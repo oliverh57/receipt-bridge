@@ -281,7 +281,7 @@ class AppDelegate(NSObject):
 
         from .updates import relaunch_after_exit
 
-        bundle = login_item.bundle_path()
+        bundle = login_item.running_bundle()
         if bundle is None:
             log.info("updated; not running as an app, so not restarting")
             return

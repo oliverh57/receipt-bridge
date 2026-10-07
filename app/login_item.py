@@ -23,13 +23,18 @@ PLIST = """<?xml version="1.0" encoding="UTF-8"?>
 """
 
 
-def bundle_path() -> str | None:
-    """The .app to open at login: the one running, else the installed one.
-    None when there's no app bundle at all (run from a terminal, not built)."""
+def running_bundle() -> str | None:
+    """The .app this process runs in; None from a terminal."""
     for parent in Path(sys.argv[0]).resolve().parents:
         if parent.suffix == ".app":
             return str(parent)
-    return str(INSTALLED) if INSTALLED.is_dir() else None
+    return None
+
+
+def bundle_path() -> str | None:
+    """The .app to open at login: the one running, else the installed one.
+    None when there's no app bundle at all (run from a terminal, not built)."""
+    return running_bundle() or (str(INSTALLED) if INSTALLED.is_dir() else None)
 
 
 PROJECT = Path(__file__).resolve().parent.parent

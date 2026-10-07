@@ -2715,7 +2715,9 @@ class ReceiptService:
         try:
             result = updates.install(last["download"], last["version"], self.config.update_repo,
                                      log=self._note)
-            if result["app"] and login_item.INSTALLED.is_dir():
+            # Only the copy in Applications rebuilds it: another copy (a test
+            # build in dist/) would replace the real app with itself.
+            if result["app"] and login_item.running_bundle() == str(login_item.INSTALLED):
                 self._note("Rebuilding the app")
                 login_item.install_app()
         except (updates.UpdateError, RuntimeError, OSError, subprocess.TimeoutExpired) as exc:

@@ -285,6 +285,24 @@ def test_update_now_installs_and_restarts() -> None:
         assert service._outcome.ok and "Restarting" in service._outcome.message
 
 
+def test_only_the_app_in_applications_rebuilds_itself() -> None:
+    """A test copy (run from its own dist/) must never replace the real app."""
+    from app import login_item
+
+    with tempfile.TemporaryDirectory() as tmp:
+        service = _service(Path(tmp))
+        service.db.set_state("update:last", json.dumps(NEWER))
+        service.restart = mock.Mock()
+        done = {"version": "99.0.0", "files": 3, "requirements": False, "app": True}
+        for running, rebuilds in (("/tmp/test-copy/dist/Receipt Bridge.app", False), (None, False),
+                                  (str(login_item.INSTALLED), True)):
+            with mock.patch.object(updates, "install", return_value=done), \
+                    mock.patch.object(login_item, "running_bundle", return_value=running), \
+                    mock.patch.object(login_item, "install_app") as install_app:
+                service._run_update()
+            assert install_app.called == rebuilds, running
+
+
 def test_a_failed_update_says_why_and_does_not_restart() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         service = _service(Path(tmp))
