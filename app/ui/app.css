@@ -837,3 +837,51 @@ img.doc, .doc img, .m-doc img { -webkit-user-drag: none; user-select: none; }
 .badge.bank { position: relative; overflow: hidden; }
 .badge.bank img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
 .badge.bank.logo { background: transparent !important; color: transparent !important; }
+
+/* ---- first-run setup guide ------------------------------------------- */
+.setup-backdrop { position: fixed; inset: 0; z-index: 30; background: var(--overlay); animation: fade 0.15s ease-out; }
+.setup {
+  position: fixed; z-index: 31; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: min(620px, calc(100vw - 32px)); height: min(640px, calc(100vh - 32px)); display: flex; flex-direction: column;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow);
+}
+.setup-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 18px 24px 14px; border-bottom: 1px solid var(--line); }
+.setup-head h2 { margin: 0; font-size: 16px; flex: 1; white-space: nowrap; }
+.setup-steps { display: flex; gap: 4px; margin: 0; padding: 0; list-style: none; counter-reset: step; }
+.setup-steps li { counter-increment: step; }
+.setup-steps button { display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px 0 4px; border: 0; border-radius: 13px;
+  background: none; color: var(--muted); font-size: 12px; cursor: default; }
+.setup-steps button::before { content: counter(step); display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%;
+  background: var(--hover); color: var(--muted); font-size: 11px; font-weight: 600; }
+.setup-steps li.done button::before { content: "✓"; background: var(--good-bg); color: var(--good); }
+.setup-steps li.on button { background: var(--selected); color: var(--ink); font-weight: 600; }
+.setup-steps li.on button::before { background: var(--accent); color: var(--accent-ink); }
+.setup-body { flex: 1; overflow-y: auto; padding: 22px 24px 12px; user-select: text; -webkit-user-select: text; }
+.setup-body h3 { margin: 0 0 6px; font-size: 18px; }
+.setup-body > p, .setup-qr p { margin: 0 0 16px; color: var(--muted); line-height: 1.5; max-width: 40em; }
+.setup-body .card { margin-bottom: 12px; }
+.setup-body .optional { margin-left: 4px; color: var(--faint); font-size: 12px; font-weight: 500; }
+.setup-q { margin: 14px 0 8px; font-weight: 600; }
+.setup-actions { display: flex; gap: 8px; margin: 4px 0 12px; }
+.setup-note { margin: 10px 0; padding: 10px 12px; border-radius: var(--radius); overflow-wrap: anywhere;
+  background: var(--panel); border: 1px solid var(--line); color: var(--muted); line-height: 1.5; }
+.setup-note.warn { background: var(--warn-bg); border-color: transparent; color: var(--warn); }
+.setup-note.bad { background: var(--bad-bg); border-color: transparent; color: var(--bad); }
+.setup-note .spinner { display: inline-block; vertical-align: -2px; margin-right: 8px; }
+.setup-done { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+.setup-options { display: grid; gap: 8px; }
+.setup-option { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 12px 14px; text-align: left;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--bg); cursor: default; }
+.setup-option:hover:not(:disabled) { background: var(--hover); }
+.setup-option:disabled { opacity: 0.55; }
+.setup-option.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.setup-option .tag { background: var(--selected); color: var(--accent); }
+.setup-option .sub { flex-basis: 100%; color: var(--muted); font-size: 12px; }
+.setup-qr { display: flex; align-items: center; gap: 20px; margin: 4px 0 8px; }
+.setup-qr img { flex: 0 0 auto; padding: 10px; border-radius: 10px; background: #fff; image-rendering: pixelated; border: 1px solid var(--line); }
+.setup-qr p { margin: 4px 0 8px; }
+.setup-qr .btn.quiet { padding: 0; }
+.setup-foot { display: flex; gap: 8px; align-items: center; padding: 14px 24px; border-top: 1px solid var(--line); }
+.setup-foot .btn { height: 28px; padding: 0 14px; }
+.setup-foot .btn.quiet { padding: 0 6px; color: var(--muted); }
+@media (max-width: 560px) { .setup-qr { flex-direction: column; align-items: flex-start; } .setup-head h2 { flex-basis: 100%; } }

@@ -151,6 +151,13 @@ class Config:
         from .setup_guide import SHORTCUT_URL
         return str(self.raw.get("iphone", {}).get("shortcut_url") or SHORTCUT_URL)
 
+    @property
+    def setup_folders(self) -> tuple[Path | None, Path | None]:
+        """Stand-ins for iCloud Drive and its Shortcuts folder, for a demo
+        copy (`setup: {icloud_drive, shortcuts_folder}`). None: the real ones."""
+        setup = self.raw.get("setup", {})
+        return tuple(_resolve(setup[k]) if setup.get(k) else None for k in ("icloud_drive", "shortcuts_folder"))
+
     def ensure_dirs(self) -> None:
         for path in (self.data_dir, self.pdf_dir, self.debug_dir, self.export_dir, self.photos_dir):
             path.mkdir(parents=True, exist_ok=True)

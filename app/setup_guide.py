@@ -24,10 +24,23 @@ SHORTCUT_SETTINGS = "Receipt Bridge.txt"
 INBOX_NAME = "Receipt Inbox"
 SUBFOLDERS = ("Bank", "Expense")
 
-# The "Receipt" Shortcut's iCloud link (Shortcuts → Share → Copy iCloud
-# Link). Shipped here so every copy can offer it; config.yaml's
-# `iphone.shortcut_url` overrides it. Empty: the guide shows how to build it.
-SHORTCUT_URL = ""
+# The "Receipt Bridge" Shortcut's iCloud link (Shortcuts → Share → Copy
+# iCloud Link). Shipped here so every copy offers it as a QR code;
+# config.yaml's `iphone.shortcut_url` overrides it.
+SHORTCUT_URL = "https://www.icloud.com/shortcuts/fa106643eea24b12a479e921f160a32e"
+# Where that Shortcut saves, inside iCloud Drive. It's a fixed folder: this
+# version doesn't read Receipt Bridge.txt (SETUP-FOR-YOU.md §2 has one that does).
+SHORTCUT_SAVES_TO = INBOX_NAME
+
+
+def use_folders(icloud_drive: Path | None = None, shortcuts_folder: Path | None = None) -> None:
+    """Stand-ins for iCloud Drive and its Shortcuts folder (config.yaml
+    `setup:`), so a demo copy's guide never touches the real ones."""
+    global ICLOUD_DRIVE, SHORTCUTS_FOLDER
+    if icloud_drive is not None:
+        ICLOUD_DRIVE = icloud_drive
+    if shortcuts_folder is not None:
+        SHORTCUTS_FOLDER = shortcuts_folder
 
 
 def icloud_available() -> bool:
@@ -63,16 +76,19 @@ def inbox_for(location: str) -> Path:
     return chosen / INBOX_NAME
 
 
-def write_shortcut_settings(inbox: Path) -> str | None:
+def write_shortcut_settings(inbox: Path, previous: Path | None = None) -> str | None:
     """Tell the Shortcut where to save. Returns the path written, relative to
-    iCloud Drive, or None when the inbox isn't in iCloud Drive (the file is
-    then removed, so the Shortcut asks rather than saving somewhere the Mac
-    no longer reads). Never raises: the Mac side works without it."""
+    iCloud Drive, or None when the inbox isn't in iCloud Drive. Moving the
+    inbox out of iCloud Drive (from `previous`) removes the file, so the
+    Shortcut asks rather than saving somewhere the Mac no longer reads; an
+    inbox that was never there leaves it alone (tests, development copies).
+    Never raises: the Mac side works without it."""
     target = SHORTCUTS_FOLDER / SHORTCUT_SETTINGS
     rel = icloud_relative(inbox)
     try:
         if rel is None:
-            target.unlink(missing_ok=True)
+            if previous is not None and icloud_relative(previous) is not None:
+                target.unlink(missing_ok=True)
             return None
         if not SHORTCUTS_FOLDER.is_dir():
             return None                     # Shortcuts isn't syncing with iCloud on this Mac

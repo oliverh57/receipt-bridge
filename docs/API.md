@@ -155,6 +155,25 @@ FreeAgent"); links to a single explanation aren't documented.
 | `POST /api/settings/folders/create-subfolders` | — | creates `Bank/` and `Expense/` in the inbox |
 | `POST /api/settings/open-folder` | `{which}` | reveal in Finder |
 
+Changing the inbox also rewrites `Receipt Bridge.txt` in iCloud Drive › Shortcuts
+(the inbox's path inside iCloud Drive), which the iPhone Shortcut reads to know
+where to save. Moving the inbox out of iCloud Drive removes it.
+
+## First-run setup guide
+
+`state.setup` is `{done, icloud, icloud_inbox, shortcut_saves_to, shortcut_url}`:
+whether the guide has been finished, whether iCloud Drive is on, the inbox's path
+inside iCloud Drive (or null), the fixed iCloud Drive folder the shared Shortcut
+saves to, and its iCloud link (`SHORTCUT_URL` in app/setup_guide.py, or config
+`iphone.shortcut_url`).
+
+| Call | Body | Does |
+|---|---|---|
+| `POST /api/setup/inbox` | `{location: "icloud" \| path}` | makes the inbox (`Receipt Inbox` in iCloud Drive or inside the chosen folder, unless the folder already is one) with `Bank/` and `Expense/`, and uses it; returns `{path}` |
+| `POST /api/setup/done` | `{done?: bool}` | the guide stops opening at launch (default true) |
+| `GET /api/setup/shortcut-qr` | — | the Shortcut link as a QR code PNG; 404 with no link |
+| `POST /api/setup/open-shortcut` | — | opens the Shortcut link in the Mac's browser |
+
 ## A payment's own FreeAgent settings (Statement)
 
 | Endpoint | Body | Does |

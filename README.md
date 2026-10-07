@@ -89,10 +89,15 @@ Desktop app**. Save the JSON as `credentials.json` in this folder.
 > **Set the consent screen to "In production."** In *Testing*, Google expires
 > the sign-in every 7 days. You'll click past an "unverified app" warning once.
 
-Open **Receipt Bridge** from Applications. In **Settings**: connect
-**FreeAgent** (and tick your business bank account), check the **Receipt
-inbox** folders, and, for the separate email tool, **Email receipts → Connect
-Gmail**. Gmail access is read-only: the app cannot send, delete or change mail.
+Open **Receipt Bridge** from Applications. The first time, a **setup guide**
+walks through it: connect **FreeAgent** (and tick your business bank
+account), choose where receipt photos are saved (it makes `Receipt Inbox`
+with `Bank` and `Expense` inside: iCloud Drive, or any folder you pick),
+optionally **Connect Gmail**, then scan a QR code to add the iPhone
+Shortcut (its link is `SHORTCUT_URL` in `app/setup_guide.py`).
+**Set up later** brings it back next launch; **Settings → General → Setup
+guide** opens it any time. Gmail access is read-only: the app cannot send,
+delete or change mail.
 
 The app runs this folder's code, so after changing code just quit and reopen.
 Re-run the installer only if you move the folder. To start the app when
@@ -113,6 +118,7 @@ app/
   fetchers/         supplier-site downloaders (Trainline)
   supplier_builder.py / supplier_editor.py   Add and Edit supplier
   photo_inbox.py    receipt inbox: archive, read, flag, stage
+  setup_guide.py    first-run guide: inbox folders, the Shortcut's settings file, QR code
   receipt_reader.py / receipt_text.py   on-device OCR (Swift helper) and the reading rules
   freeagent.py      FreeAgent OAuth and API (writes only when the filer allows)
   matcher.py        receipt ↔ bank transaction

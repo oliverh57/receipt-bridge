@@ -117,6 +117,8 @@ class ReceiptService:
     def __init__(self, config: Config, notifier: Any = None):
         self.config = config
         config.ensure_dirs()
+        if any(config.setup_folders):
+            setup_guide.use_folders(*config.setup_folders)
         self.db = Database(config.db_path)
         self.accounts = AccountStore(config)
         adopt_legacy_scan_state(self.db, self.accounts)
@@ -395,17 +397,19 @@ class ReceiptService:
             new_archive.mkdir(parents=True, exist_ok=True)
             self.db.set_state("pref:photo_archive", str(new_archive))
         if inbox:
+            previous = self.photo_inbox
             self.db.set_state("pref:photo_inbox", str(new_inbox))
-            setup_guide.write_shortcut_settings(new_inbox)
+            setup_guide.write_shortcut_settings(new_inbox, previous)
         self._bump()
         self.check_photos()
 
     def reset_folder(self, which: str) -> None:
         if which not in ("inbox", "archive"):
             raise ValueError("which must be inbox or archive")
+        previous = self.photo_inbox
         self.db.delete_state(f"pref:photo_{which}")
         if which == "inbox":
-            setup_guide.write_shortcut_settings(self.photo_inbox)
+            setup_guide.write_shortcut_settings(self.photo_inbox, previous)
         self._bump()
 
     def create_inbox_folders(self) -> None:
@@ -425,11 +429,12 @@ class ReceiptService:
             raise ValueError("That's where read receipts are archived. Choose another folder.")
         for sub in setup_guide.SUBFOLDERS:
             (inbox / sub).mkdir(parents=True, exist_ok=True)
+        previous = self.photo_inbox
         if inbox == self.config.photo_inbox.resolve():
             self.db.delete_state("pref:photo_inbox")
         else:
             self.db.set_state("pref:photo_inbox", str(inbox))
-        setup_guide.write_shortcut_settings(inbox)
+        setup_guide.write_shortcut_settings(inbox, previous)
         self._bump()
         self.check_photos()
         return inbox
@@ -452,9 +457,8 @@ class ReceiptService:
             "done": self.db.get_state("pref:setup_done") == "1",
             "icloud": setup_guide.icloud_available(),
             "icloud_inbox": setup_guide.icloud_relative(inbox),     # None: not in iCloud Drive
-            "icloud_default": str(setup_guide.ICLOUD_DRIVE / setup_guide.INBOX_NAME),
-            # the Shortcut finds the inbox by itself (Receipt Bridge.txt can be written)
-            "shortcut_follows": setup_guide.SHORTCUTS_FOLDER.is_dir() and setup_guide.icloud_relative(inbox) is not None,
+            # the shared Shortcut's fixed folder in iCloud Drive
+            "shortcut_saves_to": setup_guide.SHORTCUT_SAVES_TO,
             "shortcut_url": self.config.shortcut_url,
         }
 

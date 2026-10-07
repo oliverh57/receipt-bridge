@@ -53,9 +53,8 @@ updates:
   repo: oliverh57/receipt-bridge
 
 iphone:
-  # The "Receipt" Shortcut's iCloud link (on the iPhone: Shortcuts → hold
-  # the Shortcut → Share → Copy iCloud Link). The setup guide shows it as a
-  # QR code to scan. Empty: the guide shows how to build the Shortcut instead.
+  # The iPhone Shortcut's iCloud link, shown by the setup guide as a QR code.
+  # Empty: the one built into app/setup_guide.py (SHORTCUT_URL).
   shortcut_url: ""
 
 web:
