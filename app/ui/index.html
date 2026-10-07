@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Receipt Bridge</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script>window.RB_TOKEN = "__TOKEN__";</script>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">🧾</span>
+        <span>Receipt Bridge</span>
+      </div>
+
+      <nav class="nav" aria-label="Views">
+        <button class="nav-item" data-view="pending">
+          <span>Files</span><span class="count" data-count="files"></span>
+        </button>
+        <button class="nav-item" data-view="statement">
+          <span>Bank Feed</span><span class="count warn" data-count="statement"></span>
+        </button>
+        <button class="nav-item" data-view="expenses">
+          <span>Expenses</span>
+        </button>
+        <button class="nav-item" data-view="archived">
+          <span>Archived</span>
+        </button>
+      </nav>
+
+      <div class="sync">
+        <div class="status" id="status" aria-live="polite"></div>
+        <button class="btn small" id="scan-btn" title="Check FreeAgent, the receipt inbox and Gmail now. This also runs automatically.">Check now</button>
+      </div>
+
+      <div class="sandbox-badge" id="sandbox-badge" hidden>
+        <b>Sandbox</b>
+        <span>Practice company only.</span>
+      </div>
+      <div class="sidebar-foot">
+        <button class="nav-item" data-view="settings">
+          <span>Settings</span><span class="dot" id="settings-dot" hidden></span>
+        </button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="progress" id="progress" hidden><div class="progress-bar" id="progress-bar"></div></div>
+
+      <div id="banner"></div>
+
+      <section class="content" id="content"></section>
+    </main>
+  </div>
+
+  <div class="toast" id="toast" role="status" hidden></div>
+  <div id="modal"></div>
+
+  <script src="/static/app.js"></script>
+  <script src="/static/match.js"></script>
+</body>
+</html>

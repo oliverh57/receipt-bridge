@@ -1,0 +1,67 @@
+# Receipt Bridge configuration.
+# Every path may use ~ and is resolved relative to the project root if relative.
+
+# Where staged PDFs and the SQLite database live.
+data_dir: data
+
+# Where the iPhone "Receipt" Shortcut saves photos (Bank/ and Expense/
+# subfolders). iCloud is only a drop-off: each file is moved into
+# data/photos/ as soon as it has been read.
+photo_inbox: ~/Library/Mobile Documents/com~apple~CloudDocs/Receipt Inbox
+
+# Where "Send to FreeAgent" writes its batch folders.
+# Each click of the button creates a dated subfolder here.
+export_dir: ~/ReceiptBridge/to-freeagent
+
+gmail:
+  # Path to the OAuth client secret you download from Google Cloud Console.
+  credentials_file: credentials.json
+  # Where the refresh token is cached after the first sign-in.
+  token_file: data/token.json
+  # Only ever request read-only access.
+  scopes:
+    - https://www.googleapis.com/auth/gmail.readonly
+  # How far back a scan looks when there is no previous scan to resume from.
+  initial_lookback_days: 90
+  # Hard cap on messages pulled per watcher per scan.
+  max_results_per_scan: 100
+
+pdf:
+  # Chromium page setup used when rendering an email to PDF.
+  format: A4
+  margin: 12mm
+  # Block tracking pixels and analytics hosts while rendering, so opening a
+  # receipt in this app does not phone home to the sender.
+  block_trackers: true
+
+fetchers:
+  # Master switch for browser automation. With this off, every watcher falls
+  # straight through to rendering the email itself.
+  enabled: true
+  # Run Chromium headless. Set to false to watch a fetcher work while
+  # debugging — but note Chromium can only print to PDF in headless mode, so
+  # the render_email fallback stops working until you set this back to true.
+  headless: true
+  # Give up on a fetcher after this many seconds and fall back.
+  timeout_seconds: 45
+  # Dump a screenshot and the page HTML into data/debug when a fetcher fails.
+  debug_on_failure: true
+
+updates:
+  # Settings → General → Check for updates compares this copy's version
+  # (app/updates.py) with the version pushed to this repository.
+  repo: oliverh57/receipt-bridge
+
+iphone:
+  # The "Receipt" Shortcut's iCloud link (on the iPhone: Shortcuts → hold
+  # the Shortcut → Share → Copy iCloud Link). The setup guide shows it as a
+  # QR code to scan. Empty: the guide shows how to build the Shortcut instead.
+  shortcut_url: ""
+
+web:
+  host: 127.0.0.1
+  port: 8765
+  # The real UI is Receipt Bridge.app, a native window (see build_app.py).
+  # `cli.py serve` is the headless/development path and opens nothing by
+  # default; pass `serve --open` to borrow a browser window instead.
+  open_in_app_window: false

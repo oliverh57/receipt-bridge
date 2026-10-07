@@ -1,0 +1,38 @@
+# Created in Receipt Bridge from an example email.
+# Edit freely — or remove it in Settings. Field reference: watchers/README.md
+id: anthropic
+name: Anthropic
+vendor: Anthropic
+enabled: true
+created_by: app
+gmail_query: from:(anthropic.com) subject:("Your receipt from Anthropic, PBC")
+lookback_days: 365
+match:
+  from_contains: anthropic.com
+  subject_contains: Your receipt from Anthropic, PBC
+fields:
+  reference:
+    required: true
+    patterns:
+    - Receipt\ number\s*[:#]?\s*#?\s*([A-Z0-9][A-Z0-9-]{4,})
+    source: text
+  total:
+    type: money
+    required: true
+    patterns:
+    - Total[\s:]*£\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)
+    source: text
+  currency:
+    value: GBP
+  purchased_on:
+    type: date
+    default: email_date
+    patterns: []
+  description:
+    source: subject
+    patterns:
+    - (.+)
+pdf:
+- step: attachment
+- render_email
+filename: '{purchased_on} {vendor} {currency}{total} {reference}.pdf'

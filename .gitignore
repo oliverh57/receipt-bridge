@@ -1,0 +1,19 @@
+__pycache__/
+*.pyc
+.venv/
+dist/
+build/
+data/
+credentials.json
+token.json
+.env
+backups/
+freeagent_credentials.json
+.DS_Store
+.claude/
+
+# Personal: real receipts and emails (one photo shows a passport number),
+# and notes about this business. They stay on this Mac and are never pushed.
+tests/fixtures/
+PLAN.md
+SETUP-FOR-YOU.md

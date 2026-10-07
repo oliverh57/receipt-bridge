@@ -1,0 +1,107 @@
+# Yesim eSIM data purchases.
+#
+# Two things make this one different from Trainline:
+#
+# 1. The email is sent by ecommpay, Yesim's payment processor, not by Yesim.
+#    ecommpay serve many merchants and their subject line is just "Your
+#    Receipt", so matching on sender and subject alone would sweep up receipts
+#    from unrelated companies. `body_contains: Yesim` is what makes this safe.
+#
+# 2. There is no receipt to download — no order link, no account area, no
+#    attachment. This email *is* the receipt, so `render_email` is the only
+#    source rather than a fallback.
+#
+# On a bank statement these usually appear as ECOMMPAY or Genesis Group AG
+# (Yesim's Swiss legal entity), not as "Yesim" — worth knowing when matching
+# a receipt to a statement line.
+
+id: yesim
+name: Yesim
+vendor: Yesim
+enabled: true
+
+gmail_query: 'from:(ecommpay.com) subject:("Your Receipt")'
+
+# eSIM top-ups are occasional — a few a year, not a few a week — so the global
+# 90-day window would miss most of them. A year is cheap here because these
+# receipts need no browser round-trip: the email is the receipt.
+lookback_days: 365
+
+match:
+  from_contains: "ecommpay.com"
+  subject_contains: "Your Receipt"
+  # The merchant only appears in the body, so this is doing real work: it is
+  # the only thing separating a Yesim receipt from any other ecommpay one.
+  body_contains: "Yesim"
+  exclude_if_contains:
+    - "payment has been declined"
+    - "payment was refunded"
+    - "refund is successfully"
+
+fields:
+  # "Payment ID  5036549010148143" — ecommpay's own reference, and the most
+  # useful one to quote if a charge is ever queried.
+  reference:
+    patterns:
+      - 'Payment ID\s+([0-9]{10,})'
+    required: true
+
+  # "Amount  8.64 GBP" — value first, currency after, unlike Trainline's £8.64.
+  #
+  # The decimals are optional and may be a single digit: ecommpay send "15.3
+  # GBP", not "15.30". One pattern covering 0-2 decimal places is safer than a
+  # strict two-decimal rule with a looser fallback, which would quietly match
+  # "15" out of "15.3" and file the wrong amount.
+  total:
+    type: money
+    required: true
+    patterns:
+      - 'Amount\s+([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s+[A-Z]{3}'
+
+  # Read the currency rather than assuming GBP: eSIM data is priced per
+  # region and the same account can be billed in EUR or USD.
+  currency:
+    default: GBP
+    patterns:
+      - 'Amount\s+[0-9][0-9,]*(?:\.[0-9]{1,2})?\s+([A-Z]{3})'
+
+  # "Date  14.08.2026 18:39" — day-first, dot-separated.
+  purchased_on:
+    type: date
+    date_formats:
+      - "%d.%m.%Y"
+    default: email_date
+    patterns:
+      - 'Date\s+(\d{2}\.\d{2}\.\d{4})'
+
+  # Yesim's own order reference, distinct from ecommpay's payment ID.
+  order_id:
+    patterns:
+      - 'Order ID\s+([0-9a-f]{16,})'
+
+  # Retrieval reference number — the value that ties this to the bank record.
+  rrn:
+    patterns:
+      - 'RRN\s+([0-9]{6,})'
+
+  auth_code:
+    patterns:
+      - 'Auth Code\s+([0-9]{4,})'
+
+  # Masked PAN, e.g. 559806******2685. Enough to tell which card was used
+  # without storing anything sensitive.
+  card:
+    patterns:
+      - 'Bank Card\s+([0-9]{6}\*+[0-9]{4})'
+
+  # Yesim leave the Description field blank, so this is a fixed label rather
+  # than something extracted.
+  description:
+    template: "Yesim eSIM mobile data"
+
+# No supplier document exists to fetch; the email is the receipt.
+pdf:
+  - render_email
+
+# 2026-08-14 Yesim GBP8.64 5036549010148143.pdf
+filename: "{purchased_on} {vendor} {currency}{total} {reference}.pdf"

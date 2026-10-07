@@ -1,0 +1,101 @@
+# Trainline booking confirmations.
+#
+# The confirmation email carries everything an accountant needs — transaction
+# ID, transaction date, card, itemised fare and total — so it is a usable
+# receipt on its own. But Trainline also produce a proper "Expense Receipt"
+# document, and the email contains a passwordless link to the order, so the
+# `trainline` fetcher tries for that first and this email is the fallback.
+
+id: trainline
+name: Trainline
+vendor: Trainline
+enabled: true
+
+# Server-side filter. Trainline send from several addresses on this domain;
+# the confirmation specifically comes from auto-confirm@.
+gmail_query: 'from:(thetrainline.com) subject:("booking confirmation")'
+
+# Client-side confirmation that a search hit really is a booking confirmation.
+match:
+  from_contains: "thetrainline.com"
+  subject_contains: "booking confirmation"
+  body_contains: "Transaction ID"
+  # Ticket emails and change/refund notices reference the same booking but are
+  # not the payment record, so keep them out.
+  exclude_if_contains:
+    - "Your refund has been"
+    - "has been cancelled"
+
+fields:
+  # 009855653737 — Trainline use the same number for the invoice number.
+  reference:
+    patterns:
+      - 'Transaction ID:\s*([0-9]{6,})'
+      - 'Invoice number:\s*([0-9]{6,})'
+    required: true
+
+  # Decimals optional, 1-2 digits, in a single pattern. The previous strict
+  # two-decimal rule with a bare-integer fallback would have matched "19" out
+  # of "£19.5" and filed an amount that was wrong rather than missing — a
+  # failure mode that reconciles silently and is far worse than an error.
+  total:
+    type: money
+    required: true
+    patterns:
+      - 'Total amount:\s*£\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)'
+
+  currency:
+    value: GBP
+
+  # "Transaction Date: 3 September 2026" — this is the date the card was
+  # charged, which is what needs to match the bank statement line.
+  purchased_on:
+    type: date
+    date_formats:
+      - "%d %B %Y"
+    default: email_date
+    patterns:
+      - 'Transaction Date:\s*(\d{1,2}\s+[A-Za-z]+\s+\d{4})'
+
+  # First station on the outbound leg.
+  origin:
+    patterns:
+      - '\bOutbound\b.*?\n\s*\d{1,2}:\d{2}\s+([^\n]+?)\s*\n'
+
+  destination:
+    patterns:
+      - 'Your trip to\s+([^\n]+?)\s+departing'
+
+  travel_date:
+    patterns:
+      - 'departing\s+[A-Za-z]+day,\s*(\d{1,2}\s+[A-Za-z]+\s+\d{4})'
+    type: date
+    date_formats:
+      - "%d %B %Y"
+
+  card_type:
+    patterns:
+      - 'Card Type:\s*([^\n]+)'
+
+  payment_type:
+    patterns:
+      - 'Payment Type:\s*([^\n]+)'
+
+  # Passwordless link to the order. The token lives in the URL fragment, which
+  # is why reading it needs a real browser rather than a plain HTTP request.
+  order_link:
+    source: links
+    patterns:
+      - '(https://www\.thetrainline\.com/[^\s]*my-account/order-token#[^\s]+)'
+
+  description:
+    template: "Train travel, {origin} to {destination}"
+
+# Tried top to bottom; the first one that produces a PDF wins.
+pdf:
+  - fetcher: trainline
+    url_field: order_link
+  - render_email
+
+# 2026-09-03 Trainline GBP19.95 Tottenham Hale to Cambridge North 009855653737.pdf
+filename: "{purchased_on} {vendor} {currency}{total} {origin} to {destination} {reference}.pdf"

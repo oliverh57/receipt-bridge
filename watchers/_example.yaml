@@ -1,0 +1,53 @@
+# A starting point for a new supplier. Copy this file, rename it, set
+# `enabled: true`, and iterate with:
+#
+#   python cli.py test-watcher example tests/fixtures/your-email.eml --dump-text
+#
+# Full reference: watchers/README.md
+# Left disabled so it never runs against your inbox as-is.
+
+id: example
+name: Example Supplier
+vendor: Example Ltd
+enabled: false
+
+gmail_query: 'from:(billing@example.com) subject:("receipt")'
+
+# Optional. How far back the first scan reaches for this supplier, overriding
+# gmail.initial_lookback_days in config.yaml. Widen it for suppliers you use
+# rarely; leave it out to follow the global default.
+# lookback_days: 365
+
+match:
+  from_contains: "example.com"
+  subject_contains: "receipt"
+
+fields:
+  reference:
+    patterns:
+      - 'Invoice number:\s*([A-Z0-9-]+)'
+    required: true
+
+  total:
+    type: money
+    required: true
+    patterns:
+      - 'Total:\s*£\s*([0-9][0-9,]*\.[0-9]{2})'
+
+  currency:
+    value: GBP
+
+  purchased_on:
+    type: date
+    default: email_date
+    patterns:
+      - 'Paid on:\s*(\d{1,2}\s+[A-Za-z]+\s+\d{4})'
+
+  description:
+    template: "Example Ltd, invoice {reference}"
+
+# Most suppliers put everything on the email, so this is usually all you need.
+pdf:
+  - render_email
+
+filename: "{purchased_on} {vendor} {currency}{total} {reference}.pdf"
