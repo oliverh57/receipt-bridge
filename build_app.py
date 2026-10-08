@@ -119,17 +119,19 @@ def compile_launcher(target: Path) -> bool:
     import sysconfig
 
     venv_python = ROOT / ".venv" / "bin" / "python"
-    config_tool = Path(sysconfig.get_config_var("BINDIR") or "") / (
-        f"python{sysconfig.get_python_version()}-config"
-    )
-    if not config_tool.exists():
-        print(f"  (no {config_tool.name}; using the script launcher)")
+    # The flags come from sysconfig as separate arguments, not from
+    # python-config's output: that is one space-separated string, which falls
+    # apart when Python lives in a folder with a space in its name (~/Receipt
+    # Bridge/.python, where install.sh puts one). Naming LIBDIR, with an
+    # rpath, also covers a standalone Python whose python-config leaves it out.
+    include = sysconfig.get_paths().get("include") or sysconfig.get_config_var("INCLUDEPY")
+    libdir = sysconfig.get_config_var("LIBDIR")
+    library = f"python{sysconfig.get_python_version()}{getattr(sys, 'abiflags', '')}"
+    if not (include and libdir and (Path(include) / "Python.h").exists()):
+        print("  (no Python headers; using the script launcher)")
         return False
-
-    flags = subprocess.run(
-        [str(config_tool), "--cflags", "--embed", "--ldflags"],
-        capture_output=True, text=True,
-    ).stdout.split()
+    flags = [f"-I{include}", f"-L{libdir}", f"-Wl,-rpath,{libdir}", f"-l{library}",
+             "-ldl", "-framework", "CoreFoundation"]
     source = target.with_suffix(".c")
     source.write_text(
         NATIVE_LAUNCHER.format(

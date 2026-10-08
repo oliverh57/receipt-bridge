@@ -17,3 +17,5 @@ freeagent_credentials.json
 tests/fixtures/
 PLAN.md
 SETUP-FOR-YOU.md
+.python/
+.uv/

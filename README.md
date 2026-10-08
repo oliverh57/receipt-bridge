@@ -6,6 +6,23 @@ in FreeAgent, and files it there with the receipt attached. It replaces
 FreeAgent Smart Capture. The design and its reasoning are in `PLAN.md`;
 one-off setup steps are in `SETUP-FOR-YOU.md`.
 
+## Install
+
+Open **Terminal** (in Applications → Utilities), paste this line and press
+Return:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/oliverh57/receipt-bridge/main/install.sh | bash
+```
+
+It downloads Receipt Bridge into a **Receipt Bridge** folder in your home
+folder, sets it up, puts **Receipt Bridge** in Applications and opens it. A
+setup guide then walks you through connecting FreeAgent, choosing where
+receipt photos go, Gmail (optional) and the iPhone Shortcut. It takes about
+five minutes and needs no admin password. If macOS asks to install its
+developer tools first, click **Install**, wait, then paste the line again.
+New versions arrive inside the app (**Update now**).
+
 ---
 
 ## Using it
@@ -77,9 +94,12 @@ are kept.
 
 ## Setup (once)
 
-Double-click **Install Receipt Bridge.command** in this folder. It sets up
-Python, downloads what the app needs, and puts **Receipt Bridge** in
-Applications. Run it again any time to update the app; receipts are kept.
+New Mac: use the **Install** line above. With the folder already here,
+double-click **Install Receipt Bridge.command** instead. Either way it sets
+up Python (using the Mac's own if it's 3.10 or newer, otherwise downloading
+one into the folder's `.python/` with [uv](https://docs.astral.sh/uv/)),
+downloads what the app needs, and puts **Receipt Bridge** in Applications.
+Run it again any time to rebuild the app; receipts are kept.
 
 **Gmail access.** In [Google Cloud Console](https://console.cloud.google.com/):
 create a project, enable the **Gmail API**, set up the **OAuth consent screen**
