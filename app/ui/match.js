@@ -1371,7 +1371,8 @@ document.addEventListener("dragover", (e) => {
   if (dragFromPage) { e.preventDefault(); e.dataTransfer.dropEffect = "none"; return; }
   if (!outsideFiles(e)) return;
   e.preventDefault();
-  const ok = DROP_VIEWS.includes(state.view);
+  // a licence file can be dropped on any screen while the keys are missing
+  const ok = DROP_VIEWS.includes(state.view) || !!state.snap?.needs_licence;
   e.dataTransfer.dropEffect = ok ? "copy" : "none";
   setDragging(ok);
 });
@@ -1381,7 +1382,11 @@ document.addEventListener("drop", (e) => {
   if (!outsideFiles(e)) return;
   e.preventDefault();
   setDragging(false);
-  if (DROP_VIEWS.includes(state.view)) uploadFiles(e.dataTransfer.files, "business");
+  const files = [...e.dataTransfer.files];
+  const licences = files.filter((f) => f.name.toLowerCase().endsWith(".rbkey"));
+  if (licences.length) installLicence(licences[0]);         // on any screen
+  const rest = files.filter((f) => !licences.includes(f));
+  if (rest.length && DROP_VIEWS.includes(state.view)) uploadFiles(rest, "business");
 });
 
 // ---- events ------------------------------------------------------------------------------

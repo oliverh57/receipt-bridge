@@ -2620,6 +2620,9 @@ class ReceiptService:
             "theme": self.theme,
             "export_dir": str(self.config.export_dir),
             "has_credentials": self.config.credentials_file.exists(),
+            # the app keys come in a licence file dropped on the app (app/licence.py)
+            "needs_licence": not (self.config.credentials_file.exists()
+                                  and self.config.freeagent_credentials_file.exists()),
             "freeagent": self.freeagent_snapshot(),
             "update": self.update_snapshot(),
             "file_results": self._file_results,     # the last File / File all (docs/API.md)
@@ -2769,6 +2772,15 @@ class ReceiptService:
             self._finish("update", True, f"Updated to {version}. Restarting…")
         else:
             self._finish("update", True, f"Updated to {version}. Quit and reopen Receipt Bridge to use it.")
+
+    def install_licence(self, data: bytes) -> list[str]:
+        """Save the keys in a dropped licence file. Raises LicenceError."""
+        from .licence import install
+
+        installed = install(data, self.config.credentials_file, self.config.freeagent_credentials_file)
+        self._freeagent_error = self._freeagent_problem = ""
+        self._bump()
+        return installed
 
     def open_update_page(self) -> bool:
         """Open the latest version on GitHub in the browser. Only ever the

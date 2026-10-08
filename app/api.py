@@ -594,6 +594,36 @@ def create_app(service: ReceiptService) -> FastAPI:
         subprocess.run(["open", url], check=False)
         return {"ok": True}
 
+    @app.post("/api/licence")
+    async def licence(request: Request) -> dict[str, Any]:
+        """A dropped licence file, as the raw request body."""
+        from .licence import LicenceError
+
+        data = await request.body()
+        if len(data) > 64 * 1024:
+            raise HTTPException(400, "That isn't a Receipt Bridge licence file.")
+        try:
+            return {"installed": service.install_licence(data)}
+        except LicenceError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.post("/api/licence/choose")
+    def licence_choose() -> dict[str, Any]:
+        """The Mac's own file picker, for people who'd rather not drag."""
+        from .licence import LicenceError
+
+        script = 'POSIX path of (choose file with prompt "Choose your Receipt Bridge licence file" of type {"rbkey"})'
+        result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=600)
+        if result.returncode != 0:
+            return {"installed": None}                  # cancelled
+        path = Path(result.stdout.strip())
+        try:
+            if path.stat().st_size > 64 * 1024:
+                raise LicenceError("That isn't a Receipt Bridge licence file.")
+            return {"installed": service.install_licence(path.read_bytes())}
+        except (LicenceError, OSError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+
     @app.post("/api/settings/choose-folder")
     def choose_folder(body: dict[str, Any]) -> dict[str, Any]:
         """The Mac's own folder picker. Waits for the person, so it's a

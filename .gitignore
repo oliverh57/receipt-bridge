@@ -5,6 +5,10 @@ dist/
 build/
 data/
 token.json
+# App keys: handed out as a licence file (app/licence.py), never pushed
+credentials.json
+freeagent_credentials.json
+*.rbkey
 .env
 backups/
 .DS_Store

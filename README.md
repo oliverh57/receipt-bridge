@@ -101,11 +101,17 @@ one into the folder's `.python/` with [uv](https://docs.astral.sh/uv/)),
 downloads what the app needs, and puts **Receipt Bridge** in Applications.
 Run it again any time to rebuild the app; receipts are kept.
 
-**App keys ship with the app.** `credentials.json` (Google, a Desktop app
-OAuth client) and `freeagent_credentials.json` (FreeAgent) only identify
-Receipt Bridge: everyone signs in to their own Gmail and FreeAgent, and
-sign-in only ever returns to their own Mac. An update puts either back if it
-goes missing; it never replaces one that's there.
+**Licence file.** The Google and FreeAgent app keys aren't on GitHub: they
+come in a licence file, `Receipt Bridge.rbkey`, that you give to people you
+trust. The setup guide asks for it; drop it on the app (anywhere in the
+window) or click **Choose file…**. The keys only identify Receipt Bridge:
+everyone still signs in to their own Gmail and FreeAgent. To make a licence
+from this folder's `credentials.json` and `freeagent_credentials.json` (after
+replacing a key, say):
+
+```bash
+.venv/bin/python -m app.licence make "Receipt Bridge.rbkey"
+```
 
 > **Gmail: set the Google Cloud consent screen to "In production."** In
 > *Testing*, only Google accounts listed as test users can sign in, and Google
@@ -214,8 +220,8 @@ blank (left for review) is allowed, a wrong figure is not.
 - `data/photos/` (or the archive folder chosen in Settings) — every original
   receipt photo. **Not** in the daily backup: choose a synced folder in
   Settings → Receipt inbox if you want an off-Mac copy.
-- `data/` and `backups/` are gitignored. The app keys are not: they ship
-  (see Setup).
+- `data/`, `backups/`, the app keys and `*.rbkey` licence files are
+  gitignored.
 
 ## Where this could go
 

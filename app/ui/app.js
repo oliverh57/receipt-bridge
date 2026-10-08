@@ -838,12 +838,31 @@ function inboxCard(p) {
     </div>`;
 }
 
+/** Where the licence file goes: it carries the Google and FreeAgent app
+ * keys. Dropping it anywhere in the window works too (match.js). */
+function licenceDrop() {
+  return `<div class="licence-drop">
+      <div><b>Drop your Receipt Bridge licence file here</b></div>
+      <div class="sub">It ends in <code>.rbkey</code> and connects this copy to FreeAgent and Gmail. Ask whoever gave you Receipt Bridge for it.</div>
+      <button class="btn small" data-action="licence-choose">Choose file…</button>
+    </div>`;
+}
+
+async function installLicence(file) {
+  const res = await fetch("/api/licence", { method: "POST",
+    headers: { "x-receipt-bridge": TOKEN, "content-type": "application/octet-stream" }, body: file });
+  const body = await res.json().catch(() => ({}));
+  if (res.ok) toast(`<b>Licence installed.</b> ${esc(body.installed.join(" and "))} can now be connected.`);
+  else toast(`<b>Licence not installed.</b> ${esc(body.detail || res.statusText)}`, 9000);
+  refresh(true);
+}
+
 function freeagentCard(fa) {
   if (!fa) return "";
   const env = fa.environment === "sandbox" ? ` <span class="pill unknown">Sandbox</span>` : "";
   if (!fa.has_credentials) {
     return `<div class="card"><div class="card-head"><h3>FreeAgent</h3></div>
-      <div class="card-note">This copy is missing its FreeAgent key (<code>freeagent_credentials.json</code>). Settings → General → Updates → <b>Update now</b> puts it back; if there's no update, run the installer again.</div></div>`;
+      ${licenceDrop()}</div>`;
   }
   const error = fa.error ? `<div class="card-note"><span class="pill bad">Problem</span> ${esc(fa.error)}</div>` : "";
   if (!fa.connected) {
@@ -968,6 +987,7 @@ function renderSettings() {
                 ${s.accounts.length ? "+ Add account" : "Connect Gmail"}</button>`}</div>
         ${s.connecting ? `<div class="card-note">Waiting for you to finish signing in to Google in your browser. Gives up after 5 minutes.</div>` : ""}
         ${state.gmailAsk && !s.connecting ? gmailAskHtml() : ""}
+        ${s.has_credentials ? "" : licenceDrop()}
         ${accountRows || `<div class="card-note">No account connected.</div>`}
         <div class="card-note">Opens in your browser. Read-only.</div>
       </div>
@@ -1073,8 +1093,7 @@ function setupReady(key) {
 function setupFreeagentHtml(fa) {
   let body;
   if (!fa.has_credentials) {
-    body = `<div class="setup-note warn">This copy is missing its FreeAgent key (<code>freeagent_credentials.json</code>).
-      Settings → General → Updates → <b>Update now</b> puts it back; if there's no update, run the installer again. Then open this guide again from Settings → General.</div>`;
+    body = licenceDrop();
   } else if (!fa.connected) {
     body = `<div class="setup-actions"><button class="btn primary" data-action="setup-fa-connect">Connect FreeAgent</button></div>
       ${setup.faWaiting ? `<div class="setup-note"><span class="spinner"></span>Approve Receipt Bridge in the browser window that opened, then come back here.</div>` : ""}
@@ -1124,7 +1143,7 @@ function setupEmailHtml(s) {
     body = `<div class="card">${s.accounts.map((a) => `<div class="card-row"><span class="pill ok"></span><div class="grow selectable">${esc(a.email)}</div></div>`).join("")}</div>
       <div class="setup-actions">${s.connecting ? "" : `<button class="btn small" data-action="connect-ask" ${state.gmailAsk ? "disabled" : ""}>+ Add another account</button>`}</div>`;
   } else if (!s.has_credentials) {
-    body = `<div class="setup-note">This copy is missing its Google key (<code>credentials.json</code>). Skip this for now: Settings → General → Updates → <b>Update now</b> puts it back, and you can connect later in Settings → Email receipts.</div>`;
+    body = licenceDrop();
   } else if (!s.connecting && !state.gmailAsk) {
     body = `<div class="setup-actions"><button class="btn primary" data-action="connect-ask">Connect Gmail</button></div>`;
   } else body = "";
@@ -1322,6 +1341,11 @@ document.addEventListener("click", (e) => {
       return act(() => api("/api/settings", { method: "POST", body: { notify_frequency: target.dataset.frequency } }));
     case "notifications-test":
       return act(() => api("/api/notifications/test", { method: "POST" }));
+    case "licence-choose":
+      return act(async () => {
+        const { installed } = await api("/api/licence/choose", { method: "POST" });
+        if (installed) toast(`<b>Licence installed.</b> ${esc(installed.join(" and "))} can now be connected.`);
+      });
     case "update-install":
       return act(() => api("/api/updates/install", { method: "POST" }));
     case "update-check":

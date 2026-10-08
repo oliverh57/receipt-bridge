@@ -885,3 +885,9 @@ img.doc, .doc img, .m-doc img { -webkit-user-drag: none; user-select: none; }
 .setup-foot .btn { height: 28px; padding: 0 14px; }
 .setup-foot .btn.quiet { padding: 0 6px; color: var(--muted); }
 @media (max-width: 560px) { .setup-qr { flex-direction: column; align-items: flex-start; } .setup-head h2 { flex-basis: 100%; } }
+
+/* where the licence file is dropped (Settings, setup guide) */
+.licence-drop { margin: 10px 16px; padding: 16px; border: 1.5px dashed var(--line, currentColor);
+  border-radius: var(--radius); text-align: center; display: grid; gap: 6px; justify-items: center; }
+.setup-body .licence-drop, .setup .licence-drop { margin: 10px 0; }
+.licence-drop .sub { color: var(--muted); }
