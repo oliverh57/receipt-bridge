@@ -364,8 +364,8 @@ function renderBanner() {
       ${connecting ? `<button class="btn small" data-action="connect-stop">Cancel sign-in</button>` : `<button class="btn small" data-action="connect">Reconnect</button>`}</div>`;
   } else if (state.snap.update?.can_install) {
     const u = state.snap.update;
-    el.innerHTML = `<div class="banner info"><div class="text"><b>Version ${esc(u.latest.replace(/^v/i, ""))} of Receipt Bridge is available.</b>
-      ${u.installing ? " Installing; the app will restart." : " Takes a few seconds; your receipts and settings are kept."}</div>
+    el.innerHTML = `<div class="banner info"><div class="text"><b>Version ${esc(u.latest.replace(/^v/i, ""))} of Receipt Bridge is ${u.restart_needed ? "installed" : "available"}.</b>
+      ${u.installing ? " Installing; the app will restart." : u.restart_needed ? " Restart to start using it." : " Takes a few seconds; your receipts and settings are kept."}</div>
       ${updateButton(u, "btn small")}</div>`;
   } else {
     el.innerHTML = "";
@@ -770,7 +770,7 @@ function loginRow(login, installing) {
 function updateButton(u, cls = "btn primary small") {
   return u.installing
     ? `<button class="${cls}" disabled>Updating…</button>`
-    : `<button class="${cls}" data-action="update-install">Update now</button>`;
+    : `<button class="${cls}" data-action="update-install">${u.restart_needed ? "Restart to update" : "Update now"}</button>`;
 }
 
 function updateCard(u) {
@@ -778,14 +778,17 @@ function updateCard(u) {
   const latest = esc(u.latest.replace(/^v/i, ""));
   const status = u.installing ? `<span class="pill unknown">Updating to ${latest}…</span>`
     : u.checking ? `<span class="pill unknown">Checking…</span>`
+    : u.restart_needed ? `<span class="pill warn">Version ${latest} is installed</span>`
     : u.available ? `<span class="pill warn">Version ${latest} is available</span>`
     : u.error ? `<span class="pill bad">Couldn't check</span>`
     : u.latest ? `<span class="pill ok">Up to date</span>`
     : "";
+  const restart = u.restarts ? "restarts the app" : "you then quit and reopen it";
   const detail = u.checking || u.installing ? ""
+    : u.restart_needed ? `Restart to start using it. ${u.restarts ? "Takes a few seconds." : ""}`
     : u.error ? esc(u.error)
-    : u.git_checkout && u.available ? "This copy is a git checkout: update it with <code>git pull</code>."
-    : u.available ? `Downloads it from GitHub and ${u.restarts ? "restarts the app" : "installs it; restart to use it"}. Receipts, sign-ins and settings are kept.`
+    : u.available && u.git_checkout ? `Updates this copy with <code>git pull</code> (never over edits not committed yet), then ${restart}.`
+    : u.available ? `Downloads it from GitHub, then ${restart}. Receipts, sign-ins and settings are kept.`
     : u.checked_at ? `Checked ${ago(u.checked_at)}. Checks <code>${esc(u.repo)}</code> on GitHub every day.`
     : `Checks <code>${esc(u.repo)}</code> on GitHub every day.`;
   return `<div class="card">
@@ -795,7 +798,7 @@ function updateCard(u) {
         ${u.can_install ? updateButton(u) : ""}
         ${u.available && !u.can_install ? `<button class="btn small" data-action="update-open">View on GitHub</button>` : ""}
         ${u.installing ? "" : `<button class="btn small" data-action="update-check" ${u.checking ? "disabled" : ""}>Check for updates</button>`}</div>
-      ${u.available && u.notes ? `<details class="log"><summary>What's new</summary><pre>${esc(u.notes)}</pre></details>` : ""}
+      ${u.available && !u.restart_needed && u.notes ? `<details class="log"><summary>What's new</summary><pre>${esc(u.notes)}</pre></details>` : ""}
     </div>`;
 }
 

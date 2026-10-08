@@ -14,7 +14,10 @@ virtualenv, `config.yaml`, the credential files, and the supplier rules in
 Settings). The code being replaced is kept in `data/updates/` first, and put
 back if the install fails part-way.
 
-A git checkout is never overwritten: that's a working copy, use `git pull`.
+A git checkout is never copied over: it updates with `git pull --ff-only`,
+which never merges and won't overwrite edits not committed yet. Either way,
+when the files here are already newer than what's running, updating is just
+a restart.
 """
 
 from __future__ import annotations
@@ -60,8 +63,9 @@ def parse(tag: str | None) -> tuple[int, ...] | None:
     return tuple(parts + [0] * (3 - len(parts)))
 
 
-def is_newer(latest: str, current: str = VERSION) -> bool:
-    theirs, ours = parse(latest), parse(current)
+def is_newer(latest: str, current: str | None = None) -> bool:
+    """Is `latest` higher than `current` (by default, this running copy)?"""
+    theirs, ours = parse(latest), parse(VERSION if current is None else current)
     return theirs is not None and ours is not None and theirs > ours
 
 
@@ -202,20 +206,54 @@ def install(download: str, expected: str, repo: str = DEFAULT_REPO, project: Pat
             raise UpdateError(f"Couldn't install the update, so nothing changed: {exc}") from exc
 
     names = {rel.as_posix() for rel in changed}
-    requirements = "requirements.txt" in names
-    if requirements:
-        log("Installing what the new version needs")
-        python = project / ".venv" / "bin" / "python"
-        steps = [[str(python), "-m", "pip", "install", "--quiet", "-r", str(project / "requirements.txt")],
-                 [str(python), "-m", "playwright", "install", "chromium"]]
-        for step in steps:
-            result = subprocess.run(step, cwd=project, capture_output=True, text=True, timeout=900)
-            if result.returncode != 0:
-                _restore(backup, added, project)
-                raise UpdateError("Couldn't download what the new version needs, so nothing changed. "
-                                  "Check the internet connection and try again.")
-    return {"version": found, "files": len(changed), "requirements": requirements,
+    if "requirements.txt" in names and not _install_requirements(project, log):
+        _restore(backup, added, project)
+        raise UpdateError("Couldn't download what the new version needs, so nothing changed. "
+                          "Check the internet connection and try again.")
+    return _changes(found, names)
+
+
+def pull(project: Path = ROOT, log: Any = print) -> dict[str, Any]:
+    """Update a git checkout from GitHub: fast-forward only, so it never
+    merges, and git refuses rather than overwrite edits not committed yet."""
+    def git(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["git", *args], cwd=project, capture_output=True, text=True, timeout=120)
+
+    before = git("rev-parse", "HEAD").stdout.strip()
+    log("Pulling from GitHub")
+    result = git("pull", "--ff-only")
+    if result.returncode != 0:
+        why = (result.stderr.strip().splitlines() or ["git pull failed"])[-1]
+        raise UpdateError(f"git pull couldn't update this copy, so nothing changed: {why}")
+    after = git("rev-parse", "HEAD").stdout.strip()
+    names = set(git("diff", "--name-only", before, after).stdout.split()) if before != after else set()
+    if "requirements.txt" in names and not _install_requirements(project, log):
+        raise UpdateError("Updated, but couldn't download what the new version needs. "
+                          "Check the internet connection, then run Install Receipt Bridge.command.")
+    return _changes(on_disk_version(project), names)
+
+
+def on_disk_version(project: Path = ROOT) -> str | None:
+    """The version the files here are now: ahead of VERSION once an update
+    is installed (or pulled) and the app hasn't restarted yet."""
+    try:
+        return _version_in((project / "app" / "updates.py").read_text(encoding="utf-8"))
+    except OSError:
+        return None
+
+
+def _changes(version: str | None, names: set[str]) -> dict[str, Any]:
+    return {"version": version, "files": len(names), "requirements": "requirements.txt" in names,
             "app": bool(names & {"build_app.py", "app/login_item.py"})}
+
+
+def _install_requirements(project: Path, log: Any) -> bool:
+    log("Installing what the new version needs")
+    python = project / ".venv" / "bin" / "python"
+    steps = [[str(python), "-m", "pip", "install", "--quiet", "-r", str(project / "requirements.txt")],
+             [str(python), "-m", "playwright", "install", "chromium"]]
+    return all(subprocess.run(step, cwd=project, capture_output=True, text=True, timeout=900).returncode == 0
+               for step in steps)
 
 
 def _digest(path: Path) -> str:

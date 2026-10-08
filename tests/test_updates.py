@@ -241,6 +241,22 @@ def _wait_for_check(service) -> None:
     raise AssertionError("update check never finished")
 
 
+def _away_from_this_checkout(tmp: str) -> None:
+    """Point updates at a throwaway folder for the rest of the test: this
+    project is a git checkout, and an update run here would really pull."""
+    patcher = mock.patch.object(updates, "ROOT", Path(tmp))
+    patcher.start()
+    _patches.append(patcher)
+
+
+_patches: list = []
+
+
+def _stop_patches() -> None:
+    while _patches:
+        _patches.pop().stop()
+
+
 NEWER = {"version": "v99.0.0", "url": "https://github.com/o/r/releases/tag/v99.0.0",
          "notes": "", "published_at": None, "download": f"{BASE}/tarball/v99.0.0"}
 
@@ -291,6 +307,7 @@ def test_only_the_app_in_applications_rebuilds_itself() -> None:
 
     with tempfile.TemporaryDirectory() as tmp:
         service = _service(Path(tmp))
+        _away_from_this_checkout(tmp)
         service.db.set_state("update:last", json.dumps(NEWER))
         service.restart = mock.Mock()
         done = {"version": "99.0.0", "files": 3, "requirements": False, "app": True}
@@ -306,6 +323,7 @@ def test_only_the_app_in_applications_rebuilds_itself() -> None:
 def test_when_it_cannot_restart_it_says_so() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         service = _service(Path(tmp))
+        _away_from_this_checkout(tmp)
         service.db.set_state("update:last", json.dumps(NEWER))
         service.restart = mock.Mock(return_value=False)
         done = {"version": "99.0.0", "files": 3, "requirements": False, "app": False}
@@ -322,9 +340,90 @@ def test_a_terminal_python_is_not_mistaken_for_the_app() -> None:
     assert login_item.running_bundle() is None
 
 
+def test_files_already_newer_than_what_is_running_only_need_a_restart() -> None:
+    """A git checkout pulled (or an update installed) while the app ran:
+    nothing to download, so the button restarts."""
+    with tempfile.TemporaryDirectory() as tmp:
+        service = _service(Path(tmp))
+        _away_from_this_checkout(tmp)
+        service.db.set_state("update:last", json.dumps(dict(NEWER, version="v1.1.2")))
+        service.restart = mock.Mock(return_value=True)
+        with mock.patch.object(updates, "VERSION", "1.1.1"), \
+                mock.patch.object(updates, "on_disk_version", return_value="1.1.2"), \
+                mock.patch.object(updates, "install") as install, mock.patch.object(updates, "pull") as pull:
+            snap = service.update_snapshot()
+            assert snap["restart_needed"] and snap["can_install"] and snap["available"]
+            assert snap["latest"] == "1.1.2"          # what is installed here
+            service._run_update()
+        install.assert_not_called()
+        pull.assert_not_called()
+        service.restart.assert_called_once()
+        assert "Updated to 1.1.2" in service._outcome.message
+
+
+def test_a_git_checkout_behind_github_pulls() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        service = _service(Path(tmp))
+        service.db.set_state("update:last", json.dumps(NEWER))
+        service.restart = mock.Mock(return_value=True)
+        (Path(tmp) / ".git").mkdir()
+        done = {"version": "99.0.0", "files": 2, "requirements": False, "app": False}
+        with mock.patch.object(updates, "ROOT", Path(tmp)), \
+                mock.patch.object(updates, "pull", return_value=done) as pull, \
+                mock.patch.object(updates, "install") as install:
+            snap = service.update_snapshot()
+            assert snap["can_install"] and snap["git_checkout"] and not snap["restart_needed"]
+            service._run_update()
+        pull.assert_called_once()
+        install.assert_not_called()
+        service.restart.assert_called_once()
+
+
+def _git(cwd: Path, *args: str) -> str:
+    import subprocess
+    return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args],
+                          cwd=cwd, capture_output=True, text=True, check=True).stdout
+
+
+def test_pull_fast_forwards_and_never_overwrites_edits() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        github, mine = tmp_path / "github.git", tmp_path / "mine"
+        _git(tmp_path, "init", "-q", "--bare", "-b", "main", str(github))
+        _git(tmp_path, "clone", "-q", str(github), str(mine))
+        (mine / "app").mkdir()
+        (mine / "app/updates.py").write_text(_source("1.0.0"))
+        (mine / "app/service.py").write_text("old\n")
+        _git(mine, "add", "-A"); _git(mine, "commit", "-q", "-m", "1.0.0"); _git(mine, "push", "-q", "origin", "main")
+
+        # a newer version pushed from elsewhere
+        other = tmp_path / "other"
+        _git(tmp_path, "clone", "-q", str(github), str(other))
+        (other / "app/updates.py").write_text(_source("1.1.0"))
+        (other / "app/service.py").write_text("new\n")
+        _git(other, "commit", "-q", "-am", "1.1.0"); _git(other, "push", "-q", "origin", "main")
+
+        # an edit not committed yet, to a file the update changes: refused, untouched
+        (mine / "app/service.py").write_text("my edit\n")
+        try:
+            updates.pull(mine, log=lambda _line: None)
+        except updates.UpdateError as exc:
+            assert "nothing changed" in str(exc)
+        else:
+            raise AssertionError("expected git to refuse to overwrite the edit")
+        assert (mine / "app/service.py").read_text() == "my edit\n"
+        assert updates.on_disk_version(mine) == "1.0.0"
+
+        _git(mine, "checkout", "--", "app/service.py")
+        result = updates.pull(mine, log=lambda _line: None)
+        assert result == {"version": "1.1.0", "files": 2, "requirements": False, "app": False}
+        assert (mine / "app/service.py").read_text() == "new\n"
+
+
 def test_a_failed_update_says_why_and_does_not_restart() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         service = _service(Path(tmp))
+        _away_from_this_checkout(tmp)
         service.db.set_state("update:last", json.dumps(NEWER))
         service.restart = mock.Mock()
         with mock.patch.object(updates, "install", side_effect=updates.UpdateError("GitHub is down.")):
@@ -336,6 +435,7 @@ def test_a_failed_update_says_why_and_does_not_restart() -> None:
 def test_nothing_to_install_is_refused() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         service = _service(Path(tmp))
+        _away_from_this_checkout(tmp)
         client, token = _client(service)
         same = dict(NEWER, version=f"v{updates.VERSION}")
         service.db.set_state("update:last", json.dumps(same))
@@ -359,7 +459,10 @@ if __name__ == "__main__":
         if not name.startswith("test_") or not callable(func):
             continue
         try:
-            func()
+            try:
+                func()
+            finally:
+                _stop_patches()
             print(f"  PASS  {name}")
         except AssertionError as exc:
             failures += 1

@@ -2687,49 +2687,62 @@ class ReceiptService:
     def update_snapshot(self) -> dict[str, Any]:
         last = self._last_update_check()
         latest = last.get("version") or ""
-        available = bool(latest) and updates.is_newer(latest)
+        installed = updates.on_disk_version() or updates.VERSION
         git = (updates.ROOT / ".git").exists()
+        # GitHub has something newer than the files here: download or pull it
+        behind = bool(latest) and updates.is_newer(latest, installed)
+        # the files here are newer than what's running: only a restart is needed
+        restart_needed = updates.is_newer(installed) and not behind
         with self._lock:
             installing = "update" in self._queued
         return {
             "current": updates.VERSION,
-            "latest": latest,
-            "available": available,
+            "installed": installed,
+            "latest": latest if behind or not restart_needed else installed,
+            "available": behind or restart_needed,
+            "restart_needed": restart_needed,
             "url": last.get("url") or "",
             "notes": last.get("notes") or "",
             "error": last.get("error") or "",
             "checked_at": last.get("checked_at"),
             "checking": self._checking_updates,
             "installing": installing,
-            # a git checkout updates with git pull, never over the top
-            "can_install": available and bool(last.get("download")) and not git,
+            # a git checkout pulls; any other copy downloads and copies over
+            "can_install": restart_needed or (behind and (git or bool(last.get("download")))),
             "git_checkout": git,
             "restarts": self.restart is not None,
             "repo": self.config.update_repo,
         }
 
     def install_update(self) -> bool:
-        """Download and install the latest version, then restart."""
+        """Download (or pull) the latest version and restart, or only
+        restart when the files here are already newer than what's running."""
         if not self.update_snapshot()["can_install"]:
             raise ValueError("There's no update to install. Check for updates first.")
         return self._enqueue("update", self._run_update)
 
     def _run_update(self) -> None:
+        snap = self.update_snapshot()
         last = self._last_update_check()
-        version = last.get("version", "").lstrip("vV")
-        self._set_activity(busy=True, kind="update", label=f"Updating to {version}", started_at=_now(), log=[])
-        try:
-            result = updates.install(last["download"], last["version"], self.config.update_repo,
-                                     log=self._note)
-            # Only the copy in Applications rebuilds it: another copy (a test
-            # build in dist/) would replace the real app with itself.
-            if result["app"] and login_item.running_bundle() == str(login_item.INSTALLED):
-                self._note("Rebuilding the app")
-                login_item.install_app()
-        except (updates.UpdateError, RuntimeError, OSError, subprocess.TimeoutExpired) as exc:
-            log.warning("update failed: %s", exc)
-            self._finish("update", False, f"Couldn't update: {exc}")
-            return
+        if not snap["restart_needed"]:
+            target = snap["latest"].lstrip("vV")
+            self._set_activity(busy=True, kind="update", label=f"Updating to {target}", started_at=_now(), log=[])
+            try:
+                if snap["git_checkout"]:
+                    result = updates.pull(log=self._note)
+                else:
+                    result = updates.install(last["download"], last["version"], self.config.update_repo,
+                                             log=self._note)
+                # Only the copy in Applications rebuilds it: another copy (a test
+                # build in dist/) would replace the real app with itself.
+                if result["app"] and login_item.running_bundle() == str(login_item.INSTALLED):
+                    self._note("Rebuilding the app")
+                    login_item.install_app()
+            except (updates.UpdateError, RuntimeError, OSError, subprocess.TimeoutExpired) as exc:
+                log.warning("update failed: %s", exc)
+                self._finish("update", False, f"Couldn't update: {exc}")
+                return
+        version = (updates.on_disk_version() or snap["latest"]).lstrip("vV")
         if self.restart is not None and self.restart():
             self._finish("update", True, f"Updated to {version}. Restarting…")
         else:
