@@ -369,6 +369,25 @@ def test_the_statement_shows_which_payments_have_receipts() -> None:
         assert {r["url"]: r["status"] for r in service.statement(None, "2026-03")["rows"]}["tx/3"] == "missing"
 
 
+def test_a_linked_photo_on_the_statement_says_it_is_a_photo() -> None:
+    """The panel showed a linked photo in a frame at full size: it didn't
+    know it was a photo, so it couldn't scale it as Files does."""
+    service, _flagged, tmp = make()
+    with tmp:
+        connected(service, Path(tmp.name))
+        photo = Path(tmp.name) / "receipt.jpg"
+        photo.write_bytes(b"\xff\xd8\xff")
+        rid = service.db.insert_receipt({
+            "watcher_id": "photo", "source": "photo", "source_id": "p1", "vendor": "Sainsbury's",
+            "purchased_on": "2026-03-06", "total": 9.0, "currency": "GBP", "pdf_path": str(photo)})
+        service.db.update_receipt(rid, {"freeagent_json": json.dumps({"transaction": "tx/2"})})
+        service.db.set_status(rid, "filed")
+        row = next(r for r in service.statement(None, "2026-03")["rows"] if r["url"] == "tx/2")
+        assert row["status"] == "filed"
+        assert row["receipt"]["is_image"] is True and row["receipt"]["source"] == "photo"
+        assert row["receipt"]["page_count"] == 0
+
+
 def test_the_statement_lists_only_money_going_out() -> None:
     """A client paying an invoice needs no receipt; it only buried the
     payments that do."""

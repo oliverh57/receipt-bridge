@@ -1849,6 +1849,11 @@ class ReceiptService:
                 "detail": (marked or "") if kind == "not_needed" else "",
                 "receipt": None if receipt is None else {"id": receipt["id"], "vendor": receipt["vendor"],
                                                          "date": receipt["purchased_on"],
+                                                         # shown as Files shows it: a photo scaled, a PDF as its pages
+                                                         "is_image": bool(receipt["pdf_path"]) and Path(receipt["pdf_path"]).suffix.lower() in IMAGE_TYPES,
+                                                         "page_count": self._page_count(receipt),
+                                                         "source": receipt["source"] if "source" in receipt.keys() else "gmail",
+                                                         "tidy": self._tidy_json(receipt),
                                                          **(self._review_line(*in_match[t["url"]])
                                                             if kind == "in_match" else {})},
                 "suggestion": suggestion,

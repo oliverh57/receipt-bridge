@@ -985,7 +985,9 @@ function statementRow(t) {
 }
 
 function filedFile(t) {
-  return t.status === "filed" && t.receipt ? { id: t.receipt.id, supplier: t.receipt.vendor, has_pdf: true, is_image: false } : null;
+  if (t.status !== "filed" || !t.receipt) return null;
+  const { id, vendor, is_image, page_count, source, tidy } = t.receipt;
+  return { id, supplier: vendor, status: "filed", has_pdf: true, is_image: Boolean(is_image), page_count: page_count || 0, source, tidy };
 }
 
 /** Files that could be this payment: unlinked business files, the engine's
@@ -1203,7 +1205,7 @@ function panelHtml(t) {
   if (t.status === "filed") {
     return `${head}<div class="st-pbody">
       <div class="m-wait"><div class="t">${t.approved ? "Approved and linked" : "Linked"} to the ${esc(t.receipt?.vendor || "")} receipt</div><div class="b">Saved to FreeAgent${t.approved ? " and approved there" : ""}. Nothing more to do.</div></div>
-      ${t.receipt ? docFigure({ id: t.receipt.id, has_pdf: true }) : ""}
+      ${t.receipt ? docFigure(filedFile(t)) : ""}
       <div class="m-actions">${t.receipt ? `<button class="btn" data-action="m-unfile" data-id="${t.receipt.id}">Undo link</button>` : ""}
         ${fa.web ? `<a class="btn" href="${esc(fa.web)}" target="_blank" rel="noopener">View in FreeAgent</a>` : ""}</div></div>`;
   }
