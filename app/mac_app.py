@@ -284,9 +284,11 @@ class AppDelegate(NSObject):
         bundle = login_item.running_bundle()
         if bundle is None:
             log.info("updated; not running as an app, so not restarting")
-            return
+            return False
+        log.info("restarting %s", bundle)
         relaunch_after_exit(os.getpid(), bundle)
         AppHelper.callAfter(NSApplication.sharedApplication().terminate_, None)
+        return True
 
     def applicationShouldTerminateAfterLastWindowClosed_(self, sender):
         return False

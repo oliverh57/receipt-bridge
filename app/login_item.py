@@ -24,11 +24,20 @@ PLIST = """<?xml version="1.0" encoding="UTF-8"?>
 
 
 def running_bundle() -> str | None:
-    """The .app this process runs in; None from a terminal."""
-    for parent in Path(sys.argv[0]).resolve().parents:
-        if parent.suffix == ".app":
-            return str(parent)
-    return None
+    """The Receipt Bridge .app this process runs in; None from a terminal.
+
+    Asked of macOS, not worked out from sys.argv: the launcher runs the app
+    as a module, so argv[0] is app/mac_app.py in the project folder. Checked
+    by bundle id, because a framework Python runs inside its own Python.app.
+    """
+    try:
+        from Foundation import NSBundle
+    except ImportError:
+        return None
+    bundle = NSBundle.mainBundle()
+    if bundle is None or bundle.bundleIdentifier() != LABEL:
+        return None
+    return str(bundle.bundlePath())
 
 
 def bundle_path() -> str | None:

@@ -273,7 +273,7 @@ def test_update_now_installs_and_restarts() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         service = _service(Path(tmp))
         service.db.set_state("update:last", json.dumps(NEWER))
-        service.restart = mock.Mock()
+        service.restart = mock.Mock(return_value=True)
         done = {"version": "99.0.0", "files": 3, "requirements": False, "app": False}
         with mock.patch.object(updates, "install", return_value=done) as install, \
                 mock.patch.object(updates, "ROOT", Path(tmp)):          # not this checkout's own .git
@@ -301,6 +301,25 @@ def test_only_the_app_in_applications_rebuilds_itself() -> None:
                     mock.patch.object(login_item, "install_app") as install_app:
                 service._run_update()
             assert install_app.called == rebuilds, running
+
+
+def test_when_it_cannot_restart_it_says_so() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        service = _service(Path(tmp))
+        service.db.set_state("update:last", json.dumps(NEWER))
+        service.restart = mock.Mock(return_value=False)
+        done = {"version": "99.0.0", "files": 3, "requirements": False, "app": False}
+        with mock.patch.object(updates, "install", return_value=done):
+            service._run_update()
+        assert service._outcome.ok and "Quit and reopen" in service._outcome.message
+
+
+def test_a_terminal_python_is_not_mistaken_for_the_app() -> None:
+    """The bundle is asked of macOS and checked by id: running here, from a
+    terminal, there's no Receipt Bridge bundle to restart or rebuild."""
+    from app import login_item
+
+    assert login_item.running_bundle() is None
 
 
 def test_a_failed_update_says_why_and_does_not_restart() -> None:

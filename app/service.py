@@ -149,7 +149,8 @@ class ReceiptService:
         self._review_counts_cache: tuple[Any, dict[str, int]] | None = None
         self._checking_updates = False
         # Quits and reopens the app after an update; the macOS shell sets it.
-        self.restart: Callable[[], None] | None = None
+        # Returns False when it can't (not running as the app).
+        self.restart: Callable[[], bool] | None = None
 
     # ---- lifecycle ------------------------------------------------------
 
@@ -2724,11 +2725,10 @@ class ReceiptService:
             log.warning("update failed: %s", exc)
             self._finish("update", False, f"Couldn't update: {exc}")
             return
-        if self.restart is None:
-            self._finish("update", True, f"Updated to {version}. Restart Receipt Bridge to use it.")
-            return
-        self._finish("update", True, f"Updated to {version}. Restarting…")
-        self.restart()
+        if self.restart is not None and self.restart():
+            self._finish("update", True, f"Updated to {version}. Restarting…")
+        else:
+            self._finish("update", True, f"Updated to {version}. Quit and reopen Receipt Bridge to use it.")
 
     def open_update_page(self) -> bool:
         """Open the latest version on GitHub in the browser. Only ever the
