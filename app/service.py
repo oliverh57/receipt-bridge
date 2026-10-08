@@ -43,7 +43,7 @@ from .matcher import match_receipts, needs_receipt, supplier_token
 from .review import Context, explained_for_good, is_undated, review
 IMAGE_TYPES = {'.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif'}
 from .photo_inbox import pending_files, process_inbox, reread
-from .watchers import load_watchers_safe
+from .watchers import build_filename, load_watchers_safe
 
 log = logging.getLogger(__name__)
 
@@ -73,6 +73,10 @@ FREEAGENT_RETRY_SECONDS = 120      # sooner while it couldn't be reached
 EMAIL_HINT_DAYS = 60
 EMAIL_HINT_RECHECK_DAYS = 14
 EMAIL_HINT_SEARCHES = 25
+# The Emails view: emails per page of the list, and whole emails kept in
+# memory so opening one again (or adding it) doesn't download it twice.
+EMAIL_PAGE = 50
+EMAILS_CACHED = 12
 # Category suggestions asked of the on-device model per run.
 CATEGORY_GUESSES = 20
 FREEAGENT_HISTORY_DAYS = 120       # how far back the first read of an account goes
@@ -150,6 +154,7 @@ class ReceiptService:
         self._outcome: Outcome | None = None
         self._health: dict[str, Health] = {}
         self._connecting = False
+        self._email_cache: dict[tuple[str, str], Any] = {}   # the Emails view, most recent last
         self._last_log: list[str] = []
         # Bumped on every change, so the UI can skip redrawing when nothing
         # happened since it last looked.
@@ -1605,6 +1610,8 @@ class ReceiptService:
         removed = self.accounts.remove(email)
         with self._lock:
             self._health.pop(email, None)
+            for key in [k for k in self._email_cache if k[0] == email]:
+                del self._email_cache[key]
         self._bump()
         return removed
 
@@ -2477,6 +2484,144 @@ class ReceiptService:
             pool.close()
         return out, "rendered_email"
 
+    # ---- the Emails view: any one email into Files ------------------------
+    #
+    # Unlike the rest of the UI these talk to Gmail while you wait, like the
+    # supplier search: you're looking through your mail, so there is nothing
+    # to show until Gmail answers. Each request has its own client (they
+    # aren't safe across threads) and gives up after REQUEST_TIMEOUT.
+
+    def _mail_client(self, account: str = "") -> tuple[Any, Any]:
+        chosen = self.accounts.get(account) if account else None
+        chosen = chosen or next(iter(self.accounts.list()), None)
+        if chosen is None:
+            raise ValueError("Connect a Gmail account first.")
+        return chosen, chosen.client(self.config.credentials_file, self.config.scopes)
+
+    def list_emails(self, account: str = "", search: str = "", receipts_only: bool = False,
+                    page_token: str = "") -> dict[str, Any]:
+        """One page of the mailbox, newest first, each email judged for how
+        much it looks like a receipt."""
+        from . import email_inbox
+
+        chosen, client = self._mail_client(account)
+        query = email_inbox.list_query(search, receipts_only)
+        stubs, next_token = client.search_page(query, page_token, EMAIL_PAGE)
+        rows = [email_inbox.list_row(h, chosen.email) for h in client.headers([s["id"] for s in stubs])] \
+            if stubs else []
+        known = self.emails_in_files([r["id"] for r in rows])
+        for row in rows:
+            row["in_files"] = known.get(row["id"])
+        return {"account": chosen.email, "emails": rows, "next": next_token}
+
+    def emails_in_files(self, message_ids: list[str]) -> dict[str, dict[str, Any]]:
+        """Which of these emails are already receipts, and where they are.
+        Local only: the list asks again after each change, without Gmail."""
+        ids = [m for m in message_ids if m][:500]
+        if not ids:
+            return {}
+        marks = ",".join("?" * len(ids))
+        with self.db.connect() as conn:
+            rows = conn.execute(f"SELECT id, gmail_message_id, status, vendor FROM receipts "
+                                f"WHERE gmail_message_id IN ({marks})", ids).fetchall()
+        return {r["gmail_message_id"]: {"id": r["id"], "status": r["status"], "vendor": r["vendor"]}
+                for r in rows}
+
+    def _cached_email(self, account: Any, client: Any, message_id: str) -> Any:
+        key = (account.email, message_id)
+        with self._lock:
+            cache = self._email_cache
+            if key in cache:
+                cache[key] = cache.pop(key)          # most recently used last
+                return cache[key]
+        message = client.fetch(message_id)
+        with self._lock:
+            cache[key] = message
+            while len(cache) > EMAILS_CACHED:
+                cache.pop(next(iter(cache)))
+        return message
+
+    def open_email(self, account: str, message_id: str) -> dict[str, Any]:
+        """One whole email for the Emails view, with what it would become."""
+        from email.utils import parseaddr
+
+        from . import email_inbox
+
+        chosen, client = self._mail_client(account)
+        message = self._cached_email(chosen, client, message_id)
+        display, address = parseaddr(message.sender or "")
+        attachments = [{"filename": a.get("filename") or "attachment", "content_type": a.get("content_type", ""),
+                        "size": a.get("size", 0)} for a in message.attachments]
+        return {
+            "id": message_id,
+            "thread_id": message.thread_id,
+            "account": chosen.email,
+            "subject": message.subject,
+            "from_name": display or address,
+            "from_address": address,
+            "to": message.recipient,
+            "date": message.date.isoformat() if message.date else "",
+            "html": message.html,
+            "text": message.text,
+            "attachments": attachments,
+            "draft": email_inbox.draft(message),
+            "in_files": self.emails_in_files([message_id]).get(message_id),
+        }
+
+    def add_email(self, account: str, message_id: str, fields: dict[str, Any]) -> bool:
+        """"Add to Files" on an email: queued, as printing it takes a browser.
+        `fields` is what the form shows (supplier, date, total, currency,
+        vat, paid_by), checked here so a mistake is said at once."""
+        clean = _email_fields(fields)
+        known = self.emails_in_files([message_id]).get(message_id)
+        if known and known["status"] in (PENDING, EXPORTED, FILED):
+            raise ValueError("That email is already a receipt.")
+        chosen, _ = self._mail_client(account)
+        return self._enqueue(f"email-add:{message_id}",
+                             lambda: self._run_add_email(chosen.email, message_id, clean))
+
+    def _run_add_email(self, account: str, message_id: str, fields: dict[str, Any]) -> None:
+        supplier = fields["supplier"] or "Email"
+        self._set_activity(busy=True, kind="retry", label=f"Adding the {supplier} email",
+                           started_at=_now(), log=[])
+        try:
+            chosen, client = self._mail_client(account)
+            message = self._cached_email(chosen, client, message_id)
+            path, source = self._email_document(message, {"supplier": supplier, "amount": fields["total"],
+                                                          "day": fields["date"]})
+        except Exception as exc:
+            log.exception("add email")
+            self._finish("email-add", False, f"Couldn't add that email: {exc}")
+            return
+        money = f" {fields['currency']}{fields['total']:.2f}" if fields["total"] is not None else ""
+        day = fields["date"] or message.date_iso
+        data = {
+            "watcher_id": "email", "account": chosen.email,
+            "gmail_message_id": message_id, "gmail_thread_id": message.thread_id,
+            "vendor": supplier, "purchased_on": day or None,
+            "total": fields["total"], "currency": fields["currency"], "vat": fields["vat"],
+            "subject": message.subject, "email_date": message.date_iso,
+            "pdf_path": str(path), "pdf_source": source,
+            # typed, or from the sender's name: made safe, as exports are written by it
+            "filename": build_filename("{day} {supplier}{money}", {"day": day, "supplier": supplier, "money": money}),
+            "paid_by": fields["paid_by"], "status": PENDING,
+            "extra_json": {"added_from": "emails", "supplier_source": "sender"},
+        }
+        known = self.emails_in_files([message_id]).get(message_id)
+        if known and known["status"] in (IGNORED, FAILED, DELETED):
+            # chosen by hand now: what was ignored or couldn't be read comes back
+            data.pop("status")
+            self.db.update_receipt(known["id"], {**data, "error": None})
+            self.db.set_status(known["id"], PENDING)
+            receipt_id = known["id"]
+        else:
+            receipt_id = self.db.insert_receipt(data)
+        if not receipt_id:
+            self._finish("email-add", False, "That email is already a receipt.")
+            return
+        where = "an expense" if fields["paid_by"] == "personal" else "a receipt"
+        self._finish("email-add", True, f"Added the {supplier} email to Files as {where}.")
+
     def _suppliers_with_better_documents(self) -> set[str]:
         """Suppliers whose rule can get something better than the email.
 
@@ -3060,6 +3205,41 @@ def _receipt_json(row: Any, better: set[str] | frozenset[str] = frozenset()) -> 
         "flags": extra.get("flags", []) if is_photo else [],
         "is_image": bool(row["pdf_path"]) and Path(row["pdf_path"]).suffix.lower() in IMAGE_TYPES,
     }
+
+
+def _email_fields(fields: dict[str, Any]) -> dict[str, Any]:
+    """The Emails view's form, checked: a mistake is a ValueError in words."""
+    supplier = " ".join(str(fields.get("supplier") or "").split())[:80]
+    day = str(fields.get("date") or "").strip()[:10]
+    if day:
+        try:
+            date.fromisoformat(day)
+        except ValueError:
+            raise ValueError("The date should look like 2026-10-08.") from None
+
+    def amount(key: str, name: str) -> float | None:
+        value = fields.get(key)
+        if value in (None, ""):
+            return None
+        try:
+            number = round(float(str(value).replace(",", "").replace("£", "").strip()), 2)
+        except ValueError:
+            raise ValueError(f"The {name} should be a number.") from None
+        if number < 0:
+            raise ValueError(f"The {name} can't be negative.")
+        return number
+
+    total, vat = amount("total", "total"), amount("vat", "VAT")
+    if vat is not None and total is not None and vat >= total:
+        raise ValueError("The VAT should be less than the total.")
+    currency = str(fields.get("currency") or "GBP").strip().upper()
+    if not re.fullmatch(r"[A-Z]{3}", currency):
+        raise ValueError("The currency should be three letters, like GBP.")
+    paid_by = fields.get("paid_by") or "business"
+    if paid_by not in ("business", "personal"):
+        raise ValueError("Paid by should be business or personal.")
+    return {"supplier": supplier, "date": day, "total": total, "vat": vat,
+            "currency": currency, "paid_by": paid_by}
 
 
 def _money_text(value: Any, currency: str | None) -> str:

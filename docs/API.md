@@ -186,6 +186,31 @@ saves to, and its iCloud link (`SHORTCUT_URL` in app/setup_guide.py, or config
 
 Statement rows carry `approved` (FreeAgent's explanation is approved there: `marked_for_review` false; status `approved` when it has no receipt, counted as done), `settings`, `freeagent: {explained, category, vat_rate, rebill, changes}` (FreeAgent's own explanation, and what you changed that isn't sent yet) and `explained_here` (`{state: dry_run|filed, body, url?}`).
 
+## Emails (any one email into Files)
+
+The **Emails** view, for one-off receipts no supplier rule collects. Unlike
+the rest of the API, the list and an opened email are read from Gmail while
+the request waits (like the supplier search): there is nothing to show until
+Gmail answers. Adding one is queued. Signed out (no account, or all expired),
+the UI shows the Gmail card from Settings instead.
+
+| Call | Body | Does |
+|---|---|---|
+| `GET /api/emails?account=&q=&receipts=true|false&page=` | — | one page (50) of the mailbox, newest first: `{account, emails[], next}`. `q` is Gmail search syntax; `receipts=true` narrows to likely receipts (Gmail searches for receipt words); `page` is the last answer's `next` (`""` at the end). Chats, drafts, sent, spam and bin are left out. 400 "Connect a Gmail account first." when signed out |
+| `GET /api/emails/{message_id}?account=` | — | the whole email: `{id, thread_id, account, subject, from_name, from_address, to, date, html, text, attachments: [{filename, content_type, size}], draft, in_files}`. The UI shows `html` only in a sandboxed `srcdoc` iframe |
+| `POST /api/emails/known` | `{ids: [..]}` | which of these emails are already receipts: `{message_id: {id, status, vendor}}`. Local only, for redrawing the list after a change |
+| `POST /api/emails/{message_id}/add` | `{account, supplier, date, total, currency, vat, paid_by}` | queue "Add to Files" (`email-add:{id}`). The attached PDF, or the email printed, becomes the receipt; `paid_by: personal` makes it an expense. 400 with a reason for a bad field or an email that's already a receipt; an ignored one comes back |
+
+Each list email: `{id, thread_id, account, subject, from_name, from_address,
+date, snippet, has_attachment, unread, amount: {amount, currency, as_total} | null,
+receipt: "likely" | "maybe" | null, why[], in_files}`. `receipt` is judged
+from the list metadata alone (subject, sender, snippet, Gmail's tabs) in
+`app/email_inbox.py`; `why` says what made it look like one.
+
+`draft` (what the email would become, read from the whole email and any PDF):
+`{supplier, date, total, currency, vat, total_label, total_found_in, amounts[], pdf}`.
+Anything not found is `null`, never guessed.
+
 ## Email receipts (the separate Gmail tool)
 
 `POST /api/scan` (Check email), `POST /api/accounts/connect` (`{scan_from?: "YYYY-MM-DD"}`: how far back the new mailbox's first scan looks), `POST /api/accounts/disconnect|check`,

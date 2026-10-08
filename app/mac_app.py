@@ -430,8 +430,11 @@ class AppDelegate(NSObject):
     ):
         # target="_blank" and window.open: nothing in the app needs a second
         # window, so any such link is external and belongs in the browser.
+        # Only web and mail links: the Emails view shows senders' own links,
+        # and NSWorkspace would open a file: URL to an app by running it.
         url = action.request().URL()
-        if url is not None:
+        scheme = str(url.scheme() or "").lower() if url is not None else ""
+        if scheme in ("http", "https", "mailto"):
             self._safely("open link", lambda: NSWorkspace.sharedWorkspace().openURL_(url))
         return None
 
