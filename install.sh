@@ -38,7 +38,7 @@ else
   if [ -e "$DIR" ] && [ -n "$(ls -A "$DIR" 2>/dev/null)" ]; then
     stop "$DIR already exists and isn't Receipt Bridge. Move it aside, or install elsewhere with RB_DIR=/some/folder."
   fi
-  say "Downloading to $DIR…"
+  say "Downloading to ${DIR}…"
   mkdir -p "$DIR"
   if ! curl -fsSL "$TARBALL" | tar -xz -C "$DIR" --strip-components 1; then
     rm -rf "$DIR"
