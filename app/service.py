@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import queue
+import re
 import secrets
 import subprocess
 import threading
@@ -27,6 +28,8 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
+
+import requests
 
 from . import login_item, setup_guide, updates
 from .accounts import AccountStore, adopt_legacy_scan_state
@@ -64,6 +67,7 @@ FLAG_WORDS = {
 DATE_FROM_PAYMENT = "Date taken from the payment you chose. Check it against the receipt."
 INBOX_WARN_BYTES = 500 * 1024 * 1024   # warn if this much is stuck in the inbox
 FREEAGENT_SYNC_SECONDS = 3600      # re-read FreeAgent hourly while connected
+FREEAGENT_RETRY_SECONDS = 120      # sooner while it couldn't be reached
 # "Use that email": payments this recent are looked for in Gmail, each once a
 # day for up to two weeks, and at most this many searches per run.
 EMAIL_HINT_DAYS = 60
@@ -74,6 +78,17 @@ CATEGORY_GUESSES = 20
 FREEAGENT_HISTORY_DAYS = 120       # how far back the first read of an account goes
 BACKUPS_KEPT = 7
 UPDATE_CHECK_INTERVAL = timedelta(days=1)   # GitHub is asked at most this often unprompted
+
+
+def _freeagent_failure(exc: Exception) -> tuple[str, str]:
+    """A failed FreeAgent read, in words for the person (the detail is in the
+    log), and its kind: "offline" and "unavailable" fix themselves."""
+    text = str(exc)
+    if isinstance(exc, (requests.ConnectionError, requests.Timeout)):
+        return ("Check this Mac is online. It tries again by itself.", "offline")
+    if re.search(r"failed \(5\d\d\)", text) or "rate limiting" in text:
+        return ("FreeAgent is having problems at its end. It tries again by itself.", "unavailable")
+    return (f"Couldn't read FreeAgent: {text}", "error")
 
 
 def _now() -> str:
@@ -146,6 +161,9 @@ class ReceiptService:
         self._inbox_bytes = 0          # measured by the scheduler, not on every UI poll
         self._file_results: dict[str, Any] | None = None   # the last File / File all, for its result list
         self._freeagent_error = ""
+        # what kind of failure it is: "offline" and "unavailable" fix
+        # themselves (retried every couple of minutes); "error" needs looking at
+        self._freeagent_problem = ""
         self._review_counts_cache: tuple[Any, dict[str, int]] | None = None
         self._checking_updates = False
         # Quits and reopens the app after an update; the macOS shell sets it.
@@ -237,7 +255,9 @@ class ReceiptService:
                 self.notify_about("problems", f"{size // (1024 * 1024)} MB is waiting in the receipt inbox. "
                                   "Something may be stuck: check Settings → Receipt inbox.")
             self._inbox_bytes = size
-            if time.monotonic() - last_freeagent >= FREEAGENT_SYNC_SECONDS and self._freeagent_connected():
+            wait = FREEAGENT_RETRY_SECONDS if self._freeagent_problem in ("offline", "unavailable") \
+                else FREEAGENT_SYNC_SECONDS
+            if time.monotonic() - last_freeagent >= wait and self._freeagent_connected():
                 self.sync_freeagent()
                 last_freeagent = time.monotonic()
             if time.monotonic() - last_health >= HEALTH_INTERVAL.total_seconds():
@@ -695,14 +715,14 @@ class ReceiptService:
             self.guess_categories()
             self.auto_link()
             self.find_emails()
-            self._freeagent_error = ""
+            self._freeagent_error = self._freeagent_problem = ""
             self._note(f"FreeAgent: {len(accounts)} bank account(s), {len(categories)} categories, "
                        f"{fetched} transaction(s) updated")
         except NotConnected as exc:
-            self._freeagent_error = str(exc)
+            self._freeagent_error, self._freeagent_problem = str(exc), "error"
         except (FreeAgentError, OSError, ValueError) as exc:
-            log.exception("FreeAgent sync failed")
-            self._freeagent_error = f"Couldn't read FreeAgent: {exc}"
+            log.warning("FreeAgent sync failed: %s", exc)
+            self._freeagent_error, self._freeagent_problem = _freeagent_failure(exc)
 
     @staticmethod
     def _read_projects(client: FreeAgent) -> list[dict[str, Any]]:
@@ -731,6 +751,7 @@ class ReceiptService:
             "environment": client.credentials.environment if client else "",
             "connected": bool(client and client.connected),
             "error": self._freeagent_error,
+            "problem": self._freeagent_problem if self._freeagent_error else "",
             "vat": reference.get("vat"),
             "bank_accounts": [{**a, "chosen": a["url"] in chosen}
                               for a in reference.get("bank_accounts", [])

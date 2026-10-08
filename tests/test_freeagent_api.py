@@ -208,6 +208,29 @@ def test_the_snapshot_reports_freeagent_without_calling_it() -> None:
         assert snap["has_credentials"] and snap["environment"] == "sandbox" and not snap["connected"]
 
 
+def test_a_failed_read_is_explained_in_plain_words() -> None:
+    """No raw connection errors on screen, and offline isn't a "Problem"."""
+    import requests
+
+    from app.freeagent import FreeAgentError
+    from app.service import _freeagent_failure
+
+    offline = requests.ConnectionError(
+        "HTTPSConnectionPool(host='api.freeagent.com', port=443): Max retries exceeded with url: "
+        "/v2/token_endpoint (Caused by NameResolutionError(\"Failed to resolve 'api.freeagent.com'\"))")
+    message, kind = _freeagent_failure(offline)
+    assert kind == "offline" and "online" in message and "HTTPS" not in message
+    assert _freeagent_failure(requests.Timeout("read timed out"))[1] == "offline"
+
+    down = FreeAgentError("FreeAgent GET bank_transactions failed (503): Service Unavailable")
+    assert _freeagent_failure(down)[1] == "unavailable"
+    assert _freeagent_failure(FreeAgentError("FreeAgent categories: gave up after repeated rate limiting"))[1] == "unavailable"
+
+    other = FreeAgentError("FreeAgent GET bank_accounts failed (422): Invalid")
+    message, kind = _freeagent_failure(other)
+    assert kind == "error" and "422" in message
+
+
 if __name__ == "__main__":
     failures = 0
     for name, func in sorted(globals().items()):

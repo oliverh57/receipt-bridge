@@ -860,8 +860,8 @@ function freeagentCard(fa) {
       <div class="card-head"><h3>FreeAgent${env}</h3>
         <button class="btn small" data-action="fa-sync" ${state.snap.queued.includes("freeagent-sync") ? "disabled" : ""}>Refresh</button>
         <button class="btn small danger" data-action="fa-disconnect">Disconnect</button></div>
-      <div class="card-row"><div class="grow"><span class="pill ok">Connected</span><div class="sub">${vat}</div></div></div>
-      ${error}
+      <div class="card-row"><div class="grow">${freeagentStatus(fa)}<div class="sub">${vat}</div>
+        ${fa.error ? `<div class="sub">${esc(fa.error)}${fa.last_sync ? ` Showing what was synced ${esc(shortDate(fa.last_sync))}.` : ""}</div>` : ""}</div></div>
       ${vatSchemeRow(fa.vat)}
       <div class="card-note">Match receipts against:</div>
       ${accounts || `<div class="card-note">No bank accounts yet.</div>`}
@@ -869,6 +869,14 @@ function freeagentCard(fa) {
         <label class="switch"><input type="checkbox" data-action="fa-dry-run" ${fa.dry_run ? "checked" : ""} aria-label="Dry run"><span></span></label></div>
       <div class="card-note">${synced}.</div>
     </div>`;
+}
+
+/** One status for the connection: never "Connected" beside a problem. */
+function freeagentStatus(fa) {
+  if (!fa.error) return `<span class="pill ok">Connected</span>`;
+  if (fa.problem === "offline") return `<span class="pill warn">Can't reach FreeAgent</span>`;
+  if (fa.problem === "unavailable") return `<span class="pill warn">FreeAgent isn't responding</span>`;
+  return `<span class="pill bad">Problem</span>`;
 }
 
 const VAT_SCHEME_LABEL = {
@@ -1006,7 +1014,7 @@ function renderSettings() {
   // a Gmail account to reconnect
   const fa = s.freeagent || {};
   const attention = {
-    freeagent: fa.has_credentials && (!fa.connected || !!fa.error),
+    freeagent: fa.has_credentials && (!fa.connected || (!!fa.error && fa.problem === "error")),
     email: s.needs_attention.length > 0,
     general: !!s.update?.available,
   };
