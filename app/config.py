@@ -124,7 +124,7 @@ class Config:
 
     @property
     def freeagent_credentials_file(self) -> Path:
-        """FreeAgent OAuth app id and secret, per install (SETUP-FOR-YOU.md §4)."""
+        """FreeAgent OAuth app id and secret: Receipt Bridge's own, shipped with it."""
         return _resolve(self.raw.get("freeagent", {}).get(
             "credentials_file", "freeagent_credentials.json"))
 

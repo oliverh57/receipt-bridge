@@ -4,11 +4,9 @@ __pycache__/
 dist/
 build/
 data/
-credentials.json
 token.json
 .env
 backups/
-freeagent_credentials.json
 .DS_Store
 .claude/
 
@@ -19,3 +17,9 @@ PLAN.md
 SETUP-FOR-YOU.md
 .python/
 .uv/
+
+# Supplier rules are each person's own, made in Settings → Suppliers. Only
+# Trainline (it needs the browser fetcher in app/fetchers) and the template ship.
+watchers/*.yaml
+!watchers/_example.yaml
+!watchers/trainline.yaml

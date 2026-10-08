@@ -265,7 +265,8 @@ def create_app(service: ReceiptService) -> FastAPI:
     @app.post("/api/accounts/connect")
     def connect(body: Connect | None = None) -> dict[str, Any]:
         if not service.config.credentials_file.exists():
-            raise HTTPException(400, "credentials.json is missing — see the README")
+            raise HTTPException(400, "This copy is missing its Google key (credentials.json). "
+                                     "Update from Settings → General, or run the installer again.")
         scan_from = None
         if body and body.scan_from:
             try:

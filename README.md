@@ -101,13 +101,16 @@ one into the folder's `.python/` with [uv](https://docs.astral.sh/uv/)),
 downloads what the app needs, and puts **Receipt Bridge** in Applications.
 Run it again any time to rebuild the app; receipts are kept.
 
-**Gmail access.** In [Google Cloud Console](https://console.cloud.google.com/):
-create a project, enable the **Gmail API**, set up the **OAuth consent screen**
-(External, add yourself as a test user), then create an **OAuth client ID →
-Desktop app**. Save the JSON as `credentials.json` in this folder.
+**App keys ship with the app.** `credentials.json` (Google, a Desktop app
+OAuth client) and `freeagent_credentials.json` (FreeAgent) only identify
+Receipt Bridge: everyone signs in to their own Gmail and FreeAgent, and
+sign-in only ever returns to their own Mac. An update puts either back if it
+goes missing; it never replaces one that's there.
 
-> **Set the consent screen to "In production."** In *Testing*, Google expires
-> the sign-in every 7 days. You'll click past an "unverified app" warning once.
+> **Gmail: set the Google Cloud consent screen to "In production."** In
+> *Testing*, only Google accounts listed as test users can sign in, and Google
+> expires the sign-in every 7 days. In production each person clicks past an
+> "unverified app" warning once (Google allows 100 users without a review).
 
 Open **Receipt Bridge** from Applications. The first time, a **setup guide**
 walks through it: connect **FreeAgent** (and tick your business bank
@@ -211,8 +214,8 @@ blank (left for review) is allowed, a wrong figure is not.
 - `data/photos/` (or the archive folder chosen in Settings) — every original
   receipt photo. **Not** in the daily backup: choose a synced folder in
   Settings → Receipt inbox if you want an off-Mac copy.
-- `credentials.json`, `freeagent_credentials.json`, `data/` and `backups/`
-  are gitignored.
+- `data/` and `backups/` are gitignored. The app keys are not: they ship
+  (see Setup).
 
 ## Where this could go
 

@@ -7,9 +7,11 @@ endpoint; that becomes FreeAgent's default on 1 December 2026.
 
 Sign-in is OAuth 2.0. The redirect comes back to this app's own local
 server (`/freeagent/callback`), so no second process or port is needed.
-The client id and secret are per install, in `freeagent_credentials.json`
-next to Google's `credentials.json`; nothing about any one person's
-business lives in code (PLAN.md §12).
+The client id and secret are Receipt Bridge's own, shipped in
+`freeagent_credentials.json` next to Google's `credentials.json`. They only
+identify the app: each person signs in to their own FreeAgent, and sign-in
+only ever returns to their own Mac (127.0.0.1). Nothing about any one
+person's business lives in code (PLAN.md §12).
 """
 
 from __future__ import annotations

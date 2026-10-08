@@ -843,7 +843,7 @@ function freeagentCard(fa) {
   const env = fa.environment === "sandbox" ? ` <span class="pill unknown">Sandbox</span>` : "";
   if (!fa.has_credentials) {
     return `<div class="card"><div class="card-head"><h3>FreeAgent</h3></div>
-      <div class="card-note">Add <code>freeagent_credentials.json</code> to the project folder to connect (see SETUP-FOR-YOU.md).</div></div>`;
+      <div class="card-note">This copy is missing its FreeAgent key (<code>freeagent_credentials.json</code>). Settings → General → Updates → <b>Update now</b> puts it back; if there's no update, run the installer again.</div></div>`;
   }
   const error = fa.error ? `<div class="card-note"><span class="pill bad">Problem</span> ${esc(fa.error)}</div>` : "";
   if (!fa.connected) {
@@ -1073,8 +1073,8 @@ function setupReady(key) {
 function setupFreeagentHtml(fa) {
   let body;
   if (!fa.has_credentials) {
-    body = `<div class="setup-note warn">This copy has no FreeAgent app keys yet. Put <code>freeagent_credentials.json</code>
-      in the app's folder (see SETUP-FOR-YOU.md, section 4), then open this guide again from Settings → General.</div>`;
+    body = `<div class="setup-note warn">This copy is missing its FreeAgent key (<code>freeagent_credentials.json</code>).
+      Settings → General → Updates → <b>Update now</b> puts it back; if there's no update, run the installer again. Then open this guide again from Settings → General.</div>`;
   } else if (!fa.connected) {
     body = `<div class="setup-actions"><button class="btn primary" data-action="setup-fa-connect">Connect FreeAgent</button></div>
       ${setup.faWaiting ? `<div class="setup-note"><span class="spinner"></span>Approve Receipt Bridge in the browser window that opened, then come back here.</div>` : ""}
@@ -1124,7 +1124,7 @@ function setupEmailHtml(s) {
     body = `<div class="card">${s.accounts.map((a) => `<div class="card-row"><span class="pill ok"></span><div class="grow selectable">${esc(a.email)}</div></div>`).join("")}</div>
       <div class="setup-actions">${s.connecting ? "" : `<button class="btn small" data-action="connect-ask" ${state.gmailAsk ? "disabled" : ""}>+ Add another account</button>`}</div>`;
   } else if (!s.has_credentials) {
-    body = `<div class="setup-note">This needs a Google sign-in key first (<code>credentials.json</code>; the README explains, under Gmail access). Skip this for now. You can connect later in Settings → Email receipts.</div>`;
+    body = `<div class="setup-note">This copy is missing its Google key (<code>credentials.json</code>). Skip this for now: Settings → General → Updates → <b>Update now</b> puts it back, and you can connect later in Settings → Email receipts.</div>`;
   } else if (!s.connecting && !state.gmailAsk) {
     body = `<div class="setup-actions"><button class="btn primary" data-action="connect-ask">Connect Gmail</button></div>`;
   } else body = "";

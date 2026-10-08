@@ -550,7 +550,8 @@ class ReceiptService:
         opened in the user's own browser. Returns the URL too."""
         client = self._freeagent()
         if client is None:
-            raise FreeAgentError("freeagent_credentials.json is missing (SETUP-FOR-YOU.md §4)")
+            raise FreeAgentError("This copy is missing its FreeAgent key (freeagent_credentials.json). "
+                                 "Update from Settings → General, or run the installer again.")
         state = secrets.token_urlsafe(24)
         with self._lock:
             now = time.monotonic()
