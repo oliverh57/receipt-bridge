@@ -10,9 +10,9 @@ from __future__ import annotations
 import logging
 import socket
 import urllib.request
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Iterator
 
 from .email_message import Email
 
@@ -234,6 +234,19 @@ class GmailClient:
 
         return collected[:max_results]
 
+    def search_page(self, query: str, page_token: str = "",
+                    max_results: int = 50) -> tuple[list[dict], str]:
+        """One page of a search, and the token for the next ("" at the end).
+        For a list read a page at a time, where `search` would walk on."""
+        response = (
+            self.service()
+            .users()
+            .messages()
+            .list(userId="me", q=query, maxResults=max_results, pageToken=page_token or None)
+            .execute()
+        )
+        return response.get("messages", []), response.get("nextPageToken", "")
+
     def headers(self, message_ids: list[str]) -> list[dict]:
         """Subject, sender, date and snippet for several messages, cheaply.
 
@@ -247,7 +260,8 @@ class GmailClient:
         def collect(request_id, response, exception):
             if exception is not None or not response:
                 return
-            heads = {h["name"].lower(): h["value"] for h in response["payload"].get("headers", [])}
+            payload = response.get("payload") or {}
+            heads = {h["name"].lower(): h["value"] for h in payload.get("headers", [])}
             found[response["id"]] = {
                 "id": response["id"],
                 "thread_id": response.get("threadId", ""),
@@ -255,6 +269,12 @@ class GmailClient:
                 "sender": heads.get("from", ""),
                 "date": heads.get("date", ""),
                 "snippet": response.get("snippet", ""),
+                "label_ids": response.get("labelIds", []),
+                # when Gmail received it, as ISO: the Date header is whatever
+                # the sender's server wrote, in any format
+                "internal_date": _iso_from_ms(response.get("internalDate")),
+                # metadata has no parts, but mail with attachments is "mixed"
+                "has_attachment": payload.get("mimeType", "") == "multipart/mixed",
             }
 
         batch = service.new_batch_http_request(callback=collect)
@@ -293,6 +313,13 @@ class GmailClient:
     ) -> Iterator[Email]:
         for stub in self.search(query, max_results=max_results):
             yield self.fetch(stub["id"], stub.get("threadId", ""))
+
+
+def _iso_from_ms(value: Any) -> str:
+    try:
+        return datetime.fromtimestamp(int(value) / 1000, timezone.utc).isoformat(timespec="seconds")
+    except (TypeError, ValueError):
+        return ""
 
 
 def with_date_window(query: str, since: date | None, lookback_days: int,

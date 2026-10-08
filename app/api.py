@@ -81,6 +81,20 @@ class ArchivedDelete(BaseModel):
     all: bool = False
 
 
+class EmailIds(BaseModel):
+    ids: list[str]
+
+
+class EmailAdd(BaseModel):
+    account: str = ""
+    supplier: str = ""
+    date: str = ""
+    total: float | str | None = None
+    currency: str = "GBP"
+    vat: float | str | None = None
+    paid_by: str = "business"
+
+
 class SupplierSearch(BaseModel):
     q: str
 
@@ -288,6 +302,57 @@ def create_app(service: ReceiptService) -> FastAPI:
     @app.post("/api/accounts/check")
     def check() -> dict[str, Any]:
         return {"queued": service.check_accounts()}
+
+    # ---- Emails: browse the mailbox, add any one email to Files ---------
+    #
+    # Like the supplier search, the list and an opened email are read from
+    # Gmail while the page waits (see ReceiptService.list_emails); adding
+    # one is queued.
+
+    def gmail_failed(exc: Exception) -> HTTPException:
+        from .gmail_client import GmailAuthError
+
+        text = str(exc)
+        if isinstance(exc, GmailAuthError) or "invalid_grant" in text or "expired or revoked" in text:
+            return HTTPException(400, "Gmail sign-in has expired. Reconnect the account.")
+        log.info("emails: %s", text)
+        return HTTPException(502, f"Couldn't reach Gmail: {text[:200]}")
+
+    @app.get("/api/emails")
+    def emails(account: str = "", q: str = "", receipts: bool = False, page: str = "") -> dict[str, Any]:
+        try:
+            return service.list_emails(account, q[:500], receipts, page)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except Exception as exc:
+            raise gmail_failed(exc) from exc
+
+    @app.post("/api/emails/known")
+    def emails_known(body: EmailIds) -> dict[str, Any]:
+        return service.emails_in_files(body.ids)
+
+    def gmail_id(message_id: str) -> str:
+        if not re.fullmatch(r"[A-Za-z0-9_-]{6,64}", message_id):
+            raise HTTPException(400, "Not a Gmail message id")
+        return message_id
+
+    @app.get("/api/emails/{message_id}")
+    def email_open(message_id: str, account: str = "") -> dict[str, Any]:
+        gmail_id(message_id)
+        try:
+            return service.open_email(account, message_id)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except Exception as exc:
+            raise gmail_failed(exc) from exc
+
+    @app.post("/api/emails/{message_id}/add")
+    def email_add(message_id: str, body: EmailAdd) -> dict[str, Any]:
+        gmail_id(message_id)
+        try:
+            return {"queued": service.add_email(body.account, message_id, body.model_dump())}
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
 
     # ---- FreeAgent ------------------------------------------------------
     #

@@ -187,6 +187,8 @@ async function refresh(force = false) {
       state.receipts = await api("/api/receipts?status=pending");
       state.receiptsKey = key;
     }
+  } else if (state.view === "emails") {
+    await emailsRefresh(force, versionChanged);
   } else if (state.view !== "settings") {
     const key = `${state.view}:${snap.version}`;
     if (force || key !== state.receiptsKey) {
@@ -282,6 +284,7 @@ function render() {
   else if (state.view === "expenses") renderExpenses();
   else if (state.view === "archived") renderArchived();
   else if (state.view === "statement") renderStatement();
+  else if (state.view === "emails") renderEmails();
   else renderList();
   renderSetup();
 }
@@ -947,8 +950,9 @@ function gmailAskHtml() {
     </div>`;
 }
 
-function renderSettings() {
-  const s = state.snap;
+/** Gmail sign-in and the connected accounts: in Settings → Email, and the
+ * whole of the Emails view until an account is working. */
+function gmailCard(s) {
   const accountRows = s.accounts.map((a) => {
     const pill = a.state === "ok" ? `<span class="pill ok">Working</span>`
       : a.state === "unknown" ? `<span class="pill unknown">Checking…</span>`
@@ -962,6 +966,22 @@ function renderSettings() {
         <button class="btn small danger" data-action="disconnect" data-email="${esc(a.email)}">Sign out</button>
       </div>`;
   }).join("");
+  return `<div class="card">
+        <div class="card-head"><h3>Gmail</h3>
+          ${s.connecting
+            ? `<button class="btn small" data-action="connect-stop">Cancel sign-in</button>`
+            : `<button class="btn small" data-action="connect-ask" ${!s.has_credentials || state.gmailAsk ? "disabled" : ""}>
+                ${s.accounts.length ? "+ Add account" : "Connect Gmail"}</button>`}</div>
+        ${s.connecting ? `<div class="card-note">Waiting for you to finish signing in to Google in your browser. Gives up after 5 minutes.</div>` : ""}
+        ${state.gmailAsk && !s.connecting ? gmailAskHtml() : ""}
+        ${s.has_credentials ? "" : licenceDrop()}
+        ${accountRows || `<div class="card-note">No account connected.</div>`}
+        <div class="card-note">Opens in your browser. Read-only.</div>
+      </div>`;
+}
+
+function renderSettings() {
+  const s = state.snap;
 
   const suppliers = (state.suppliers || []).map((w) => w.problem
     ? `<div class="card-row"><div class="grow"><span class="pill bad">Couldn't load</span><div class="sub">${esc(w.problem)}</div></div></div>`
@@ -979,18 +999,7 @@ function renderSettings() {
     freeagent: freeagentCard(s.freeagent),
 
     email: `
-      <div class="card">
-        <div class="card-head"><h3>Gmail</h3>
-          ${s.connecting
-            ? `<button class="btn small" data-action="connect-stop">Cancel sign-in</button>`
-            : `<button class="btn small" data-action="connect-ask" ${!s.has_credentials || state.gmailAsk ? "disabled" : ""}>
-                ${s.accounts.length ? "+ Add account" : "Connect Gmail"}</button>`}</div>
-        ${s.connecting ? `<div class="card-note">Waiting for you to finish signing in to Google in your browser. Gives up after 5 minutes.</div>` : ""}
-        ${state.gmailAsk && !s.connecting ? gmailAskHtml() : ""}
-        ${s.has_credentials ? "" : licenceDrop()}
-        ${accountRows || `<div class="card-note">No account connected.</div>`}
-        <div class="card-note">Opens in your browser. Read-only.</div>
-      </div>
+      ${gmailCard(s)}
 
       <div class="card">
         <div class="card-head"><h3>Suppliers</h3>
@@ -1508,7 +1517,7 @@ document.addEventListener("change", (e) => {
 $("#scan-btn").addEventListener("click", () => act(() => api("/api/check-now", { method: "POST" })));
 
 document.addEventListener("keydown", (e) => {
-  if (wiz.open || ed.open || state.view === "settings" || state.view === "pending" || state.view === "statement" || state.view === "expenses" || state.view === "archived" || e.metaKey || e.ctrlKey || e.target.matches("input:not([type=checkbox]), select, textarea")) return;
+  if (wiz.open || ed.open || state.view === "settings" || state.view === "pending" || state.view === "statement" || state.view === "expenses" || state.view === "archived" || state.view === "emails" || e.metaKey || e.ctrlKey || e.target.matches("input:not([type=checkbox]), select, textarea")) return;
   const r = selected();
   if (e.key === "ArrowDown" || e.key === "j") { e.preventDefault(); move(1); }
   else if (e.key === "ArrowUp" || e.key === "k") { e.preventDefault(); move(-1); }
