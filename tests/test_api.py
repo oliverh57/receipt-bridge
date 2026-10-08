@@ -196,7 +196,9 @@ def test_archived_receipts_are_deleted_after_the_chosen_days() -> None:
         client.post("/api/receipts/status", json={"ids": ids, "status": "ignored"}, headers=h)
         service.db.update_receipt(ids[0], {"archived_at": "2026-01-01T00:00:00+00:00"})
 
-        assert service.purge_archived() == 0                         # off by default
+        assert service.archive_delete_days == 30                     # on by default
+        client.post("/api/settings", json={"archive_delete_days": 0}, headers=h)
+        assert service.purge_archived() == 0                         # 0: kept for ever
         assert client.post("/api/settings", json={"archive_delete_days": -1}, headers=h).status_code == 400
         client.post("/api/settings", json={"archive_delete_days": 30}, headers=h)   # purges straight away
         assert client.get("/api/state", headers=h).json()["archive_delete_days"] == 30

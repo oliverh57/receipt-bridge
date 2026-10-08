@@ -1073,9 +1073,9 @@ class ReceiptService:
     @property
     def archive_delete_days(self) -> int:
         """Delete archived receipts this many days after they were archived;
-        0 keeps them for ever (the default)."""
+        0 keeps them for ever. 30 unless changed in Settings."""
         try:
-            return max(0, int(self.db.get_state("pref:archive_delete_days", "0") or 0))
+            return max(0, int(self.db.get_state("pref:archive_delete_days", "30") or 0))
         except ValueError:
             return 0
 
