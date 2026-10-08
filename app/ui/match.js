@@ -660,7 +660,7 @@ function renderArchived() {
   const detail = sel ? `${headHtml({ ...sel, stage: sel.status })}
     <div class="m-dgrid">${docFigure(sel)}
       <div class="m-inspector">
-        <div class="m-wait"><div class="t">${sel.status === "failed" ? "This email couldn't be read" : "You ignored this"}</div>
+        <div class="m-wait"><div class="t">${sel.status === "failed" ? (sel.source === "photo" ? "This photo couldn't be read" : "This email couldn't be read") : "You ignored this"}</div>
           <div class="b">${esc(sel.status === "failed" ? (sel.error || "") : "It won't be linked or claimed unless you restore it.")}</div></div>
         <div class="m-actions">
           <button class="btn primary" data-action="a-restore" data-id="${sel.id}">Back to Files</button>

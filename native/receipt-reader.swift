@@ -364,11 +364,21 @@ func cleanCopies(_ upright: CGImage, layout: [RowLayout], skewDegrees: Double,
         // Vision: normalised, origin bottom-left. Here: pixels, origin top-left.
         let px = { (p: CGPoint) in CGPoint(x: p.x * W, y: (1 - p.y) * H) }
         let raw = [doc.topLeft, doc.topRight, doc.bottomRight, doc.bottomLeft].map(px)
-        let area = abs(zip(raw, raw.dropFirst() + [raw[0]]).reduce(0) { $0 + ($1.0.x * $1.1.y - $1.1.x * $1.0.y) }) / 2
+        // Shoelace formula, written out: as one chained expression some Swift
+        // compilers gave up type-checking it, and the reader never got built.
+        var twiceArea: CGFloat = 0
+        for i in 0..<raw.count {
+            let a: CGPoint = raw[i]
+            let b: CGPoint = raw[(i + 1) % raw.count]
+            twiceArea += a.x * b.y - b.x * a.y
+        }
+        let area: CGFloat = abs(twiceArea) / 2
         let angles = interiorAnglesDegrees(raw)
         // Pushed out a little, so the crop never shaves the print at the edge.
         let margin = max(lineHeight * 0.8, min(W, H) * 0.012)
-        let centre = CGPoint(x: raw.map(\.x).reduce(0, +) / 4, y: raw.map(\.y).reduce(0, +) / 4)
+        let sumX: CGFloat = raw.reduce(0) { $0 + $1.x }
+        let sumY: CGFloat = raw.reduce(0) { $0 + $1.y }
+        let centre = CGPoint(x: sumX / 4, y: sumY / 4)
         let quad = raw.map { v -> CGPoint in
             let d = hypot(v.x - centre.x, v.y - centre.y)
             let k = d == 0 ? 0 : margin * 1.4 / d

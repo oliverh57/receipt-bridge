@@ -87,7 +87,9 @@ def ensure_built(data_dir: Path) -> Path:
                 "(xcode-select --install)"
             ) from exc
         if result.returncode != 0:
-            raise ReaderError(f"receipt-reader did not compile: {result.stderr.strip()[:500]}")
+            log.warning("receipt-reader did not compile: %s", result.stderr.strip()[:2000])
+            raise ReaderError("This Mac couldn't set up its receipt reader. Check for updates in "
+                              "Settings → General, then click Read again.")
         return binary
 
 
