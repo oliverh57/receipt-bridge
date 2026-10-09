@@ -25,7 +25,7 @@
 const em = {
   account: "",            // the mailbox chosen in the list ("" = the first)
   q: "",                  // the search, as Gmail search syntax
-  receiptsOnly: false,    // "Likely receipts" instead of "All mail"
+  receiptsOnly: true,     // "Likely receipts" (the default) instead of "All mail"
   key: "",                // what the list was loaded for (account, search, filter)
   list: null,             // {account, emails[], next}
   loading: false,
@@ -137,7 +137,7 @@ async function openEmail(id, account = "") {
     const d = mail.draft;
     em.forms[id] ||= { supplier: d.supplier || "", date: d.date || "", total: d.total == null ? "" : d.total.toFixed(2),
       currency: d.currency || "GBP", vat: d.vat == null ? "" : d.vat.toFixed(2), vat_choice: vatRateOf(d.vat, d.total),
-      paid_by: "business" };
+      paid_by: "business", document: defaultDocument(mail) };
     const kept = Object.keys(em.mails);
     for (const old of kept.slice(0, Math.max(0, kept.length - MAILS_KEPT))) if (old !== em.sel) delete em.mails[old];
   } catch (err) {
@@ -206,7 +206,7 @@ async function submitDialog() {
     await api(`/api/emails/${encodeURIComponent(id)}/add`, { method: "POST",
       body: { account: mail.account, supplier: f.supplier, date: f.date, total: f.total, currency: f.currency,
               vat: f.vat, vat_choice: f.vat_choice, paid_by: f.paid_by,
-              payment_url: em.forPayment?.id === id ? em.forPayment.url : "" } });
+              payment_url: em.forPayment?.id === id ? em.forPayment.url : "", document: f.document || "" } });
   } catch (err) {
     em.dialogError = err.message;
     return render();
@@ -432,16 +432,30 @@ function dialogHtml(mail) {
       </div>`;
 }
 
-/** Beside the form: what becomes the receipt. The attached PDF, or the
- * email itself (it's printed to a PDF), in the same sandbox as the view.
- * `usePdf` false: the email even when there's a PDF (a recurring receipt
- * set to use the email). */
-function previewHtml(mail, usePdf = true) {
-  const pdf = usePdf ? mail.draft?.pdf : null;
-  const head = `<div class="e-dlabel">Receipt</div><div class="e-doc-name">${pdf ? `${PAPERCLIP} ${esc(pdf)}` : "This email, saved as a PDF"}</div>`;
-  const params = new URLSearchParams({ account: mail.account, t: TOKEN });
-  const body = pdf
-    ? `<iframe class="e-pdf" title="${esc(pdf)}" src="/api/emails/${encodeURIComponent(mail.id)}/pdf?${params}"></iframe>`
+/** What becomes the receipt unless you pick: its first PDF, else the email. */
+function defaultDocument(mail) {
+  const i = (mail.attachments || []).findIndex((a) => a.receipt && /pdf/i.test(a.content_type + a.filename));
+  return i >= 0 ? `att:${i}` : "email";
+}
+
+/** Beside the form: what becomes the receipt, in the same sandbox as the
+ * view. `choice`: "email" (it's printed to a PDF) or "att:N" (that PDF or
+ * picture); null for the default. `picker`: a menu to choose it (Convert to
+ * receipt), when the email carries anything else that could be it. */
+function previewHtml(mail, choice = null, picker = false) {
+  const doc = choice || defaultDocument(mail);
+  const i = doc.startsWith("att:") ? Number(doc.slice(4)) : -1;
+  const att = i >= 0 ? (mail.attachments || [])[i] : null;
+  const options = (mail.attachments || []).map((a, n) => (a.receipt ? [`att:${n}`, `${a.filename}`] : null)).filter(Boolean);
+  const name = att ? `${PAPERCLIP} ${esc(att.filename)}` : "This email, saved as a PDF";
+  const head = picker && options.length
+    ? `<div class="e-dlabel">Receipt</div><select class="e-docpick" data-action="e-document" aria-label="What becomes the receipt">
+        <option value="email" ${doc === "email" ? "selected" : ""}>This email, saved as a PDF</option>
+        ${options.map(([v, l]) => `<option value="${v}" ${doc === v ? "selected" : ""}>📎 ${esc(l)}</option>`).join("")}</select>`
+    : `<div class="e-dlabel">Receipt</div><div class="e-doc-name">${name}</div>`;
+  const params = new URLSearchParams({ account: mail.account, t: TOKEN, ...(att ? { index: String(i) } : {}) });
+  const body = att
+    ? `<iframe class="e-pdf" title="${esc(att.filename)}" src="/api/emails/${encodeURIComponent(mail.id)}/pdf?${params}"></iframe>`
     : emailFrame(mail).replace('class="doc e-frame"', 'class="e-pdf"');
   return `<div class="e-dphead">${head}</div>${body}`;
 }
@@ -461,7 +475,7 @@ function drawEmailDialog() {
         aria-labelledby="e-dialog-title"><div class="e-dform"></div><div class="e-dpreview"></div></section></div>`;
     em.drawn.dialog = em.drawn.preview = undefined;
   }
-  const preview = previewHtml(mail);
+  const preview = previewHtml(mail, em.forms[mail.id]?.document, true);
   if (em.drawn.preview !== preview) {
     host.querySelector(".e-dpreview").innerHTML = preview;
     em.drawn.preview = preview;
@@ -590,6 +604,9 @@ document.addEventListener("change", (e) => {
   const a = e.target.dataset.action;
   if (a === "e-currency" && em.forms[em.dialog]) {
     em.forms[em.dialog].currency = e.target.value;
+    render();
+  } else if (a === "e-document" && em.forms[em.dialog]) {
+    em.forms[em.dialog].document = e.target.value;
     render();
   } else if (a === "e-vat-choice" && em.forms[em.dialog]) {
     em.forms[em.dialog].vat_choice = e.target.value;
