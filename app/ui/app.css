@@ -478,10 +478,8 @@ legend { font-size: 12px; font-weight: 600; margin-bottom: 4px; padding: 0; }
 .m-opt .diff.cur { color: var(--muted); }
 .m-opt .btn.ghost { background: none; border-color: transparent; color: var(--muted); cursor: default; }
 .m-opt .amt { font-variant-numeric: tabular-nums; font-weight: 500; }
-.m-gbp { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
-.m-gbp input, .m-kv select, .m-inspector .edit-input { height: 28px; border: 1px solid var(--line); border-radius: 6px; padding: 0 8px;
+.m-kv select, .m-inspector .edit-input { height: 28px; border: 1px solid var(--line); border-radius: 6px; padding: 0 8px;
   background: var(--bg); color: var(--ink); font: inherit; }
-.m-gbp input { width: 120px; }
 
 .m-card { border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
 .m-card-head { display: flex; align-items: center; justify-content: space-between; font-size: 11px; font-weight: 600;
@@ -679,9 +677,10 @@ img.doc, .doc img, .m-doc img { -webkit-user-drag: none; user-select: none; }
 
 /* currency picker */
 .cur { position: relative; flex: 0 0 auto; }
-.cur-btn { height: 28px; min-width: 76px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg);
-  color: var(--ink); font: inherit; font-weight: 500; cursor: pointer; text-align: left; }
-.cur-btn.empty { color: var(--warn); }
+.cur-btn { display: inline-flex; align-items: center; justify-content: space-between; height: 28px; min-width: 76px; padding: 0 10px;
+  border: 1px solid var(--line); border-radius: 6px; background: var(--bg);
+  color: var(--ink); font: inherit; font-weight: 500; cursor: pointer; white-space: nowrap; }
+.cur-btn.unset { color: var(--warn); }   /* not .empty: that is the empty-page style */
 .cur-btn span { color: var(--muted); font-size: 10px; margin-left: 4px; }
 .cur-pop { position: absolute; right: 0; top: calc(100% + 4px); z-index: 30; width: 250px; background: var(--bg); border: 1px solid var(--line);
   border-radius: 10px; box-shadow: var(--shadow); padding: 6px; }

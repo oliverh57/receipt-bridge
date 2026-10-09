@@ -291,7 +291,7 @@ function currencyHtml(r) {
       data-id="${r.id}" data-code="${c}" data-search="${esc(`${c} ${name} ${sym || ""}`.toLowerCase())}">
       <b>${c}</b><span>${esc(name)}</span>${c === code ? ICON.tick : ""}</button>`).join("");
   return `<span class="cur">
-      <button type="button" class="cur-btn ${code ? "" : "empty"}" data-action="cur-open" data-id="${r.id}" aria-haspopup="listbox"
+      <button type="button" class="cur-btn ${code ? "" : "unset"}" data-action="cur-open" data-id="${r.id}" aria-haspopup="listbox"
         aria-expanded="${open}">${esc(code || "Currency")} <span aria-hidden="true">▾</span></button>
       ${open ? `<div class="cur-pop" role="listbox" aria-label="Currency"><input class="cur-q" type="search" placeholder="Search: euro, yen, USD…"
           data-action="cur-search" autocomplete="off"><div class="cur-list">${options}</div></div>` : ""}
@@ -762,17 +762,12 @@ function expenseCardHtml(r) {
   return `<div class="m-card"><div class="m-card-head"><span>Expense claim</span></div>${willFileHtml(r, "Expense claim")}</div>`;
 }
 
-/** Above the claim: a business payment that matches exactly, and the £
- * charged for an expense in another currency. */
+/** Above the claim: a business payment that matches exactly. (An expense
+ * in another currency is converted by FreeAgent.) */
 function expenseExtrasHtml(r) {
-  const business = r.match?.status === "expense_but_found"
+  return r.match?.status === "expense_but_found"
     ? `<div class="m-issue"><div class="t">Paid from ${esc(accountName())}?</div><div class="b">A ${esc(amountOf(r))} business payment matches exactly.</div>
         <div class="m-iss-ctl"><button class="btn small" data-action="m-paid" data-id="${r.id}" data-to="business">Yes: paid from ${esc(accountName())}</button></div></div>` : "";
-  const gbp = r.currency && r.currency !== "GBP" ? `<div class="m-card"><div class="m-card-head"><span>Paid in ${esc(CURRENCY_WORDS[r.currency] || r.currency)}</span></div>
-      <label class="m-gbp"><span>£ charged</span><input type="number" step="0.01" min="0" placeholder="Optional"
-        data-action="set-field" data-field="native_gross" data-id="${r.id}" value="${esc(r.native_gross ?? "")}"></label>
-      <div class="m-note">From your card statement. Leave blank to let FreeAgent convert it.</div></div>` : "";
-  return business + gbp;
 }
 
 function claimPanelHtml(r) {

@@ -76,6 +76,7 @@ EMAIL_HINT_SEARCHES = 25
 # The Emails view: emails per page of the list, and whole emails kept in
 # memory so opening one again (or adding it) doesn't download it twice.
 EMAIL_PAGE = 50
+EMAIL_RECEIPT_PAGES = 4          # "Likely receipts": Gmail pages read for one page of the list
 EMAILS_CACHED = 12
 # Category suggestions asked of the on-device model per run.
 CATEGORY_GUESSES = 20
@@ -2506,9 +2507,21 @@ class ReceiptService:
 
         chosen, client = self._mail_client(account)
         query = email_inbox.list_query(search, receipts_only)
-        stubs, next_token = client.search_page(query, page_token, EMAIL_PAGE)
-        rows = [email_inbox.list_row(h, chosen.email) for h in client.headers([s["id"] for s in stubs])] \
-            if stubs else []
+        rows: list[dict[str, Any]] = []
+        next_token, pages = page_token, 0
+        while True:
+            stubs, next_token = client.search_page(query, next_token, EMAIL_PAGE)
+            page = [email_inbox.list_row(h, chosen.email) for h in client.headers([s["id"] for s in stubs])] \
+                if stubs else []
+            if receipts_only:
+                # Gmail's word search finds "receipt" in "receipt-bridge" and
+                # anywhere in a body: only what the app also judges a receipt
+                page = [r for r in page if r["receipt"]]
+            rows += page
+            pages += 1
+            # a thinned-out page reads on, so the list isn't nearly empty
+            if not receipts_only or not next_token or len(rows) >= EMAIL_PAGE // 2 or pages >= EMAIL_RECEIPT_PAGES:
+                break
         known = self.emails_in_files([r["id"] for r in rows])
         for row in rows:
             row["in_files"] = known.get(row["id"])
