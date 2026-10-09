@@ -39,7 +39,7 @@ const state = {
   suppliers: null,
   shownOutcome: null,
   previewId: null,        // receipt whose PDF is currently in the iframe
-  settingsTab: "freeagent",  // Settings section: freeagent | email | general
+  settingsTab: "general",    // Settings section: general | freeagent | email | about
   pollTimer: null,
 };
 
@@ -375,7 +375,7 @@ function renderStatus() {
 
 function renderBanner() {
   // FreeAgent is what the app is for; email is a separate, optional tool
-  // (Settings → Email receipts), so it only speaks up when a connected
+  // (Settings → Email), so it only speaks up when a connected
   // account needs reconnecting.
   const { needs_attention, connecting } = state.snap;
   const fa = state.snap.freeagent || {};
@@ -1075,14 +1075,18 @@ function renderSettings() {
     email: s.needs_attention.length > 0,
     general: !!s.update?.available,
   };
-  const tab = SETTINGS_TABS.some(([key]) => key === state.settingsTab) ? state.settingsTab : "freeagent";
+  const tab = SETTINGS_TABS.some(([key]) => key === state.settingsTab) ? state.settingsTab : "general";
   const [, title, intro] = SETTINGS_TABS.find(([key]) => key === tab);
 
   $("#content").innerHTML = `<div class="settings" data-tab="${tab}">
     <nav class="settings-nav" aria-label="Settings sections">
       <div class="settings-title">Settings</div>
-      ${SETTINGS_TABS.map(([key, label]) => `<button class="nav-item ${key === tab ? "active" : ""}" data-action="settings-tab" data-tab="${key}"
-        ${key === tab ? 'aria-current="page"' : ""}><span>${label}</span>${attention[key] ? `<span class="dot"></span>` : ""}</button>`).join("")}
+      ${SETTINGS_TABS.map(([key, label, , group], i) => {
+        const starts = group && group !== (SETTINGS_TABS[i - 1] || [])[3];
+        const before = !starts ? "" : group === "foot" ? `<div class="nav-sep" role="separator"></div>` : `<div class="settings-group">${group}</div>`;
+        return `${before}<button class="nav-item ${key === tab ? "active" : ""}" data-action="settings-tab" data-tab="${key}"
+          ${key === tab ? 'aria-current="page"' : ""}><span>${label}</span>${attention[key] ? `<span class="dot"></span>` : ""}</button>`;
+      }).join("")}
     </nav>
     <div class="settings-inner">
       <h1>${title}</h1>
@@ -1091,11 +1095,13 @@ function renderSettings() {
     </div></div>`;
 }
 
+// [key, label, intro, group]: General first, then what Receipt Bridge connects
+// to under "Connections", then About on its own at the foot.
 const SETTINGS_TABS = [
-  ["freeagent", "FreeAgent", "Where receipts are matched and filed."],
-  ["email", "Email receipts", "Optional. Finds receipts from these suppliers in Gmail and adds them to Files."],
-  ["general", "General", "Startup, appearance, notifications, receipt inbox, archive and updates."],
-  ["about", "About", "Version, licence, terms, and the software Receipt Bridge is built on."],
+  ["general", "General", "Startup, appearance, notifications, receipt inbox, archive and updates.", ""],
+  ["freeagent", "FreeAgent", "Where receipts are matched and filed.", "Connections"],
+  ["email", "Email", "Optional. Finds receipts from these suppliers in Gmail and adds them to Files.", "Connections"],
+  ["about", "About", "Version, licence, terms, and the software Receipt Bridge is built on.", "foot"],
 ];
 
 // ---- Settings → About ----------------------------------------------------

@@ -224,7 +224,7 @@ def process_email(
         report.note(f"[{watcher.id}] {reference} already staged, skipping")
         return None
 
-    # the rule says who pays this supplier (Settings → Email receipts)
+    # the rule says who pays this supplier (Settings → Email)
     paid_by = "personal" if watcher.paid_with == "personal" else None
     if watcher.paid_with.startswith("https://"):
         paid_by = "business"

@@ -222,6 +222,7 @@ button { font: inherit; color: inherit; }
 /* the sections, a sub-menu beside the page; it stays put while the page scrolls */
 .settings-nav { position: sticky; top: 0; flex: 0 0 160px; display: flex; flex-direction: column; gap: 2px; }
 .settings-title { padding: 4px 10px 10px; color: var(--muted); font-size: 12px; font-weight: 600; }
+.settings-group { padding: 14px 10px 4px; color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
 .settings-inner { flex: 1 1 auto; min-width: 0; max-width: 680px; }
 .settings h1 { margin: 0 0 4px; font-size: 20px; }
 .settings-intro { margin: 0 0 20px; color: var(--muted); max-width: 46em; line-height: 1.45; }
