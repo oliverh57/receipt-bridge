@@ -9,10 +9,12 @@ import json
 import sys
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+import app.filer as filer  # noqa: E402
 from app.config import Config  # noqa: E402
 from app.service import ReceiptService  # noqa: E402
 
@@ -116,9 +118,28 @@ def test_an_expense_is_checked_in_files_like_any_file() -> None:
         assert service.review_counts()["files"] == 1 and "expenses" not in service.review_counts()
 
 
+def test_requests_kept_by_the_old_dry_run_are_forgotten() -> None:
+    """Dry run is gone: what it prepared reads as not filed yet."""
+    service, rid, tmp = make()
+    with tmp:
+        filed = service.db.insert_receipt({"watcher_id": "photo", "source": "photo", "source_id": "sha256:def"})
+        service.db.update_receipt(rid, {"freeagent_json": json.dumps({"state": "dry_run", "body": {}})})
+        service.db.update_receipt(filed, {"freeagent_json": json.dumps(
+            {"state": "filed", "url": "e/1", "update": {"state": "dry_run", "parts": []}})})
+        service.db.set_state("explained:t/1", json.dumps({"state": "dry_run", "body": {}}))
+        service.db.set_state("explained:t/2", json.dumps({"state": "filed", "url": "e/2"}))
+        service.db.set_state("freeagent:dry_run", "0")
+        service.db.delete_state("tidied:dry_run")
+        again = ReceiptService(service.config)
+        assert again.db.get_receipt(rid)["freeagent_json"] is None
+        assert json.loads(again.db.get_receipt(filed)["freeagent_json"]) == {"state": "filed", "url": "e/1"}
+        assert again.db.get_state("explained:t/1") is None and again.db.get_state("explained:t/2")
+        assert again.db.get_state("freeagent:dry_run") is None
+
+
 def test_switching_freeagent_company_forgets_the_old_ones_links() -> None:
     """Sandbox → your real books: nothing that points into the sandbox
-    (categories, chosen payments, re-billing, dry runs) is kept."""
+    (categories, chosen payments, re-billing) is kept."""
     service, rid, tmp = make()
     with tmp:
         service.db.update_receipt(rid, {"category": CATEGORY, "transaction_url": "https://fa.test/v2/bank_transactions/1",
@@ -137,8 +158,7 @@ def test_switching_freeagent_company_forgets_the_old_ones_links() -> None:
 
 def test_no_receipt_needed_explains_the_payment_with_its_own_settings() -> None:
     """A payment's category, VAT and re-billing are set on its Statement
-    line; "No receipt needed" builds the explanation from them (dry run
-    here: nothing is sent)."""
+    line; "No receipt needed" builds the explanation from them."""
     service, rid, tmp = make()
     with tmp:
         acct, url = "https://fa.test/v2/bank_accounts/1", "https://fa.test/v2/bank_transactions/9"
@@ -156,21 +176,27 @@ def test_no_receipt_needed_explains_the_payment_with_its_own_settings() -> None:
             pass
         service.set_payment_settings(url, {"category": CATEGORY, "vat_rate": "0.0",
                                            "rebill": {"project": "https://fa.test/v2/projects/1", "type": "cost"}})
-        service._run_explain_payment(url, None)                       # dry run is on by default
-        state = json.loads(service.db.get_state(f"explained:{url}"))
-        assert state["state"] == "dry_run"
-        assert state["body"] == {"bank_transaction": url, "dated_on": "2026-03-04", "gross_value": "-3.30",
+        sent = []
+        service._freeagent = lambda: SimpleNamespace(connected=True)
+        service._run_freeagent_sync = lambda: None
+        original = filer.explain_without_receipt
+        filer.explain_without_receipt = lambda c, u, body: sent.append(body) or "e/new"
+        try:
+            service._run_explain_payment(url, None)
+        finally:
+            filer.explain_without_receipt = original
+        assert json.loads(service.db.get_state(f"explained:{url}"))["state"] == "filed"
+        assert sent == [{"bank_transaction": url, "dated_on": "2026-03-04", "gross_value": "-3.30",
                                  "category": CATEGORY, "description": "EXAMPLE TRAVEL (no receipt)",
                                  "sales_tax_rate": "0.0", "project": "https://fa.test/v2/projects/1",
-                                 "rebill_type": "cost"}
+                                 "rebill_type": "cost"}]
         row = next(r for r in service.statement(acct, "2026-03")["rows"] if r["url"] == url)
-        assert row["status"] == "missing", "a dry run doesn't mark it"
-        assert row["settings"]["category"] == CATEGORY and row["explained_here"]["state"] == "dry_run"
+        assert row["settings"]["category"] == CATEGORY and row["explained_here"]["state"] == "filed"
 
 
 def test_a_payment_freeagent_explained_starts_from_its_explanation() -> None:
     """The Statement shows FreeAgent's own category, VAT and re-billing; only
-    what you change is sent (dry run here), and "Keep FreeAgent's" forgets it."""
+    what you change is sent, and "Keep FreeAgent's" forgets it."""
     service, rid, tmp = make()
     with tmp:
         acct, url = "https://fa.test/v2/bank_accounts/1", "https://fa.test/v2/bank_transactions/7"
@@ -193,8 +219,17 @@ def test_a_payment_freeagent_explained_starts_from_its_explanation() -> None:
         assert row()["freeagent"]["changes"] == {"category": CATEGORY, "sales_tax_rate": "0.0"}
         service.set_payment_settings(url, {"rebill": None})                  # stop re-billing
         assert row()["freeagent"]["changes"]["project"] is None
-        service._run_update_payment_explanation(url)                         # dry run
-        assert json.loads(service.db.get_state(f"explained:{url}"))["body"]["category"] == CATEGORY
+        sent = []
+        service._freeagent = lambda: SimpleNamespace(connected=True)
+        service._run_freeagent_sync = lambda: None
+        original = filer.update_existing_explanation
+        filer.update_existing_explanation = lambda c, u, exp, changes: sent.append(changes) or {}
+        try:
+            service._run_update_payment_explanation(url)
+        finally:
+            filer.update_existing_explanation = original
+        assert sent[0]["category"] == CATEGORY and sent[0]["project"] is None
+        service.set_payment_settings(url, {"category": CATEGORY})
         service.reset_payment_settings(url)
         assert row()["freeagent"]["changes"] == {}
 
@@ -315,7 +350,7 @@ def by_id(service: ReceiptService) -> dict[int, dict]:
 def test_only_suppliers_you_approved_link_themselves() -> None:
     """No auto-linking unless you ticked "Link {supplier} automatically from
     now on"; filing one by hand never turns it on. Then: an exact named
-    match, nothing to check, dry run off."""
+    match, nothing to check."""
     service, _flagged, tmp = make()
     with tmp:
         connected(service, Path(tmp.name))
@@ -323,7 +358,6 @@ def test_only_suppliers_you_approved_link_themselves() -> None:
         cafe = email_receipt(service, 2, "Cafe", "2026-03-05", 9.0)
         for rid in (rail, cafe):
             service.set_receipt_fields(rid, {"category": CATEGORY})
-        service.set_freeagent_dry_run(False)
         item = by_id(service)[rail]
         assert item["group"] == "ready" and item["stage"] == "link" and item["auto_file"] is False
         assert service.auto_link_candidates() == [], "nobody approved these suppliers"
@@ -333,8 +367,6 @@ def test_only_suppliers_you_approved_link_themselves() -> None:
         assert sorted(service.auto_link_candidates()) == sorted([rail, cafe])
         service.set_receipt_fields(cafe, {"auto_file": False})
         assert service.auto_link_candidates() == [rail]
-        service.set_freeagent_dry_run(True)
-        assert service.auto_link_candidates() == [], "dry run: nothing links itself"
         assert item["payment"]["chips"] == ["Amount", "Name", "Date"]
         assert item["will_file"] == {"type": "Bank explanation", "category": "Computer Software",
                                      "vat": "£0 (none shown)", "attachment": "Supplier PDF"}
@@ -584,8 +616,7 @@ def test_approve_replaces_a_guess_with_an_approved_explanation() -> None:
 
 def test_approve_sends_your_changes_to_a_payment_already_approved() -> None:
     """One button: Approve on an approved payment you changed updates
-    FreeAgent's explanation, live even with dry run on."""
-    import app.filer as filer
+    FreeAgent's explanation."""
     service, _flagged, tmp = make()
     with tmp:
         connected(service, Path(tmp.name))
@@ -640,7 +671,6 @@ def test_link_on_a_guess_approves_it_too() -> None:
     with tmp:
         connected(service, Path(tmp.name))
         client = _guessed(service)
-        service.set_freeagent_dry_run(False)
         rid = _toolco_receipt(service, Path(tmp.name))
         assert by_id(service)[rid]["payment"]["explained"] is False, "a guess isn't attach-only"
         service._run_file([rid])

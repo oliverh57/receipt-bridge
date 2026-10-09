@@ -145,6 +145,7 @@ class ReceiptService:
         self.db = Database(config.db_path)
         self.accounts = AccountStore(config)
         adopt_legacy_scan_state(self.db, self.accounts)
+        self._forget_dry_runs()
 
         # Posts system notifications. The macOS shell supplies one (with a
         # `status` and `send`); the CLI and tests run without.
@@ -180,6 +181,24 @@ class ReceiptService:
         self.restart: Callable[[], bool] | None = None
 
     # ---- lifecycle ------------------------------------------------------
+
+    def _forget_dry_runs(self) -> None:
+        """Dry run is gone: drop its switch and the requests it kept, so
+        those receipts and payments read as not filed yet."""
+        if self.db.get_state("tidied:dry_run"):
+            return
+        self.db.delete_state("freeagent:dry_run")
+        for key, value in self.db.list_state("explained:").items():
+            if json.loads(value or "{}").get("state") == "dry_run":
+                self.db.delete_state(key)
+        for row in self.db.list_receipts():
+            state = json.loads(row["freeagent_json"] or "{}")
+            if state.get("state") == "dry_run":
+                self.db.update_receipt(row["id"], {"freeagent_json": None})
+            elif (state.get("update") or {}).get("state") == "dry_run":
+                state.pop("update")
+                self.db.update_receipt(row["id"], {"freeagent_json": json.dumps(state)})
+        self.db.set_state("tidied:dry_run", "1")
 
     def start(self) -> None:
         self._backup_database()
@@ -651,11 +670,11 @@ class ReceiptService:
 
         # 4. the database emptied in place (every receipt and setting), then
         # everything else in the data folder but the original photos, the
-        # compiled receipt reader and the log
+        # compiled receipt reader, the bank icons and the log
         self.db.wipe()
         db_name = self.config.db_path.name
         for child in data.iterdir():
-            keep = (child == archive or child in archive.parents or child.name == "bin"
+            keep = (child == archive or child in archive.parents or child.name in ("bin", "bank-logos")
                     or child.name.startswith("app.log") or child.name.startswith(db_name))
             if keep:
                 continue
@@ -690,7 +709,7 @@ class ReceiptService:
         """Switching company (sandbox → your real books, say): forget
         everything that points into the old one, so nothing made in one is
         sent to the other. Receipts stay; their category, chosen payment,
-        re-billing, bank account and dry runs are cleared. Filed ones keep
+        re-billing and bank account are cleared. Filed ones keep
         their record."""
         before = self.db.get_state("freeagent:company")
         if before == company:
@@ -852,7 +871,6 @@ class ReceiptService:
             "projects": reference.get("projects", []),
             "last_sync": self.db.get_state("freeagent:last_sync"),
             "transactions": len(self.db.bank_transactions(sorted(chosen))),
-            "dry_run": self.freeagent_dry_run,
             # FreeAgent's website for this company ("View in FreeAgent"). Deep
             # links to one explanation aren't documented, so this is the home page.
             "web": (f"https://{reference['subdomain']}."
@@ -862,16 +880,6 @@ class ReceiptService:
         }
 
     # ---- filing (Phase 3) ----------------------------------------------------
-
-    @property
-    def freeagent_dry_run(self) -> bool:
-        """On until switched off in Settings: requests are built and shown,
-        never sent (PLAN.md §9)."""
-        return self.db.get_state("freeagent:dry_run", "1") == "1"
-
-    def set_freeagent_dry_run(self, on: bool) -> None:
-        self.db.set_state("freeagent:dry_run", "1" if on else "0")
-        self._bump()
 
     @staticmethod
     def _supplier_key(vendor: str | None) -> str:
@@ -1234,8 +1242,8 @@ class ReceiptService:
         """Receipts from suppliers you approved that can link themselves: an
         exact payment (amount, date window, the supplier's name on the
         statement), nothing to check, a category that isn't a guess, paid
-        from the business, dry run off."""
-        if self.freeagent_dry_run or not self._freeagent_connected():
+        from the business."""
+        if not self._freeagent_connected():
             return []
         reference = self._freeagent_reference()
         names = {c["url"]: c["description"] for c in reference.get("categories", [])}
@@ -1299,14 +1307,12 @@ class ReceiptService:
         ids = sorted(set(receipt_ids))
         return self._enqueue(f"file:{','.join(map(str, ids))}", lambda: self._run_file(ids))
 
-    def _run_file(self, ids: list[int], only_single_part: bool = False, live: bool = False) -> None:
-        dry = self.freeagent_dry_run and not live       # live: "Approve" is never a dry run
-        self._set_activity(busy=True, kind="file", label="Dry run" if dry else "Filing to FreeAgent",
-                           started_at=_now(), log=[])
+    def _run_file(self, ids: list[int], only_single_part: bool = False) -> None:
+        self._set_activity(busy=True, kind="file", label="Filing to FreeAgent", started_at=_now(), log=[])
         client = self._freeagent()
         if client is None or not client.connected:
             with self._lock:               # the File all dialog waits for a result
-                self._file_results = {"at": _now(), "dry_run": dry, "results": [],
+                self._file_results = {"at": _now(), "results": [],
                                       "message": "FreeAgent isn't connected: reconnect in Settings, then try again."}
             self._finish("file", False, "Connect FreeAgent first")
             return
@@ -1336,13 +1342,13 @@ class ReceiptService:
                 self._note(f"{row['vendor']}: two VAT rates, left for you to file")
                 continue
             try:
-                if guess and not dry and not plan.problems:
+                if guess and not plan.problems:
                     line = self._replace_guess(
                         client, transaction,
-                        lambda _guess: file_receipt(client, self.db, receipt_id, plan, dry_run=False),
+                        lambda _guess: file_receipt(client, self.db, receipt_id, plan),
                         with_receipt=True).replace("Filed", "Approved and linked", 1)
                 else:
-                    line = file_receipt(client, self.db, receipt_id, plan, dry_run=dry)
+                    line = file_receipt(client, self.db, receipt_id, plan)
                 self._note(line)
                 done += 1
                 results.append({"id": receipt_id, "vendor": row["vendor"], "total": row["total"],
@@ -1362,12 +1368,11 @@ class ReceiptService:
                 if previous.get("state") not in ("filing", "explained"):   # never hide an interrupted filing
                     self.db.update_receipt(receipt_id, {"freeagent_json": json.dumps(
                         {"state": "problem", "message": str(exc), "at": _now()})})
-        if done and not dry:
+        if done:
             self.sync_freeagent()                 # the payments just explained
         with self._lock:
-            self._file_results = {"at": _now(), "dry_run": dry, "results": results}
-        verb = "Dry run for" if dry else "Filed"
-        message = f"{verb} {done} receipt{'s' if done != 1 else ''}"
+            self._file_results = {"at": _now(), "results": results}
+        message = f"Filed {done} receipt{'s' if done != 1 else ''}"
         if failed:
             message += f" · {failed} need attention"
         self._finish("file", not failed, message, found=done)
@@ -1455,9 +1460,7 @@ class ReceiptService:
 
     def _run_update_claim(self, receipt_id: int) -> None:
         from .filer import update_claim
-        dry = self.freeagent_dry_run
-        self._set_activity(busy=True, kind="file", label="Dry run" if dry else "Updating FreeAgent",
-                           started_at=_now(), log=[])
+        self._set_activity(busy=True, kind="file", label="Updating FreeAgent", started_at=_now(), log=[])
         client = self._freeagent()
         if client is None or not client.connected:
             self._finish("file", False, "Connect FreeAgent first")
@@ -1472,7 +1475,7 @@ class ReceiptService:
                         vat_registered=bool(reference.get("vat", {}).get("registered")),
                         vat_treatment=self._vat_treatment(row), rebill=self._rebill(row))
         try:
-            self._finish("file", True, update_claim(client, self.db, receipt_id, plan, dry_run=dry))
+            self._finish("file", True, update_claim(client, self.db, receipt_id, plan))
         except (FilingError, FreeAgentError) as exc:
             self._finish("file", False, f"Not changed: {exc}")
 
@@ -2098,7 +2101,7 @@ class ReceiptService:
     def update_payment_explanation(self, transaction_url: str) -> bool:
         return self._enqueue(f"file:{transaction_url}", lambda: self._run_update_payment_explanation(transaction_url))
 
-    def _run_update_payment_explanation(self, transaction_url: str, live: bool = False) -> None:
+    def _run_update_payment_explanation(self, transaction_url: str) -> None:
         from .filer import FilingError as _FilingError, update_existing_explanation
         t = next((dict(x) for x in self.db.bank_transactions(self._freeagent_accounts()) if x["url"] == transaction_url), None)
         if t is None or self._freeagent_explanation(t) is None:
@@ -2107,11 +2110,6 @@ class ReceiptService:
         changes = self._explanation_changes(t, self.payment_settings(transaction_url))
         if not changes:
             self._finish("file", True, "Nothing to change")
-            return
-        if self.freeagent_dry_run and not live:
-            self.db.set_state(f"explained:{transaction_url}", json.dumps(
-                {"state": "dry_run", "kind": "update", "body": changes, "at": _now()}))
-            self._finish("file", True, "Dry run: the change was prepared, nothing sent")
             return
         client = self._freeagent()
         if client is None or not client.connected:
@@ -2156,8 +2154,7 @@ class ReceiptService:
 
     def approve_payment(self, transaction_url: str, receipt_id: int | None = None) -> bool:
         """"Approve": the payment explained and approved in FreeAgent, with
-        its receipt attached when there is one. Always sent, never a dry run
-        (your choice, 2026-10-07)."""
+        its receipt attached when there is one."""
         return self._enqueue(f"file:{transaction_url}", lambda: self._run_approve(transaction_url, receipt_id))
 
     def _run_approve(self, transaction_url: str, receipt_id: int | None) -> None:
@@ -2180,15 +2177,15 @@ class ReceiptService:
                     self._finish("file", False, f"Not approved: {exc}")
                     return
                 self._run_freeagent_sync()
-            self._run_file([receipt_id], live=True)      # replaces a guess (see _replace_guess)
+            self._run_file([receipt_id])      # replaces a guess (see _replace_guess)
             return
         if fa is None:
-            self._run_explain_payment(transaction_url, None, live=True)
+            self._run_explain_payment(transaction_url, None)
             return
         if not fa["guess"]:
             # already approved: Approve sends what you changed, if anything
             if self._explanation_changes(t, self.payment_settings(transaction_url)):
-                self._run_update_payment_explanation(transaction_url, live=True)
+                self._run_update_payment_explanation(transaction_url)
             else:
                 self._finish("file", True, "Already approved in FreeAgent")
             return
@@ -2275,7 +2272,7 @@ class ReceiptService:
     def explain_payment(self, transaction_url: str, reason: str | None) -> bool:
         return self._enqueue(f"file:{transaction_url}", lambda: self._run_explain_payment(transaction_url, reason))
 
-    def _run_explain_payment(self, transaction_url: str, reason: str | None, live: bool = False) -> None:
+    def _run_explain_payment(self, transaction_url: str, reason: str | None) -> None:
         from .filer import FilingError as _FilingError, explain_without_receipt
         t = next((dict(x) for x in self.db.bank_transactions(self._freeagent_accounts()) if x["url"] == transaction_url), None)
         if t is None:
@@ -2284,10 +2281,6 @@ class ReceiptService:
         body, problems = self._payment_explanation(t, self.payment_settings(transaction_url), reason)
         if problems:
             self._finish("file", False, "; ".join(problems))
-            return
-        if self.freeagent_dry_run and not live:
-            self.db.set_state(f"explained:{transaction_url}", json.dumps({"state": "dry_run", "body": body, "at": _now()}))
-            self._finish("file", True, "Dry run: the explanation was prepared, nothing sent")
             return
         client = self._freeagent()
         if client is None or not client.connected:

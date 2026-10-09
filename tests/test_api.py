@@ -612,7 +612,7 @@ def test_reset_app_goes_back_to_a_fresh_install_but_keeps_original_photos() -> N
         (base / "freeagent_credentials.json").write_text("{}")
         (data / "accounts").mkdir(exist_ok=True)
         (data / "accounts" / "me@example.test.json").write_text("{}")
-        for keep in ("photos/2026/receipt.jpg", "bin/receipt-reader", "app.log"):
+        for keep in ("photos/2026/receipt.jpg", "bin/receipt-reader", "bank-logos/lloyds.png", "app.log"):
             (data / keep).parent.mkdir(parents=True, exist_ok=True)
             (data / keep).write_text("x")
         client, token = _client(service)
@@ -624,7 +624,7 @@ def test_reset_app_goes_back_to_a_fresh_install_but_keeps_original_photos() -> N
         assert not (base / "credentials.json").exists() and not (base / "freeagent_credentials.json").exists()
         assert not (data / "pdfs").exists() and not (data / "accounts").exists()
         assert sorted(p.name for p in rules.iterdir()) == ["_example.yaml", "trainline.yaml"], "only what ships stays"
-        for keep in ("photos/2026/receipt.jpg", "bin/receipt-reader", "app.log"):
+        for keep in ("photos/2026/receipt.jpg", "bin/receipt-reader", "bank-logos/lloyds.png", "app.log"):
             assert (data / keep).exists(), keep
         assert service.snapshot()["outcome"]["message"] == "Receipt Bridge is reset."
 
