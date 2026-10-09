@@ -461,6 +461,14 @@ async function setPaid(r, to) {
     () => api(`/api/receipts/${r.id}/fields`, { method: "POST", body: { paid_by: from } }));
 }
 
+/** "Paid with" for several files at once: the bulk buttons and the
+ * right-click menu. Files already paid that way are left alone. */
+async function setPaidMany(ids, to) {
+  const rows = ids.map(findReceipt).filter((x) => x && savedPaid(x) !== to);
+  for (const x of rows) await api(`/api/receipts/${x.id}/fields`, { method: "POST", body: { paid_by: to } });
+  toast(`${rows.length} file${rows.length === 1 ? "" : "s"}: ${to === "personal" ? "now expenses" : `paid from ${esc(accountName())}`}`);
+}
+
 async function ignoreMany(ids) {
   const rows = ids.map(findReceipt).filter(Boolean);
   if (!rows.length) return;
@@ -469,7 +477,7 @@ async function ignoreMany(ids) {
   m.sel = nextIn(fileRows(fileGroups()).filter((x) => !ids.includes(x.id)), -1);
   state.receipts = (state.receipts || []).filter((x) => !ids.includes(x.id));
   render();
-  undoToast(`Ignored ${rows.length} files`,
+  undoToast(`Ignored ${rows.length} file${rows.length === 1 ? "" : "s"}`,
     () => api("/api/receipts/status", { method: "POST", body: { ids: rows.map((x) => x.id), status: "pending" } }));
 }
 
@@ -1422,13 +1430,7 @@ document.addEventListener("click", async (e) => {
     }
     case "m-bulk-clear": m.multi = []; return render();
     case "m-bulk-ignore": return act(() => ignoreMany(m.multi));
-    case "m-bulk-paid": {
-      const rows = m.multi.map(findReceipt).filter((x) => x && savedPaid(x) !== target.dataset.to);
-      return act(async () => {
-        for (const x of rows) await api(`/api/receipts/${x.id}/fields`, { method: "POST", body: { paid_by: target.dataset.to } });
-        toast(`${rows.length} file${rows.length === 1 ? "" : "s"}: ${target.dataset.to === "personal" ? "now expenses" : `paid from ${esc(accountName())}`}`);
-      });
-    }
+    case "m-bulk-paid": return act(() => setPaidMany(m.multi, target.dataset.to));
     case "m-toggle": m.open[target.dataset.group] = !m.open[target.dataset.group]; return render();
     case "m-add":
       return act(async () => {
@@ -1672,6 +1674,74 @@ document.addEventListener("keydown", (e) => {
 // A picker left focused would take E or ⌫ as typing and silently change the
 // category. In these views letters are shortcuts: the picker lets go of
 // focus (arrow keys and the mouse still choose).
+// ---- right-click menu on Files ----------------------------------------------------
+// Ignore, or move to Expense / Bank. Right-click inside a selection (shift-
+// or ⌘-click) acts on all of it; anywhere else, on that file, which is
+// selected, as in Finder.
+
+const ctx = { ids: [] };
+
+function closeContextMenu() { document.querySelector(".ctx-menu")?.remove(); }
+
+document.addEventListener("contextmenu", (e) => {
+  const row = state.view === "pending" ? e.target.closest('.m-row[data-action="m-pick"]') : null;
+  closeContextMenu();
+  if (!row) return;
+  e.preventDefault();
+  const id = Number(row.dataset.id);
+  if (!(m.multi.length > 1 && m.multi.includes(id))) { m.multi = []; m.sel = id; m.anchor = id; render(); }
+  ctx.ids = m.multi.length > 1 ? [...m.multi] : [id];
+  const rows = ctx.ids.map(findReceipt).filter(Boolean);
+  if (!rows.length) return;
+  const n = rows.length;
+  const all = (to) => rows.every((r) => savedPaid(r) === to);
+  const bank = accountName();
+  const menu = document.createElement("div");
+  menu.className = "ctx-menu";
+  menu.setAttribute("role", "menu");
+  menu.innerHTML = `<div class="ctx-head">${n === 1 ? esc(rows[0].supplier || "Unknown supplier") : `${n} files`}</div>
+    <button type="button" role="menuitem" data-action="ctx-paid" data-to="personal" ${all("personal") ? "disabled" : ""}>
+      <span class="badge personal">${ICON.cash}</span>Move to Expense</button>
+    <button type="button" role="menuitem" data-action="ctx-paid" data-to="business" ${all("business") ? "disabled" : ""}>
+      ${bankBadge(bank)}Move to ${esc(bank)}</button>
+    <div class="ctx-sep" role="separator"></div>
+    <button type="button" role="menuitem" class="danger" data-action="ctx-ignore">Ignore${n > 1 ? ` ${n} files` : ""}<span class="grow"></span>${kbd("⌫")}</button>`;
+  document.body.appendChild(menu);
+  // at the pointer, kept inside the window
+  const box = menu.getBoundingClientRect();
+  menu.style.left = `${Math.max(4, Math.min(e.clientX, innerWidth - box.width - 4))}px`;
+  menu.style.top = `${Math.max(4, Math.min(e.clientY, innerHeight - box.height - 4))}px`;
+  menu.querySelector("button:not([disabled])")?.focus();
+});
+
+document.addEventListener("mousedown", (e) => { if (!e.target.closest(".ctx-menu")) closeContextMenu(); }, true);
+window.addEventListener("blur", closeContextMenu);
+window.addEventListener("resize", closeContextMenu);
+document.addEventListener("scroll", closeContextMenu, true);
+
+document.addEventListener("click", (e) => {
+  const item = e.target.closest(".ctx-menu button[data-action]");
+  if (!item || item.disabled) return;
+  const ids = ctx.ids;
+  closeContextMenu();
+  if (item.dataset.action === "ctx-ignore") act(() => ignoreMany(ids));
+  else act(() => setPaidMany(ids, item.dataset.to));
+});
+
+// The menu has the keyboard while it's open: ↑↓ between items, ⏎ picks, Esc closes.
+document.addEventListener("keydown", (e) => {
+  const menu = document.querySelector(".ctx-menu");
+  if (!menu) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  const items = [...menu.querySelectorAll("button:not([disabled])")];
+  const i = items.indexOf(document.activeElement);
+  if (e.key === "Escape") closeContextMenu();
+  else if (e.key === "ArrowDown") items[(i + 1) % items.length]?.focus();
+  else if (e.key === "ArrowUp") items[(i - 1 + items.length) % items.length]?.focus();
+  else if (e.key === "Enter" || e.key === " ") document.activeElement?.click();
+}, true);
+
 const KEY_VIEWS = ["pending", "expenses", "statement"];
 document.addEventListener("keydown", (e) => {
   const t = e.target;

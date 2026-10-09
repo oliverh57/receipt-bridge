@@ -973,3 +973,19 @@ img.doc, .doc img, .m-doc img { -webkit-user-drag: none; user-select: none; }
 .e-other:hover { background: var(--hover); }
 .e-other span { color: var(--muted); }
 @media (max-width: 1040px) { .e-col { flex-basis: 300px; } }
+
+/* right-click menu on Files (match.js) */
+.ctx-menu { position: fixed; z-index: 60; min-width: 230px; max-width: 320px; padding: 4px; background: var(--bg);
+  border: 1px solid var(--line); border-radius: 9px; box-shadow: var(--shadow); }
+.ctx-head { padding: 6px 10px 4px; font-size: 11px; font-weight: 600; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ctx-menu button { display: flex; align-items: center; gap: 9px; width: 100%; padding: 6px 10px; border: 0; border-radius: 6px;
+  background: none; color: var(--ink); font: inherit; text-align: left; cursor: default; }
+.ctx-menu button:hover:not(:disabled), .ctx-menu button:focus-visible { background: var(--selected); outline: none; }
+.ctx-menu button:disabled { opacity: 0.45; }
+.ctx-menu button.danger { color: var(--bad); }
+.ctx-menu .grow { flex: 1; }
+.ctx-menu .badge { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 20px; height: 20px;
+  border-radius: 5px; font-size: 10px; font-weight: 700; overflow: hidden; }
+.ctx-menu .badge.personal { background: #5b3cc4; color: #fff; }
+.ctx-menu .badge img { width: 100%; height: 100%; }
+.ctx-sep { height: 1px; margin: 4px 6px; background: var(--line); }
