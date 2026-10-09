@@ -30,6 +30,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -225,6 +226,13 @@ def install(download: str, expected: str, repo: str = DEFAULT_REPO, project: Pat
     return _changes(found, names)
 
 
+# git's words for "GitHub couldn't be reached": no network, DNS, a timeout.
+# Not an error GitHub itself answered with (403, not found).
+_OFFLINE = re.compile(r"could not resolve host|failed to connect|couldn't connect|connection (?:timed out|refused|reset)|"
+                      r"network is unreachable|operation timed out|resolving timed out", re.IGNORECASE)
+PULL_RETRY_SECONDS = 5      # a Mac just woken often hasn't its Wi-Fi back yet
+
+
 def pull(project: Path = ROOT, log: Any = print) -> dict[str, Any]:
     """Update a git checkout from GitHub: fast-forward only, so it never
     merges, and git refuses rather than overwrite edits not committed yet."""
@@ -234,7 +242,14 @@ def pull(project: Path = ROOT, log: Any = print) -> dict[str, Any]:
     before = git("rev-parse", "HEAD").stdout.strip()
     log("Pulling from GitHub")
     result = git("pull", "--ff-only")
+    if result.returncode != 0 and _OFFLINE.search(result.stderr):
+        log("GitHub couldn't be reached; trying again")
+        time.sleep(PULL_RETRY_SECONDS)
+        result = git("pull", "--ff-only")
     if result.returncode != 0:
+        if _OFFLINE.search(result.stderr):
+            raise UpdateError("Couldn't reach GitHub, so nothing changed. "
+                              "Check the internet connection and try again.")
         why = (result.stderr.strip().splitlines() or ["git pull failed"])[-1]
         raise UpdateError(f"git pull couldn't update this copy, so nothing changed: {why}")
     after = git("rev-parse", "HEAD").stdout.strip()

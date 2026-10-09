@@ -393,6 +393,36 @@ def test_a_git_checkout_behind_github_pulls() -> None:
         service.restart.assert_called_once()
 
 
+def test_pull_says_plainly_when_github_cant_be_reached_and_tries_twice() -> None:
+    import subprocess
+    offline = subprocess.CompletedProcess([], 128, "", "fatal: unable to access "
+        "'https://github.com/o/r.git/': Could not resolve host: github.com\n")
+    head = subprocess.CompletedProcess([], 0, "abc\n", "")
+    calls = []
+
+    def fake(args, **_kw):
+        calls.append(args[1])
+        return offline if args[1] == "pull" else head
+
+    with mock.patch.object(updates.subprocess, "run", side_effect=fake), \
+            mock.patch.object(updates, "PULL_RETRY_SECONDS", 0):
+        try:
+            updates.pull(Path("."), log=lambda *_: None)
+            raise AssertionError("pulled while offline")
+        except updates.UpdateError as exc:
+            assert str(exc) == ("Couldn't reach GitHub, so nothing changed. "
+                                "Check the internet connection and try again."), exc
+    assert calls.count("pull") == 2, "tried again once"
+
+    refused = subprocess.CompletedProcess([], 128, "", "fatal: Not possible to fast-forward, aborting.\n")
+    calls.clear()
+    with mock.patch.object(updates.subprocess, "run", side_effect=lambda a, **k: (calls.append(a[1]), refused if a[1] == "pull" else head)[1]):
+        try:
+            updates.pull(Path("."), log=lambda *_: None)
+        except updates.UpdateError as exc:
+            assert "fast-forward" in str(exc) and calls.count("pull") == 1, "other errors: as git said, no retry"
+
+
 def _git(cwd: Path, *args: str) -> str:
     import subprocess
     return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args],
