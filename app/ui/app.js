@@ -820,7 +820,7 @@ function updateCard(u) {
     : `Checks <code>${esc(u.repo)}</code> on GitHub every day.`;
   return `<div class="card">
       <div class="card-head"><h3>Updates</h3></div>
-      <div class="card-row"><div class="grow">Version ${esc(u.current)}${status ? ` · ${status}` : ""}
+      <div class="card-row"><div class="grow">${status || "Not checked yet"}
           <div class="sub">${detail}</div></div>
         ${u.can_install ? updateButton(u) : ""}
         ${u.available && !u.can_install ? `<button class="btn small" data-action="update-open">View on GitHub</button>` : ""}
@@ -1058,8 +1058,6 @@ function renderSettings() {
 
       ${archiveCard(s.archive_delete_days)}
 
-      ${updateCard(s.update)}
-
       <div class="card">
         <div class="card-head"><h3>Reset</h3></div>
         <div class="card-row"><div class="grow">Reset app<div class="sub">Signs out, removes the licence, deletes all receipts and settings. Original photos are kept.</div></div>
@@ -1098,10 +1096,10 @@ function renderSettings() {
 // [key, label, intro, group]: General first, then what Receipt Bridge connects
 // to under "Connections", then About on its own at the foot.
 const SETTINGS_TABS = [
-  ["general", "General", "Startup, appearance, notifications, receipt inbox, archive and updates.", ""],
+  ["general", "General", "Startup, appearance, notifications, receipt inbox and archive.", ""],
   ["freeagent", "FreeAgent", "Where receipts are matched and filed.", "Connections"],
   ["email", "Email", "Optional. Finds receipts from these suppliers in Gmail and adds them to Files.", "Connections"],
-  ["about", "About", "Version, licence, terms, and the software Receipt Bridge is built on.", "foot"],
+  ["about", "About", "Version, updates, licence, terms, and the software Receipt Bridge is built on.", "foot"],
 ];
 
 // ---- Settings → About ----------------------------------------------------
@@ -1133,9 +1131,6 @@ function aboutHtml() {
   if (a.error) return `<div class="card"><div class="card-note">${esc(a.error)}</div></div>`;
   const u = state.snap.update;
   const log = (state.snap.activity.log.length ? state.snap.activity.log : state.snap.last_log || []).join("\n");
-  const status = !u ? "" : u.restart_needed ? `Version ${esc(u.latest.replace(/^v/i, ""))} is installed. Restart to use it.`
-    : u.available ? `Version ${esc(u.latest.replace(/^v/i, ""))} is available.`
-    : u.checking ? "Checking for updates…" : u.latest ? "Up to date." : "";
   const licensed = a.licence.google && a.licence.freeagent;
   const keys = a.licence.google || a.licence.freeagent ? `Only the ${a.licence.google ? "Google" : "FreeAgent"} key is installed.`
     : "Add your licence file to connect FreeAgent and Gmail.";
@@ -1151,10 +1146,10 @@ function aboutHtml() {
     <div class="card about-head">
       <div class="card-row"><span class="about-mark" aria-hidden="true">🧾</span>
         <div class="grow"><div class="about-name">${esc(a.name)}</div>
-          <div class="sub">Version ${esc(a.version)} · ${esc(a.copyright)}</div>
-          ${status ? `<div class="sub">${status}</div>` : ""}</div>
-        ${u?.available && u.can_install ? updateButton(u) : `<button class="btn small" data-action="update-check" ${u?.checking ? "disabled" : ""}>Check for updates</button>`}</div>
+          <div class="sub">Version ${esc(a.version)} · ${esc(a.copyright)}</div></div></div>
     </div>
+
+    ${u ? updateCard(u) : ""}
 
     <div class="card">
       <details class="about-doc" ${licensed ? "" : "open"}><summary>Licence<span class="about-state">${licensed ? "Installed" : "Not installed"}</span></summary>
