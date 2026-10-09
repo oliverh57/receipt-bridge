@@ -313,6 +313,7 @@ function render() {
   else if (state.view === "statement") renderStatement();
   else if (state.view === "emails") renderEmails();
   else renderList();
+  if (state.view !== "emails" && em.dialog) drawEmailDialog();   // Bank Feed's "Use that email"
   renderSetup();
 }
 
@@ -1383,7 +1384,7 @@ function move(delta) {
 
 function setView(view) {
   if (view === state.view) return;
-  if (state.view === "emails") closeEmailDialog();
+  if (state.view === "emails" || em.dialog) closeEmailDialog();
   if (state.view === "statement") m.linkFile = null;    // leaving Bank Feed ends "Link to other payment"
   state.view = view;
   state.receiptsKey = "";

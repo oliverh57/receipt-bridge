@@ -95,6 +95,7 @@ class EmailAdd(BaseModel):
     vat: float | str | None = None
     vat_choice: str = "auto"
     paid_by: str = "business"
+    payment_url: str = ""          # from Bank Feed's "Use that email": paired with this payment
 
 
 class SupplierSearch(BaseModel):

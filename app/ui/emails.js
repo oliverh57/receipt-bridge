@@ -39,6 +39,7 @@ const em = {
   openError: "",
   forms: {},              // the "Convert to receipt" form, by message id
   dialog: null,           // the email whose "Convert to receipt" dialog is open
+  forPayment: null,       // {id, url, label}: opened from Bank Feed's "Use that email", paired with that payment
   dialogError: "",
   lastAdd: null,          // the email last added, whose failure its header shows
   images: true,           // load the pictures emails link to ("Hide images" stops them)
@@ -123,14 +124,14 @@ async function emailsKnown() {
   } catch {}
 }
 
-async function openEmail(id) {
+async function openEmail(id, account = "") {
   const row = findEmail(id);
   if (em.mails[id] || em.opening === id) return;
   em.opening = id;
   em.openError = "";
   render();
   try {
-    const params = new URLSearchParams({ account: row?.account || em.account });
+    const params = new URLSearchParams({ account: account || row?.account || em.account });
     const mail = await api(`/api/emails/${encodeURIComponent(id)}?${params}`);
     em.mails[id] = mail;
     const d = mail.draft;
@@ -187,6 +188,7 @@ function openDialog(id) {
 
 function closeEmailDialog() {
   em.dialog = null;
+  em.forPayment = null;
   em.dialogError = "";
   em.drawn.dialog = em.drawn.preview = undefined;
   const host = $("#modal");
@@ -203,14 +205,17 @@ async function submitDialog() {
   try {
     await api(`/api/emails/${encodeURIComponent(id)}/add`, { method: "POST",
       body: { account: mail.account, supplier: f.supplier, date: f.date, total: f.total, currency: f.currency,
-              vat: f.vat, vat_choice: f.vat_choice, paid_by: f.paid_by } });
+              vat: f.vat, vat_choice: f.vat_choice, paid_by: f.paid_by,
+              payment_url: em.forPayment?.id === id ? em.forPayment.url : "" } });
   } catch (err) {
     em.dialogError = err.message;
     return render();
   }
   em.lastAdd = id;
+  const paired = em.forPayment?.id === id;
   closeEmailDialog();
-  toast(`Adding the ${esc(f.supplier || "email")} email to Files${f.paid_by === "personal" ? " as an expense" : ""}…`);
+  toast(paired ? `Adding the ${esc(f.supplier || "email")} email for this payment…`
+    : `Adding the ${esc(f.supplier || "email")} email to Files${f.paid_by === "personal" ? " as an expense" : ""}…`);
   refresh(true);
 }
 
@@ -398,8 +403,10 @@ function dialogHtml(mail) {
   const known = mail.in_files;
   const before = known && ["ignored", "failed", "deleted"].includes(known.status)
     ? `<div class="m-note e-dnote">This email is in Archived. Adding it moves it back to Files.</div>` : "";
+  const paired = em.forPayment?.id === mail.id ? em.forPayment : null;
   return `<h2 id="e-dialog-title">Convert to receipt</h2>
       <p class="sub">${esc(mail.subject || "(no subject)")} · ${esc(mail.from_name)}. ${found}</p>
+      ${paired ? `<div class="m-note e-pnote">For the ${esc(paired.label)} payment.</div>` : ""}
       <div class="m-kv">
         <span class="k">Supplier</span>${input("supplier", "text", 'placeholder="Who is it from?" list="supplier-names" autocomplete="off"')}
         <span class="k">Date</span>${input("date", "date")}
@@ -421,7 +428,7 @@ function dialogHtml(mail) {
       ${em.dialogError ? `<div class="m-note warn">${esc(em.dialogError)}</div>` : ""}
       <div class="m-dialog-foot">
         <button class="btn" data-action="e-cancel">Cancel</button>
-        <button class="btn primary" data-action="e-add">${f.paid_by === "personal" ? "Add as an expense" : "Add to Files"} ${kbd("⏎", true)}</button>
+        <button class="btn primary" data-action="e-add">${paired ? "Add for this payment" : f.paid_by === "personal" ? "Add as an expense" : "Add to Files"} ${kbd("⏎", true)}</button>
       </div>`;
 }
 
@@ -520,7 +527,7 @@ function drawEmails(head, tools, list, detail) {
 // ---- events ----------------------------------------------------------------------
 
 document.addEventListener("click", (e) => {
-  if (state.view !== "emails") return;
+  if (state.view !== "emails" && !em.dialog) return;        // Bank Feed's "Use that email" opens the dialog too
   if (e.target.classList?.contains("e-overlay")) return closeEmailDialog();     // outside the dialog
   const target = e.target.closest("[data-action]");
   const action = target?.dataset.action || "";
@@ -564,7 +571,7 @@ document.addEventListener("click", (e) => {
 });
 
 document.addEventListener("input", (e) => {
-  if (state.view !== "emails") return;
+  if (state.view !== "emails" && !em.dialog) return;
   const a = e.target.dataset.action;
   if (a === "e-field" && em.forms[em.dialog]) {
     em.forms[em.dialog][e.target.dataset.field] = e.target.value;
@@ -579,7 +586,7 @@ document.addEventListener("input", (e) => {
 });
 
 document.addEventListener("change", (e) => {
-  if (state.view !== "emails") return;
+  if (state.view !== "emails" && !em.dialog) return;
   const a = e.target.dataset.action;
   if (a === "e-currency" && em.forms[em.dialog]) {
     em.forms[em.dialog].currency = e.target.value;
@@ -596,7 +603,7 @@ document.addEventListener("change", (e) => {
 });
 
 document.addEventListener("keydown", (e) => {
-  if (state.view !== "emails" || !emailsReady() || wiz.open || ed.open || e.metaKey || e.ctrlKey || e.altKey) return;
+  if ((state.view !== "emails" && !em.dialog) || !emailsReady() || wiz.open || ed.open || e.metaKey || e.ctrlKey || e.altKey) return;
   const t = e.target;
   if (em.dialog) {
     // the dialog has the keyboard: Esc closes it, ⏎ adds (a focused button does its own thing)
@@ -634,8 +641,8 @@ document.addEventListener("keydown", (e) => {
 // Uses Files' menu look and closing rules (match.js: .ctx-menu, closeContextMenu).
 
 /** The whole email, once it's downloaded (opening it if need be). */
-async function whenOpen(id) {
-  if (!em.mails[id]) openEmail(id);
+async function whenOpen(id, account = "") {
+  if (!em.mails[id]) openEmail(id, account);
   for (let i = 0; i < 100 && !em.mails[id] && !em.openError; i++) await new Promise((r) => setTimeout(r, 200));
   return em.mails[id] || null;
 }
@@ -673,3 +680,23 @@ document.addEventListener("click", async (e) => {
   if (action === "ctx-e-convert") openDialog(id);
   else openSupplierWizardFor(mail);
 });
+
+// ---- Bank Feed's "Use that email" ----------------------------------------------------
+
+/** The email found for a payment, in the Convert to receipt dialog: check
+ * it, then "Add for this payment" adds it paired with that payment. */
+async function openEmailForPayment(hint, t) {
+  em.forPayment = { id: hint.message_id, url: t.url,
+                    label: `${money(-t.amount, "GBP")} ${t.description} · ${shortDate(t.date)}` };
+  toast("Opening the email…", 2500);
+  const mail = await whenOpen(hint.message_id, hint.account);
+  if (!mail || em.forPayment?.id !== hint.message_id) {
+    em.forPayment = null;
+    return toast(`<b>Couldn't open that email.</b> ${esc(em.openError || "")}`, 6000);
+  }
+  if (!canAdd(mail)) { em.forPayment = null; return toast("That email is already a receipt in Files."); }
+  em.dialog = mail.id;
+  em.dialogError = "";
+  drawEmailDialog();
+  document.querySelector('.e-dialog input[data-field="supplier"]')?.focus();
+}

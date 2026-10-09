@@ -2134,6 +2134,14 @@ class ReceiptService:
         self.db.set_state(f"explained:{transaction_url}", json.dumps(
             {"state": "updated", "url": t["explanation_url"], "before": before, "body": changes, "at": _now()}))
         self.db.delete_state(f"payment:{transaction_url}")       # FreeAgent now has them
+        if changes.get("category"):
+            # a linked receipt's category corrected: kept on it, and for its supplier from now on
+            for row in self.db.list_receipts(FILED):
+                state = json.loads(row["freeagent_json"] or "{}") if row["freeagent_json"] else {}
+                if state.get("transaction") == transaction_url:
+                    self.db.update_receipt(row["id"], {"category": changes["category"]})
+                    if row["vendor"]:
+                        self.db.set_state(f"category_for:{self._supplier_key(row['vendor'])}", changes["category"])
         self._finish("file", True, f"Updated FreeAgent's explanation of the {t['dated_on']} payment")
         self._run_freeagent_sync()
 
@@ -2724,6 +2732,15 @@ class ReceiptService:
         known = self.emails_in_files([message_id]).get(message_id)
         if known and known["status"] in (PENDING, EXPORTED, FILED):
             raise ValueError("That email is already a receipt.")
+        clean["payment_url"] = None
+        if fields.get("payment_url"):
+            t = self._cached_transaction(str(fields["payment_url"]))
+            if t is None:
+                raise ValueError("That payment isn't in the statement any more.")
+            why = why_not_open(t)
+            if why:
+                raise ValueError(f"Can't use that payment: {why}.")
+            clean["payment_url"] = t["url"]
         chosen, _ = self._mail_client(account)
         return self._enqueue(f"email-add:{message_id}",
                              lambda: self._run_add_email(chosen.email, message_id, clean))
@@ -2754,8 +2771,11 @@ class ReceiptService:
             "filename": build_filename("{day} {supplier}{money}", {"day": day, "supplier": supplier, "money": money}),
             "paid_by": fields["paid_by"], "status": PENDING,
             "extra_json": {"added_from": "emails", "supplier_source": "sender", "vat_choice": fields["vat_choice"],
-                           **({"vat_amount": fields["vat"]} if fields["vat_choice"] == "amount" else {})},
+                           **({"vat_amount": fields["vat"]} if fields["vat_choice"] == "amount" else {}),
+                           **({"found_for_payment": fields["payment_url"]} if fields.get("payment_url") else {})},
         }
+        if fields.get("payment_url"):
+            data["transaction_url"] = fields["payment_url"]       # "Use that email": paired with its payment
         known = self.emails_in_files([message_id]).get(message_id)
         if known and known["status"] in (IGNORED, FAILED, DELETED):
             # chosen by hand now: what was ignored or couldn't be read comes back
@@ -2767,6 +2787,10 @@ class ReceiptService:
             receipt_id = self.db.insert_receipt(data)
         if not receipt_id:
             self._finish("email-add", False, "That email is already a receipt.")
+            return
+        if fields.get("payment_url"):
+            self.db.delete_state(f"email_hint:{fields['payment_url']}")
+            self._finish("email-add", True, f"Added the {supplier} email, paired with its payment.")
             return
         where = "an expense" if fields["paid_by"] == "personal" else "a receipt"
         self._finish("email-add", True, f"Added the {supplier} email to Files as {where}.")
