@@ -399,7 +399,7 @@ function dialogHtml(mail) {
   return `<h2 id="e-dialog-title">Convert to receipt</h2>
       <p class="sub">${esc(mail.subject || "(no subject)")} · ${esc(mail.from_name)}. ${found}</p>
       <div class="m-kv">
-        <span class="k">Supplier</span>${input("supplier", "text", 'placeholder="Who is it from?" autocomplete="off"')}
+        <span class="k">Supplier</span>${input("supplier", "text", 'placeholder="Who is it from?" list="supplier-names" autocomplete="off"')}
         <span class="k">Date</span>${input("date", "date")}
         <span class="k">Total</span><span class="pair">${input("total", "text", 'inputmode="decimal" placeholder="0.00" autocomplete="off"')}${currency}</span>
         <span class="k">VAT</span><span class="pair"><select class="e-vat" data-action="e-vat-choice" aria-label="VAT">${VAT_MENU.map(([v, l]) =>

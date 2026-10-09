@@ -218,6 +218,7 @@ async function refresh(force = false) {
     try { state.categories = await api("/api/freeagent/categories"); } catch {}
   }
 
+  if (versionChanged && ["pending", "emails"].includes(state.view)) loadSupplierNames();
   announceOutcome(snap.outcome);
   // Redrawing replaces the preview's controls; never do it while one of
   // them is in use, or an open dropdown would snap shut.
@@ -234,6 +235,19 @@ async function refresh(force = false) {
     state.renderedAt = Date.now();
   }
   schedule(snap.activity.busy || snap.queued.length || snap.connecting ? BUSY_POLL_MS : IDLE_POLL_MS);
+}
+
+/** The suppliers you've had before, offered as you type a supplier
+ * (<datalist id="supplier-names">). Local; at most once every 20 seconds. */
+async function loadSupplierNames() {
+  if (Date.now() - (state.namesAt || 0) < 20000) return;
+  state.namesAt = Date.now();
+  try {
+    const names = await api("/api/supplier-names");
+    const html = names.map((n) => `<option value="${esc(n)}"></option>`).join("");
+    const list = $("#supplier-names");
+    if (list.innerHTML !== html) list.innerHTML = html;
+  } catch {}
 }
 
 function schedule(ms) {

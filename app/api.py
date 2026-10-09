@@ -215,6 +215,10 @@ def create_app(service: ReceiptService) -> FastAPI:
             headers={"Content-Disposition": "inline"},
         )
 
+    @app.get("/api/supplier-names")
+    def supplier_names() -> list[str]:
+        return service.supplier_names()
+
     @app.get("/api/suppliers")
     def suppliers() -> list[dict[str, Any]]:
         return service.suppliers()

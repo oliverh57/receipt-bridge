@@ -1050,6 +1050,9 @@ class ReceiptService:
             if "total" in changes:
                 changes["total_status"] = "confirmed by you"
             changes["extra_json"] = extra
+        if ("vendor" in changes or checked) and extra.get("supplier_source") in ("model", "first line"):
+            extra["supplier_source"] = "you"            # a name you've checked is no longer a guess
+            changes["extra_json"] = extra
         if changes:
             self.db.update_receipt(receipt_id, changes)
         vendor = changes.get("vendor") or row["vendor"]
@@ -2527,6 +2530,29 @@ class ReceiptService:
             row["in_files"] = known.get(row["id"])
         return {"account": chosen.email, "emails": rows, "next": next_token}
 
+    def supplier_names(self, limit: int = 500) -> list[str]:
+        """Suppliers you've had before, most used first, for the supplier box
+        to suggest. Spelled as most recently written; local only."""
+        with self.db.connect() as conn:
+            rows = conn.execute(
+                "SELECT vendor, COUNT(*) AS n, MAX(COALESCE(purchased_on, email_date, created_at)) AS last "
+                "FROM receipts WHERE vendor IS NOT NULL AND TRIM(vendor) != '' AND status != 'deleted' "
+                "GROUP BY vendor ORDER BY n DESC, last DESC").fetchall()
+        # One suggestion per supplier: "Boot", "Boots" and "Boots Ltd" are one,
+        # offered as the spelling you've used most, ranked by all of them
+        groups: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            name = " ".join(str(row["vendor"]).split())
+            group = groups.setdefault(_supplier_key_for_names(name), {"spellings": [], "n": 0, "last": ""})
+            group["n"] += row["n"]
+            group["last"] = max(group["last"], row["last"] or "")
+            # the spelling offered: the most used, then the latest, then one
+            # without "Ltd", then the fuller ("Boots", not "Boot")
+            bare = _LEGAL_WORDS.sub("", name).strip(" .,&")
+            group["spellings"].append(((row["n"], row["last"] or "", bare == name, len(bare)), name))
+        ranked = sorted(groups.values(), key=lambda g: (g["n"], g["last"]), reverse=True)
+        return [max(g["spellings"])[1] for g in ranked][:limit]
+
     def emails_in_files(self, message_ids: list[str]) -> dict[str, dict[str, Any]]:
         """Which of these emails are already receipts, and where they are.
         Local only: the list asks again after each change, without Gmail."""
@@ -3228,6 +3254,16 @@ def _receipt_json(row: Any, better: set[str] | frozenset[str] = frozenset()) -> 
         "flags": extra.get("flags", []) if is_photo else [],
         "is_image": bool(row["pdf_path"]) and Path(row["pdf_path"]).suffix.lower() in IMAGE_TYPES,
     }
+
+
+_LEGAL_WORDS = re.compile(r"\b(?:ltd|limited|plc|inc|llc|llp|gmbh|co|company|uk)\b\.?", re.IGNORECASE)
+
+
+def _supplier_key_for_names(name: str) -> str:
+    """What makes two supplier names the same supplier, for suggestions:
+    "Boots Ltd", "BOOTS" and "Boot" all come to "boot"."""
+    key = re.sub(r"[^a-z0-9]+", "", _LEGAL_WORDS.sub(" ", name.lower().replace("&", " ")))
+    return key[:-1] if len(key) > 3 and key.endswith("s") else key or name.lower()
 
 
 def _email_fields(fields: dict[str, Any]) -> dict[str, Any]:
