@@ -941,7 +941,8 @@ def create_app(service: ReceiptService) -> FastAPI:
         if path is None:
             raise HTTPException(404, "No such supplier")
         rule = supplier_editor.read(path)
-        return {**rule, "vat_treatment": supplier_vat_treatment(rule["name"])}
+        return {**rule, "vat_treatment": supplier_vat_treatment(rule["name"]),
+                "built_in": service.supplier_built_in(watcher_id)}
 
     def supplier_vat_treatment(name: str) -> str:
         """As printed or reverse charge: kept per supplier, where review keeps it."""
@@ -1035,6 +1036,8 @@ def create_app(service: ReceiptService) -> FastAPI:
         if path is None:
             raise HTTPException(404, "No such supplier")
         name = supplier_editor.read(path)["name"]
+        if service.supplier_built_in(watcher_id):
+            raise HTTPException(400, f"{name} is built in: switch it off instead")
         stored = supplier_editor.delete(path, service.config.data_dir / "deleted-suppliers")
         service.touch()
         return {"name": name, "undo": stored}

@@ -163,6 +163,26 @@ def test_restore_only_reads_from_the_bin() -> None:
             raise AssertionError(f"restored {name!r}")
 
 
+def test_trainline_is_built_in_and_cannot_be_deleted() -> None:
+    from fastapi.testclient import TestClient
+
+    from app.api import create_app
+
+    with tempfile.TemporaryDirectory() as tmp:
+        folder = Path(tmp) / "watchers"
+        folder.mkdir()
+        _copy("trainline.yaml", folder)
+        service = ReceiptService(Config(raw={"data_dir": str(Path(tmp) / "data"), "watchers_dir": str(folder)}))
+        app = create_app(service)
+        client = TestClient(app, base_url="http://127.0.0.1")
+        h = {"X-Receipt-Bridge": app.state.token}
+        assert client.get("/api/suppliers", headers=h).json()[0]["built_in"] is True
+        assert client.get("/api/suppliers/trainline", headers=h).json()["built_in"] is True
+        refused = client.post("/api/suppliers/trainline/delete", headers=h)
+        assert refused.status_code == 400 and "switch it off" in refused.json()["detail"]
+        assert (folder / "trainline.yaml").exists()
+
+
 def test_deleting_through_the_api_keeps_collected_receipts() -> None:
     from fastapi.testclient import TestClient
 

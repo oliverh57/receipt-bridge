@@ -2061,7 +2061,7 @@ function renderEditor() {
       <div class="modal-head"><h2>Edit ${esc(ed.original?.name || "supplier")}</h2></div>
       <div class="modal-body">${ed.error ? `<div class="banner" style="margin:0 0 12px">${esc(ed.error)}</div>` : ""}${body}</div>
       <div class="modal-foot">
-        ${ed.original ? `<button class="btn danger" data-action="ed-delete">Delete</button>` : ""}
+        ${ed.original && !ed.original.built_in ? `<button class="btn danger" data-action="ed-delete">Delete</button>` : ""}
         <span class="spacer"></span>
         <button class="btn" data-action="ed-close">Cancel</button>
         <button class="btn primary" data-action="ed-save" id="ed-save" ${ed.busy || !changed ? "disabled" : ""}>Save</button>
