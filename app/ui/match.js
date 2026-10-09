@@ -1250,21 +1250,21 @@ document.addEventListener("mouseover", (e) => {
     peek.innerHTML = `<img src="${esc(row.dataset.peek)}" alt="Receipt preview">`;
   }
   const box = row.getBoundingClientRect();
-  const width = Math.min(360, Math.max(200, box.left - 24));
+  // an email is a page laid out for a desktop: given more room than a receipt photo
+  const width = Math.min(row.dataset.peekMail ? 560 : 360, Math.max(200, box.left - 24));
   peek.style.width = `${width}px`;
-  peek.style.setProperty("--peek-scale", String((width - 14) / 680));   // an email page fits the width
   peek.style.left = `${Math.max(8, box.left - width - 12)}px`;
   peek.style.top = `${Math.max(8, Math.min(box.top - 40, window.innerHeight - 520))}px`;
   peek.hidden = false;
 });
 document.addEventListener("scroll", () => { peek.hidden = true; }, true);
 
-/** The hover preview of an email: who, what, and the email (sandboxed),
- * laid out at a normal email width and scaled down to fit, like a page. */
+/** The hover preview of an email: who, what, and the whole email
+ * (sandboxed), zoomed to the preview's width like a page. */
 function peekMailHtml(mail) {
   return `<div class="st-peek-mail"><b>${esc(mail.subject || "(no subject)")}</b>
     <span class="muted">${esc(mail.from_name)} · ${esc(shortDate(mail.date))}</span></div>
-    <div class="st-peek-page">${emailFrame(mail).replace('class="doc e-frame"', 'class="st-peek-frame"')}</div>`;
+    ${emailFrame(mail, { fit: true }).replace('class="doc e-frame"', 'class="st-peek-frame"')}`;
 }
 
 const VAT_RATES = [["20.0", "20% (standard)"], ["5.0", "5% (reduced)"], ["0.0", "0% (zero-rated or none)"]];

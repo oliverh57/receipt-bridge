@@ -2772,6 +2772,13 @@ class ReceiptService:
             if why:
                 raise ValueError(f"Can't use that payment: {why}.")
             clean["payment_url"] = t["url"]
+            reference = self._freeagent_reference()
+            clean["category"] = str(fields.get("category") or "") or None
+            if clean["category"] and clean["category"] not in {c["url"] for c in reference.get("categories", [])}:
+                raise ValueError("Choose a category from the list.")
+            clean["project"] = str(fields.get("project") or "") or None
+            if clean["project"] and clean["project"] not in {p["url"] for p in reference.get("projects", [])}:
+                raise ValueError("Choose a project from the list.")
         chosen, _ = self._mail_client(account)
         return self._enqueue(f"email-add:{message_id}",
                              lambda: self._run_add_email(chosen.email, message_id, clean))
@@ -2826,9 +2833,13 @@ class ReceiptService:
             # category set on the payment (else FreeAgent's, remembered, guessed)
             url = fields["payment_url"]
             self.db.delete_state(f"email_hint:{url}")
-            chosen_category = self.payment_settings(url).get("category")
-            if chosen_category and not self.db.get_receipt(receipt_id)["category"]:
+            chosen_category = fields.get("category") or self.payment_settings(url).get("category")
+            if chosen_category:
                 self.db.update_receipt(receipt_id, {"category": chosen_category})
+            if fields.get("project"):                             # linked to the project, not re-billed
+                extra = json.loads(self.db.get_receipt(receipt_id)["extra_json"] or "{}")
+                extra["rebill"] = {"project": fields["project"], "type": "none", "factor": None}
+                self.db.update_receipt(receipt_id, {"extra_json": extra})
             self._run_approve(url, receipt_id)
             return
         where = "an expense" if fields["paid_by"] == "personal" else "a receipt"

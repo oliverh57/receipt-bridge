@@ -330,6 +330,14 @@ def test_an_email_added_for_a_payment_is_approved_straight_away() -> None:
         row = service.db.get_receipt(rid)
         assert approved == [(url, rid)] and row["transaction_url"] == url and row["category"] == CATEGORY
         assert service.db.get_state(f"email_hint:{url}") is None
+        # chosen in the dialog: its category and project win
+        other, project = "https://fa.test/v2/categories/285", "https://fa.test/v2/projects/1"
+        service._run_add_email("me@example.test", "m2", {"supplier": "JustPark", "date": "2026-08-24", "total": 14.99,
+            "currency": "GBP", "vat": None, "vat_choice": "auto", "paid_by": "business", "payment_url": "tx/j",
+            "category": other, "project": project})
+        row = service.db.get_receipt(approved[1][1])
+        assert row["category"] == other and json.loads(row["extra_json"])["rebill"] == {"project": project, "type": "none",
+                                                                                       "factor": None}
 
 
 def test_a_payment_approved_in_freeagent_is_done() -> None:
