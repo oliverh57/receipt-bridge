@@ -98,6 +98,10 @@ example. Either way, confirm what it found: sender, total, reference, attached
 PDF. A preview shows the filename the rule produces and how many emails it
 matches.
 
+**Export…** saves the recurring receipts you tick to one `.rbrules` file;
+**Import…** (or dropping that file on the window) adds the ones you don't
+already have. A single rule's `.yaml` imports too.
+
 For senders that serve many shops — payment processors such as ecommpay —
 fill in **Must mention** with the shop's name.
 
