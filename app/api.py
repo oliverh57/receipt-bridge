@@ -464,10 +464,14 @@ def create_app(service: ReceiptService) -> FastAPI:
         return {"ok": True}
 
     @app.get("/api/statement")
-    def statement(account: str = "", month: str = "") -> dict[str, Any]:
-        if month and not re.fullmatch(r"\d{4}-\d{2}", month):
-            raise HTTPException(400, "month must be YYYY-MM")
-        return service.statement(account or None, month or None)
+    def statement(account: str = "", month: str = "", limit: int = 0) -> dict[str, Any]:
+        """A month (YYYY-MM), or month=all: every month, newest first, the
+        latest `limit` payments (0: all of them)."""
+        if month and month != "all" and not re.fullmatch(r"\d{4}-\d{2}", month):
+            raise HTTPException(400, "month must be YYYY-MM or all")
+        if limit < 0:
+            raise HTTPException(400, "limit can't be negative")
+        return service.statement(account or None, month or None, limit or None)
 
     @app.post("/api/statement/payment")
     def statement_payment(body: dict[str, Any]) -> dict[str, Any]:

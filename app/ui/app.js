@@ -14,9 +14,20 @@ const TOKEN = window.RB_TOKEN;
 const IDLE_POLL_MS = 4000;
 const BUSY_POLL_MS = 900;
 
+/** A remembered choice for this Mac's window (Bank Feed's Month / All and
+ * how many). Only a convenience: a blocked localStorage just forgets. */
+function pref(key, fallback) {
+  try { return localStorage.getItem(`rb:${key}`) ?? fallback; } catch { return fallback; }
+}
+function setPref(key, value) {
+  try { localStorage.setItem(`rb:${key}`, String(value)); } catch {}
+}
+
 const state = {
   view: "pending",
   month: new Date().toISOString().slice(0, 7),   // Statement month, YYYY-MM
+  stView: pref("stView", "month") === "all" ? "all" : "month",   // Bank Feed: a month, or every month
+  stLimit: Number(pref("stLimit", "100")) || 0,  // …and then the latest how many (0: all)
   statement: null,
   filedToday: [],
   snap: null,
@@ -179,10 +190,12 @@ async function refresh(force = false) {
   if (!snap.setup?.done && !setup.open && !setup.dismissed) setup.open = true;
 
   if (state.view === "statement") {
-    const key = `statement:${state.month}:${snap.version}`;
+    const all = state.stView === "all";
+    const key = `statement:${all ? `all:${state.stLimit}` : state.month}:${snap.version}`;
     if (force || key !== state.receiptsKey) {
       // the payments, and the unlinked files that could be their receipts
-      try { state.statement = await api(`/api/statement?month=${encodeURIComponent(state.month)}`); }
+      const query = all ? `month=all&limit=${state.stLimit}` : `month=${encodeURIComponent(state.month)}`;
+      try { state.statement = await api(`/api/statement?${query}`); }
       catch (err) { state.statement = { error: err.message, rows: [], summary: {} }; }
       state.receipts = await api("/api/receipts?status=pending");
       state.receiptsKey = key;

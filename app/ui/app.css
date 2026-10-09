@@ -564,6 +564,9 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
 /* Statement */
 .st-month { display: flex; align-items: center; gap: 6px; }
 .st-month span { min-width: 120px; text-align: center; font-weight: 600; }
+.st-limit { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.st-limit select { width: auto; min-width: 116px; max-width: none; }
+.st-more { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 4px 0; }
 .st-body { padding: 20px 24px 40px; display: flex; flex-direction: column; gap: 18px; max-width: 1180px; width: 100%; }
 .st-summary { border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; display: flex; flex-wrap: wrap; gap: 18px 32px; align-items: center; }
 .st-summary .main { flex: 1 1 320px; min-width: 0; }
