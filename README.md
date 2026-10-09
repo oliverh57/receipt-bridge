@@ -137,7 +137,7 @@ replacing a key, say):
 > "unverified app" warning once (Google allows 100 users without a review).
 
 Open **Receipt Bridge** from Applications. The first time, a **setup guide**
-walks through it: connect **FreeAgent** (and tick your business bank
+walks through it: add your **licence file**, connect **FreeAgent** (and tick your business bank
 account), choose where receipt photos are saved (it makes `Receipt Inbox`
 with `Bank` and `Expense` inside: iCloud Drive, or any folder you pick),
 optionally **Connect Gmail**, then scan a QR code to add the iPhone

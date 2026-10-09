@@ -872,8 +872,8 @@ function inboxCard(p) {
  * keys. Dropping it anywhere in the window works too (match.js). */
 function licenceDrop() {
   return `<div class="licence-drop">
-      <div><b>Drop your Receipt Bridge licence file here</b></div>
-      <div class="sub">It ends in <code>.rbkey</code> and connects this copy to FreeAgent and Gmail. Ask whoever gave you Receipt Bridge for it.</div>
+      <div><b>Drop your licence file here</b></div>
+      <div class="sub">The <code>.rbkey</code> file you were given with Receipt Bridge.</div>
       <button class="btn small" data-action="licence-choose">Choose file…</button>
     </div>`;
 }
@@ -1204,7 +1204,9 @@ window.rbShowAbout = () => { state.settingsTab = "about"; if (state.view === "se
 // endpoints as Settings, so nothing here can drift from it. "Set up later"
 // hides it until the next launch; Finish (or Settings → General) settles it.
 
-const SETUP_STEPS = [["freeagent", "FreeAgent"], ["folder", "Receipt folder"], ["email", "Email"], ["iphone", "iPhone"]];
+const SETUP_STEPS = [["licence", "Licence"], ["freeagent", "FreeAgent"], ["folder", "Receipt folder"], ["email", "Email"], ["iphone", "iPhone"]];
+/** A step's number as people see it: "step 3". */
+function stepNumber(key) { return SETUP_STEPS.findIndex(([k]) => k === key) + 1; }
 const setup = { open: false, dismissed: false, step: 0, faWaiting: false, busy: false };
 
 function openSetup(step = 0) {
@@ -1221,19 +1223,38 @@ function closeSetup(done) {
 
 function setupReady(key) {
   const s = state.snap;
+  if (key === "licence") return !!s.has_credentials && !!s.freeagent?.has_credentials;
   if (key === "freeagent") return !!s.freeagent?.connected;
   if (key === "folder") return s.photo_inbox.exists && s.photo_inbox.has_subfolders;
   if (key === "email") return s.accounts.length > 0;
   return false;
 }
 
+/** Step 1: the licence file. Its keys let Receipt Bridge connect to
+ * FreeAgent and Gmail, so it comes before either. Dropping it anywhere in
+ * the window works too (match.js). */
+function setupLicenceHtml(s) {
+  const google = !!s.has_credentials, freeagent = !!s.freeagent?.has_credentials;
+  const body = google && freeagent
+    ? `<div class="setup-done"><span class="pill ok">Installed</span></div>`
+    : `${licenceDrop()}${google || freeagent ? `<div class="setup-note warn">This file only has the ${google ? "Google" : "FreeAgent"} key. Ask for one with both.</div>` : ""}`;
+  return `<h3>Add your licence file</h3>
+    <p>It lets Receipt Bridge connect to FreeAgent and Gmail.</p>${body}`;
+}
+
+/** Instead of the licence drop again: back to step 1. */
+function needsLicence() {
+  return `<div class="setup-note warn">Add your licence file first.
+    <button class="btn small" data-action="setup-step" data-step="${stepNumber("licence") - 1}">Go to step ${stepNumber("licence")}</button></div>`;
+}
+
 function setupFreeagentHtml(fa) {
   let body;
   if (!fa.has_credentials) {
-    body = licenceDrop();
+    body = needsLicence();
   } else if (!fa.connected) {
     body = `<div class="setup-actions"><button class="btn primary" data-action="setup-fa-connect">Connect FreeAgent</button></div>
-      ${setup.faWaiting ? `<div class="setup-note"><span class="spinner"></span>Approve Receipt Bridge in the browser window that opened, then come back here.</div>` : ""}
+      ${setup.faWaiting ? `<div class="setup-note"><span class="spinner"></span>Approve it in your browser, then come back.</div>` : ""}
       ${fa.error ? `<div class="setup-note bad">${esc(fa.error)}</div>` : ""}`;
   } else {
     const accounts = fa.bank_accounts.map((a) => `
@@ -1244,11 +1265,11 @@ function setupFreeagentHtml(fa) {
         ${fa.environment === "sandbox" ? ` <span class="pill unknown">Sandbox</span>` : ""}</div>
       <div class="setup-q">Which account does the business pay from?</div>
       <div class="card">${accounts || `<div class="card-note"><span class="spinner"></span>Loading your bank accounts…</div>`}</div>
-      ${none ? `<div class="setup-note warn">Tick at least one, or receipts have no payments to match.</div>` : ""}
-      <div class="setup-note">Dry run is on: Receipt Bridge shows what it would send and sends nothing until you switch it off in Settings → FreeAgent.</div>`;
+      ${none ? `<div class="setup-note warn">Tick at least one.</div>` : ""}
+      <div class="setup-note">Dry run is on: nothing is sent to FreeAgent until you turn it off in Settings → FreeAgent.</div>`;
   }
   return `<h3>Connect FreeAgent</h3>
-    <p>Receipt Bridge matches each receipt to its bank payment in FreeAgent, then files it there with the receipt attached.</p>${body}`;
+    <p>Receipts are matched to your bank payments and filed there.</p>${body}`;
 }
 
 function setupFolderHtml(s) {
@@ -1256,22 +1277,21 @@ function setupFolderHtml(s) {
   const ready = setupReady("folder");
   const where = su.icloud_inbox ? `iCloud Drive › ${su.icloud_inbox.split("/").join(" › ")}` : p.path;
   return `<h3>Where should receipt photos go?</h3>
-    <p>Your iPhone saves each receipt photo into this folder. The Mac reads it and moves it out, so the folder stays almost empty.
-      It gets two folders inside: <b>Bank</b> for receipts the business paid, <b>Expense</b> for ones you paid personally.</p>
+    <p>Your iPhone saves photos here. <b>Bank</b> and <b>Expense</b> folders are made inside.</p>
     <div class="setup-options">
       <button class="setup-option ${ready && su.icloud_inbox ? "on" : ""}" data-action="setup-inbox-icloud" ${su.icloud && !setup.busy ? "" : "disabled"}>
         <b>iCloud Drive</b> <span class="tag">Recommended</span>
-        <span class="sub">${su.icloud ? "Makes iCloud Drive › Receipt Inbox, where the iPhone Shortcut saves." : "iCloud Drive is off on this Mac (System Settings → Apple Account → iCloud)."}</span>
+        <span class="sub">${su.icloud ? "Works with the iPhone Shortcut as it is." : "iCloud Drive is off on this Mac."}</span>
       </button>
       <button class="setup-option ${ready && !su.icloud_inbox ? "on" : ""}" data-action="setup-inbox-choose" ${setup.busy ? "disabled" : ""}>
         <b>Choose a folder…</b>
-        <span class="sub">Dropbox, Google Drive, OneDrive or any folder your phone can save to. A Receipt Inbox folder is made inside it. You'll need to point the iPhone Shortcut at it by hand.</span>
+        <span class="sub">Any folder your phone can save to. You'll point the Shortcut at it yourself.</span>
       </button>
     </div>
     ${ready ? `<div class="setup-done"><span class="pill ok">Ready</span> <span class="selectable">${esc(where)}</span>
         <button class="btn quiet small" data-action="open-folder" data-which="inbox">Show in Finder</button></div>`
-      : p.exists ? `<div class="setup-note">The folder is there but has no Bank and Expense folders yet. Choose above to add them.</div>` : ""}
-    ${ready && su.icloud_inbox ? `<div class="setup-note">In Finder, right-click the folder and choose <b>Keep Downloaded</b>, so photos arrive straight away.</div>` : ""}`;
+      : p.exists ? `<div class="setup-note">Choose above to add the Bank and Expense folders.</div>` : ""}
+    ${ready && su.icloud_inbox ? `<div class="setup-note">In Finder, right-click the folder and choose <b>Keep Downloaded</b>.</div>` : ""}`;
 }
 
 function setupEmailHtml(s) {
@@ -1280,7 +1300,7 @@ function setupEmailHtml(s) {
     body = `<div class="card">${s.accounts.map((a) => `<div class="card-row"><span class="pill ok"></span><div class="grow selectable">${esc(a.email)}</div></div>`).join("")}</div>
       <div class="setup-actions">${s.connecting ? "" : `<button class="btn small" data-action="connect-ask" ${state.gmailAsk ? "disabled" : ""}>+ Add another account</button>`}</div>`;
   } else if (!s.has_credentials) {
-    body = licenceDrop();
+    body = needsLicence();
   } else if (!s.connecting && !state.gmailAsk) {
     body = `<div class="setup-actions"><button class="btn primary" data-action="connect-ask">Connect Gmail</button></div>`;
   } else body = "";
@@ -1288,35 +1308,32 @@ function setupEmailHtml(s) {
       <button class="btn quiet small" data-action="connect-stop">Cancel</button></div>`;
   else if (state.gmailAsk) body += gmailAskHtml();
   return `<h3>Find receipts in Gmail <span class="optional">Optional</span></h3>
-    <p>Many suppliers only email their receipts. Receipt Bridge can look for them in Gmail and add them alongside your photos.
-      Access is read-only: it can't send, change or delete email.</p>${body}`;
+    <p>Read-only: Receipt Bridge can't send, change or delete email.</p>${body}`;
 }
 
 function setupIphoneHtml(s) {
   const su = s.setup;
   // The shared Shortcut saves to one fixed folder in iCloud Drive.
   const fixed = `iCloud Drive › ${su.shortcut_saves_to}`;
+  const step = stepNumber("folder");
   const folder = su.icloud_inbox === su.shortcut_saves_to
-    ? setupReady("folder") ? `It saves into <b>${esc(fixed)}</b>, the folder you set up in step 2.`
-      : `It saves into <b>${esc(fixed)}</b>. Go back to step 2 to make that folder, or nothing will arrive.`
-    : `It saves into <b>${esc(fixed)}</b>, but your receipt folder is
+    ? setupReady("folder") ? "" : `It saves to <b>${esc(fixed)}</b>. Set that up in step ${step} first.`
+    : `It saves to <b>${esc(fixed)}</b>, but your folder is
        <span class="selectable"><code>${esc(su.icloud_inbox ? "iCloud Drive › " + su.icloud_inbox.split("/").join(" › ") : s.photo_inbox.path)}</code></span>.
-       Once it's added, open the Shortcut and change both <b>Save File</b> steps to that folder,
-       or go back to step 2 and choose iCloud Drive.`;
+       Change both <b>Save File</b> steps in the Shortcut, or choose iCloud Drive in step ${step}.`;
   const install = su.shortcut_url
     ? `<div class="setup-qr">
         <img src="/api/setup/shortcut-qr?t=${encodeURIComponent(TOKEN)}" alt="QR code for the Receipt Shortcut" width="164" height="164">
-        <div><div class="setup-q">Point your iPhone's camera at this code</div>
-          <p>Tap the link that appears, then <b>Add Shortcut</b>.</p>
+        <div><div class="setup-q">Scan with your iPhone's camera</div>
+          <p>Then tap <b>Add Shortcut</b>.</p>
           <button class="btn quiet small" data-action="setup-open-shortcut">Open the link on this Mac instead</button></div>
       </div>`
-    : `<div class="setup-note">Build it on your iPhone in about 15 minutes: the steps are in <b>SETUP-FOR-YOU.md</b>, section 2, in the app's folder.</div>`;
-  return `<h3>Add the Receipt Shortcut to your iPhone</h3>
-    <p>Photograph a receipt, say whether the business paid, and it's in Receipt Bridge a minute later.</p>
+    : `<div class="setup-note">Build it on your iPhone: the steps are in <b>SETUP-FOR-YOU.md</b>, section 2.</div>`;
+  return `<h3>Add the iPhone Shortcut</h3>
+    <p>Photograph a receipt and it's here a minute later.</p>
     ${install}
-    <div class="setup-note">${folder}</div>
-    <div class="setup-note">Then put it somewhere quick: the Home Screen, or the Action button (Settings → Action Button → Shortcut).
-      And turn on Settings → Privacy &amp; Security → Location Services → Camera → <b>While Using</b>: photos taken abroad then show which currency they're in.</div>`;
+    ${folder ? `<div class="setup-note">${folder}</div>` : ""}
+    <div class="setup-note">Tip: add it to the Home Screen or the Action button. Allow Location for Camera so photos taken abroad show their currency.</div>`;
 }
 
 function renderSetup() {
@@ -1324,12 +1341,14 @@ function renderSetup() {
   if (!setup.open || !state.snap) { if (box.innerHTML) box.innerHTML = ""; return; }
   const s = state.snap;
   const [key] = SETUP_STEPS[setup.step];
-  const body = { freeagent: () => setupFreeagentHtml(s.freeagent || {}), folder: () => setupFolderHtml(s),
+  const body = { licence: () => setupLicenceHtml(s), freeagent: () => setupFreeagentHtml(s.freeagent || {}), folder: () => setupFolderHtml(s),
                  email: () => setupEmailHtml(s), iphone: () => setupIphoneHtml(s) }[key]();
   const last = setup.step === SETUP_STEPS.length - 1;
   // FreeAgent and the folder are needed to file anything; skipping is
   // allowed, but the button says so.
-  const next = last ? "Finish" : setupReady(key) ? "Continue" : key === "email" ? "Skip" : "Skip for now";
+  // Without the licence nothing after it can work: no skipping, just "Set up later".
+  const blocked = key === "licence" && !setupReady(key);
+  const next = last ? "Finish" : setupReady(key) || blocked ? "Continue" : key === "email" ? "Skip" : "Skip for now";
   const steps = SETUP_STEPS.map(([k, label], i) => `<li class="${i === setup.step ? "on" : setupReady(k) ? "done" : ""}">
       <button data-action="setup-step" data-step="${i}" ${i === setup.step ? 'aria-current="step"' : ""}>${label}</button></li>`).join("");
   box.innerHTML = `<div class="setup-backdrop"></div>
@@ -1341,7 +1360,7 @@ function renderSetup() {
       <div class="setup-foot">
         <button class="btn quiet" data-action="setup-later">Set up later</button><span class="spacer"></span>
         ${setup.step ? `<button class="btn" data-action="setup-back">Back</button>` : ""}
-        <button class="btn ${setupReady(key) || last ? "primary" : ""}" data-action="setup-next">${next}</button>
+        <button class="btn ${setupReady(key) || last || blocked ? "primary" : ""}" data-action="setup-next" ${blocked ? "disabled" : ""}>${next}</button>
       </div>
     </div>`;
 }
