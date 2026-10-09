@@ -95,6 +95,18 @@ class GitHub:
         return UpdateError(f"GitHub answered {response.status_code}.")
 
 
+# Lines in a commit message that are for git, not for people: "Co-Authored-By:",
+# "Signed-off-by:", "Claude-Session:" and the like. Never shown as What's new.
+_TRAILER = re.compile(r"^[A-Za-z][A-Za-z0-9-]*(?:-By|-by|-Session|-Id|-ID):\s*\S.*$")
+
+
+def notes_from(message: str) -> str:
+    """A commit message or release body as What's new: without the trailer
+    lines git tools add, and without the blank lines they leave behind."""
+    lines = [line for line in (message or "").splitlines() if not _TRAILER.match(line.strip())]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+
+
 def latest(repo: str = DEFAULT_REPO, session: Any = None) -> dict[str, Any]:
     """The newest version on GitHub: its number, a page about it, notes,
     and where to download it. The version on the default branch, so pushing
@@ -119,7 +131,7 @@ def latest(repo: str = DEFAULT_REPO, session: Any = None) -> dict[str, Any]:
     details = commit.json().get("commit") or {}
     pushed = {"version": version,
               "url": f"https://github.com/{repo}/commits/{branch}",
-              "notes": (details.get("message") or "").strip(),
+              "notes": notes_from(details.get("message") or ""),
               "published_at": (details.get("committer") or {}).get("date"),
               "download": f"{API}/repos/{repo}/tarball/{sha}"}   # that commit, not whatever's newest later
 
@@ -132,7 +144,7 @@ def latest(repo: str = DEFAULT_REPO, session: Any = None) -> dict[str, Any]:
         return pushed
     return {"version": tag,
             "url": release.get("html_url") or f"https://github.com/{repo}/releases",
-            "notes": (release.get("body") or "").strip(),
+            "notes": notes_from(release.get("body") or ""),
             "published_at": release.get("published_at"),
             "download": release.get("tarball_url") or f"{API}/repos/{repo}/tarball/{tag}"}
 
