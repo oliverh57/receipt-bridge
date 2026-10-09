@@ -233,7 +233,7 @@ function renderEmailsSignIn() {
         ? "Gmail needs signing in again before your emails can be shown."
         : "Sign in to Gmail to turn any email into a receipt or an expense: a hotel, a ticket, a shop you used once. Receipt Bridge only reads your mail; it can't send, change or delete anything."}</p>
       ${gmailCard(s)}
-      <p class="e-signin-note">Receipts from the same supplier every month? Add a supplier in Settings → Email instead and they're collected by themselves.</p>
+      <p class="e-signin-note">Receipts from the same supplier every time? Turn one into a recurring receipt (here, or Settings → Email) and they're collected by themselves.</p>
     </div></div>`;
 }
 
@@ -336,10 +336,12 @@ function emailActions(mail) {
   const known = mail.in_files;
   if (adding(mail.id)) return `<button class="btn primary" disabled><span class="spinner" aria-hidden="true"></span> Adding…</button>`;
   if (known?.status === "pending") {
-    return `<span class="chip info">In Files</span><button class="btn" data-action="e-show" data-rid="${known.id}">Show in Files</button>`;
+    return `<span class="chip info">In Files</span><button class="btn" data-action="e-show" data-rid="${known.id}">Show in Files</button>
+      <button class="btn" data-action="e-recurring" title="Collect this supplier's receipts by themselves from now on">Turn into recurring receipt</button>`;
   }
-  if (known && ["exported", "filed"].includes(known.status)) return `<span class="chip good">Saved to FreeAgent</span>`;
-  return `<button class="btn primary" data-action="e-convert">Convert to receipt ${kbd("⏎", true)}</button>`;
+  const recurring = `<button class="btn" data-action="e-recurring" title="Collect this supplier's receipts by themselves from now on">Turn into recurring receipt</button>`;
+  if (known && ["exported", "filed"].includes(known.status)) return `<span class="chip good">Saved to FreeAgent</span>${recurring}`;
+  return `${recurring}<button class="btn primary" data-action="e-convert">Convert to receipt ${kbd("⏎", true)}</button>`;
 }
 
 function emailNote(mail) {
@@ -538,6 +540,8 @@ document.addEventListener("click", (e) => {
       return render();
     case "e-convert":
       return openDialog(em.sel);
+    case "e-recurring":
+      return em.mails[em.sel] && openSupplierWizardFor(em.mails[em.sel]);
     case "e-cancel":
       return closeEmailDialog();
     case "e-paid":

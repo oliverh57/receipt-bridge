@@ -1030,8 +1030,9 @@ function renderSettings() {
       ${gmailCard(s)}
 
       <div class="card">
-        <div class="card-head"><h3>Suppliers</h3>
-          <button class="btn small" data-action="add-supplier" ${s.accounts.length ? "" : "disabled"}>+ Add supplier</button></div>
+        <div class="card-head"><h3>Recurring receipts</h3>
+          <button class="btn small" data-action="add-supplier" ${s.accounts.length ? "" : "disabled"}>+ Add recurring receipt</button></div>
+        <div class="card-note">Suppliers who email a receipt every time. Their receipts are collected by themselves.</div>
         ${suppliers || `<div class="card-note">Loading…</div>`}
       </div>
 
@@ -1677,6 +1678,16 @@ function openSupplierWizard() {
   setTimeout(() => $("#wiz-q")?.focus(), 0);
 }
 
+/** "Turn into recurring receipt" in Emails: the same steps, starting from
+ * this email as the example (no search). Back goes to a search for its sender. */
+function openSupplierWizardFor(email) {
+  Object.assign(wiz, { open: true, step: "search", q: email.from_address || "", busy: false, error: "",
+                       results: [{ id: email.id, account: email.account, subject: email.subject,
+                                   sender: email.from_name, date: email.date }],
+                       pick: null, analysis: null, choices: {}, preview: null });
+  wizardPick(0);
+}
+
 function closeWizard() {
   wiz.open = false;
   $("#modal").innerHTML = "";
@@ -1826,12 +1837,12 @@ function renderWizard() {
   const footer = wiz.step === "confirm"
     ? `<button class="btn" data-action="wiz-back">Back</button><span class="spacer"></span>
        <button class="btn" data-action="wiz-close">Cancel</button>
-       <button class="btn primary" data-action="wiz-save" id="wiz-save" ${wiz.busy || !wiz.preview?.ok ? "disabled" : ""}>Add supplier</button>`
+       <button class="btn primary" data-action="wiz-save" id="wiz-save" ${wiz.busy || !wiz.preview?.ok ? "disabled" : ""}>Add recurring receipt</button>`
     : `<span class="spacer"></span><button class="btn" data-action="wiz-close">Cancel</button>`;
 
   $("#modal").innerHTML = `<div class="backdrop" data-action="wiz-close"></div>
-    <div class="modal" role="dialog" aria-modal="true" aria-label="Add supplier">
-      <div class="modal-head"><h2>Add supplier</h2></div>
+    <div class="modal" role="dialog" aria-modal="true" aria-label="Add recurring receipt">
+      <div class="modal-head"><h2>Add recurring receipt</h2></div>
       <div class="modal-body">${wiz.error ? `<div class="banner" style="margin:0 0 12px">${esc(wiz.error)}</div>` : ""}${body}</div>
       <div class="modal-foot">${footer}</div>
     </div>`;
@@ -1940,7 +1951,7 @@ function renderEditor() {
     : `<div class="form-grid">
         <label>Name<input data-ed="name" value="${esc(v.name)}"></label>
         <label class="toggle-field">On
-          <span class="switch"><input type="checkbox" data-ed="enabled" ${v.enabled ? "checked" : ""} aria-label="Supplier on"><span></span></span></label>
+          <span class="switch"><input type="checkbox" data-ed="enabled" ${v.enabled ? "checked" : ""} aria-label="Recurring receipt on"><span></span></span></label>
         <label>From<input data-ed="domain" value="${esc(v.domain)}"></label>
         <label>Subject contains<input data-ed="subject" value="${esc(v.subject)}" placeholder="Optional"></label>
         <label>Must mention<input data-ed="mentions" value="${esc(v.mentions)}" placeholder="Optional"></label>
@@ -1953,7 +1964,7 @@ function renderEditor() {
       <div class="wiz-preview" id="ed-check"></div>`;
   const changed = v && Object.keys(editorChanges()).length;
   $("#modal").innerHTML = `<div class="backdrop" data-action="ed-close"></div>
-    <div class="modal" role="dialog" aria-modal="true" aria-label="Edit supplier">
+    <div class="modal" role="dialog" aria-modal="true" aria-label="Edit recurring receipt">
       <div class="modal-head"><h2>Edit ${esc(ed.original?.name || "supplier")}</h2></div>
       <div class="modal-body">${ed.error ? `<div class="banner" style="margin:0 0 12px">${esc(ed.error)}</div>` : ""}${body}</div>
       <div class="modal-foot">

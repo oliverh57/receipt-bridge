@@ -88,11 +88,15 @@ Each receipt is tagged by what its PDF is:
 | **Email receipt** | The email *is* the receipt (Yesim) |
 | **Email copy** | The supplier's document wasn't available; retried automatically (3 times, 12 hours apart), or click *Get the supplier's receipt* |
 
-### Adding a supplier
+### Adding a recurring receipt
 
-**Settings → Suppliers → + Add supplier.** Search your mail, pick one example
-receipt, and confirm what it found: sender, total, reference, attached PDF. A
-preview shows the filename the rule produces and how many emails it matches.
+A recurring receipt is a supplier that emails a receipt every time; once added,
+its receipts are collected by themselves. In **Emails**, open one of its
+receipts and click **Turn into recurring receipt**. Or **Settings → Email →
+Recurring receipts → + Add recurring receipt**, search your mail and pick one
+example. Either way, confirm what it found: sender, total, reference, attached
+PDF. A preview shows the filename the rule produces and how many emails it
+matches.
 
 For senders that serve many shops — payment processors such as ecommpay —
 fill in **Must mention** with the shop's name.

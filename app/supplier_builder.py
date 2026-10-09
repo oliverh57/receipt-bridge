@@ -189,8 +189,27 @@ def _subject_hint(subject: str, others: list[str] | tuple[str, ...] = ()) -> str
         while n < min(len(prefix), len(words)) and prefix[n].lower() == words[n].lower():
             n += 1
         prefix = prefix[:n]
-    hint = " ".join(prefix).strip(" -:–—|·,#№(")
+    hint = _contiguous(prefix, subject).strip(" -:–—|·,#№(")
     return hint[:60] if len(hint) >= 4 else ""
+
+
+def _contiguous(words: list[str], subject: str) -> str:
+    """The longest run of these words that's in the subject as written.
+
+    Dropping a date word from the middle ("Your Thursday evening trip with
+    Uber" → "Your evening trip with Uber") left a phrase no subject contains,
+    so the rule matched nothing, not even its own example. A rule's subject
+    is matched as written, so it must be a piece of the real one: "evening
+    trip with Uber"."""
+    lowered = " ".join(subject.split()).lower()
+    best = ""
+    for i in range(len(words)):
+        for j in range(len(words), i, -1):
+            run = " ".join(words[i:j])
+            if len(run) > len(best) and run.lower() in lowered:
+                best = run
+                break
+    return best
 
 
 def _label_before(line: str, start: int) -> str:
