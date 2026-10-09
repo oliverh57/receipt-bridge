@@ -426,13 +426,15 @@ function dialogHtml(mail) {
 }
 
 /** Beside the form: what becomes the receipt. The attached PDF, or the
- * email itself (it's printed to a PDF), in the same sandbox as the view. */
-function previewHtml(mail) {
-  const d = mail.draft;
-  const head = `<div class="e-dlabel">Receipt</div><div class="e-doc-name">${d.pdf ? `${PAPERCLIP} ${esc(d.pdf)}` : "This email, saved as a PDF"}</div>`;
+ * email itself (it's printed to a PDF), in the same sandbox as the view.
+ * `usePdf` false: the email even when there's a PDF (a recurring receipt
+ * set to use the email). */
+function previewHtml(mail, usePdf = true) {
+  const pdf = usePdf ? mail.draft?.pdf : null;
+  const head = `<div class="e-dlabel">Receipt</div><div class="e-doc-name">${pdf ? `${PAPERCLIP} ${esc(pdf)}` : "This email, saved as a PDF"}</div>`;
   const params = new URLSearchParams({ account: mail.account, t: TOKEN });
-  const body = d.pdf
-    ? `<iframe class="e-pdf" title="${esc(d.pdf)}" src="/api/emails/${encodeURIComponent(mail.id)}/pdf?${params}"></iframe>`
+  const body = pdf
+    ? `<iframe class="e-pdf" title="${esc(pdf)}" src="/api/emails/${encodeURIComponent(mail.id)}/pdf?${params}"></iframe>`
     : emailFrame(mail).replace('class="doc e-frame"', 'class="e-pdf"');
   return `<div class="e-dphead">${head}</div>${body}`;
 }

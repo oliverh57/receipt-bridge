@@ -1724,22 +1724,24 @@ document.addEventListener("keydown", (e) => {
 // reference. A live preview shows the file the rule would produce.
 
 const wiz = { open: false, step: "search", q: "", results: [], busy: false, error: "",
-              pick: null, analysis: null, choices: {}, preview: null, previewTimer: null };
+              pick: null, analysis: null, choices: {}, preview: null, previewTimer: null,
+              mail: null, drawnDoc: undefined };
 
 function openSupplierWizard() {
   Object.assign(wiz, { open: true, step: "search", q: "", results: [], busy: false, error: "",
-                       pick: null, analysis: null, choices: {}, preview: null });
+                       pick: null, analysis: null, choices: {}, preview: null, mail: null });
   renderWizard();
   setTimeout(() => $("#wiz-q")?.focus(), 0);
 }
 
-/** "Turn into recurring receipt" in Emails: the same steps, starting from
- * this email as the example (no search). Back goes to a search for its sender. */
+/** "Turn into recurring receipt" in Emails: this email is the example (no
+ * search), shown like Convert to receipt: the rule's settings, and the
+ * receipt beside them. */
 function openSupplierWizardFor(email) {
   Object.assign(wiz, { open: true, step: "search", q: email.from_address || "", busy: false, error: "",
                        results: [{ id: email.id, account: email.account, subject: email.subject,
                                    sender: email.from_name, date: email.date }],
-                       pick: null, analysis: null, choices: {}, preview: null });
+                       pick: null, analysis: null, choices: {}, preview: null, mail: email });
   wizardPick(0);
 }
 
@@ -1783,6 +1785,7 @@ async function importRulesFile(file) {
 
 function closeWizard() {
   wiz.open = false;
+  wiz.mail = null;
   $("#modal").innerHTML = "";
 }
 
@@ -1880,8 +1883,79 @@ function radio(name, value, checked, label, sub) {
     <span><b>${label}</b>${sub ? ` <span class="sub">${sub}</span>` : ""}</span></label>`;
 }
 
+/** One answer as a dropdown, for the dialog beside the email. */
+function wizSelect(key, options, value, label) {
+  return `<select data-wiz="${key}" aria-label="${esc(label)}">${options.map(([v, text]) =>
+    `<option value="${v}" ${v === value ? "selected" : ""}>${text}</option>`).join("")}</select>`;
+}
+
+/** From an email: the rule's settings on the left, the receipt on the right. */
+function renderWizardBeside() {
+  const host = $("#modal");
+  if (!host.querySelector(".wiz-beside")) {
+    host.innerHTML = `<div class="m-overlay wiz-overlay"><section class="m-dialog e-dialog wiz-beside m-keep" role="dialog"
+        aria-modal="true" aria-labelledby="wiz-title"><div class="e-dform"></div><div class="e-dpreview"></div></section></div>`;
+    wiz.drawnDoc = undefined;
+  }
+  drawWizardDoc();
+  const mail = wiz.mail, a = wiz.analysis, c = wiz.choices;
+  let body = `<div class="empty" style="padding:40px 0"><span class="spinner"></span>Reading the email…</div>`;
+  if (a) {
+    const figure = (x) => `${esc(money(Number(x.value.replace(/,/g, "")), x.currency))}${x.label ? ` · ${esc(x.label)}` : ""}`;
+    const amounts = a.amounts.length ? a.amounts.map((x, i) => [i, figure(x)]) : [[-1, "None found"]];
+    const vats = [...a.vat_amounts.map((x, i) => [i, figure(x)]), [VAT_NONE, "No VAT"], [VAT_REVERSE, "Reverse charge"]];
+    const refs = [...a.references.map((x, i) => [i, `${esc(x.value)}${x.label ? ` · ${esc(x.label)}` : ""}`]), [-1, "None"]];
+    const input = (key, placeholder = "") =>
+      `<input class="edit-input" data-wiz="${key}" value="${esc(c[key])}" placeholder="${placeholder}" autocomplete="off">`;
+    const accounts = ((state.snap.freeagent || {}).bank_accounts || []).filter((x) => x.chosen);
+    const pw = (to, badge, title, sub) => {
+      const on = c.paid_with === to;
+      return `<button type="button" class="pw-opt ${on ? "on" : ""}" data-action="wiz-paid" data-to="${esc(to)}" aria-pressed="${on}">
+        ${badge}<span class="who"><b>${esc(title)}</b><span>${esc(sub)}</span></span>
+        ${on ? `<span class="tick">${ICON.tick}</span>` : ""}</button>`;
+    };
+    const banks = accounts.length > 1
+      ? [pw("business", `<span class="badge">£</span>`, "Any business account", "Linked in Bank Feed"),
+         ...accounts.map((x) => pw(x.url, bankBadge(x.name), x.name, "Business account · linked in Bank Feed"))]
+      : [pw("business", bankBadge(accountName()), accountName(), "Business account · linked in Bank Feed")];
+    body = `<div class="m-kv">
+        <span class="k">Supplier</span>${input("name")}
+        <span class="k">From</span>${input("domain")}
+        <span class="k">Subject</span>${input("subject", "Optional")}
+        <span class="k">Mentions</span>${input("mentions", "Optional")}
+        <span class="k">Total</span>${wizSelect("amount", amounts, a.amounts.length ? c.amount : -1, "Total")}
+        <span class="k">VAT</span>${wizSelect("vat", vats, c.vat, "VAT")}
+        <span class="k">Reference</span>${wizSelect("reference", refs, c.reference, "Reference")}
+        ${a.has_pdf ? `<span class="k">Receipt</span>${wizSelect("use_attachment", [[1, `Attached PDF · ${esc(a.pdf_name)}`], [0, "The email"]],
+          c.use_attachment ? 1 : 0, "Receipt")}` : ""}
+      </div>
+      <div class="e-dlabel">Paid with</div>
+      <div class="pw" role="group" aria-label="Paid with">${banks.join("")}
+        ${pw("personal", `<span class="badge personal">${ICON.cash}</span>`, "Expense", "Paid personally · claimed back")}</div>
+      <div class="wiz-preview" id="wiz-preview" style="margin-top:18px"></div>`;
+  }
+  host.querySelector(".e-dform").innerHTML = `<h2 id="wiz-title">Turn into recurring receipt</h2>
+    <p class="sub">${esc(mail.subject || "(no subject)")} · ${esc(mail.from_name)}</p>
+    ${wiz.error ? `<div class="m-note warn">${esc(wiz.error)}</div>` : ""}${body}
+    <div class="m-dialog-foot">
+      <button class="btn" data-action="wiz-close">Cancel</button>
+      <button class="btn primary" data-action="wiz-save" id="wiz-save" ${wiz.busy || !wiz.preview?.ok ? "disabled" : ""}>
+        Add recurring receipt ${kbd("⏎", true)}</button></div>`;
+  renderWizardPreview();
+}
+
+/** The receipt pane: redrawn only when it changes (PDF or email), so it never reloads as you type. */
+function drawWizardDoc() {
+  const pane = document.querySelector(".wiz-beside .e-dpreview");
+  if (!pane || !wiz.mail) return;
+  const usePdf = wiz.analysis ? !!wiz.choices.use_attachment : true;
+  const html = previewHtml(wiz.mail, usePdf);
+  if (wiz.drawnDoc !== html) { pane.innerHTML = html; wiz.drawnDoc = html; }
+}
+
 function renderWizard() {
   if (!wiz.open) return;
+  if (wiz.mail) return renderWizardBeside();
   let body = "";
   if (wiz.step === "search") {
     const rows = wiz.results.map((r, i) => `
@@ -1965,8 +2039,9 @@ document.addEventListener("submit", (e) => {
 document.addEventListener("input", (e) => {
   const key = e.target.dataset.wiz;
   if (!key || !wiz.open) return;
-  const value = e.target.type === "radio" && key !== "paid_with" ? Number(e.target.value) : e.target.value;
+  const value = ["amount", "reference", "vat", "use_attachment"].includes(key) ? Number(e.target.value) : e.target.value;
   wiz.choices[key] = key === "use_attachment" ? value === 1 : value;
+  if (key === "use_attachment") drawWizardDoc();
   if (key !== "paid_with") wizardPreview();   // who pays doesn't change what's read
 });
 
@@ -1977,11 +2052,15 @@ document.addEventListener("click", (e) => {
     case "wiz-back": wiz.step = "search"; wiz.analysis = null; return renderWizard();
     case "wiz-close": return closeWizard();
     case "wiz-save": return wizardSave();
+    case "wiz-paid": wiz.choices.paid_with = target.dataset.to; return renderWizard();
   }
+  if (wiz.open && e.target.classList?.contains("wiz-overlay")) closeWizard();     // outside the dialog
 });
 
 document.addEventListener("keydown", (e) => {
   if (wiz.open && e.key === "Escape") closeWizard();
+  else if (wiz.open && wiz.mail && e.key === "Enter" && !e.target.closest?.("button, select, a")
+           && !$("#wiz-save")?.disabled) { e.preventDefault(); wizardSave(); }
 }, true);
 
 
