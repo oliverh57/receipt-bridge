@@ -40,7 +40,7 @@ from .filer import FilingError, file_receipt, plan_for, unfile
 from .export import ExportResult, export_receipts
 from .freeagent import Credentials, FreeAgent, FreeAgentError, NotConnected, TokenStore, VAT_SCHEMES, vat_settings
 from .gmail_client import SignInCancelled
-from .matcher import match_receipts, needs_receipt, supplier_token
+from .matcher import match_receipts, needs_receipt, supplier_token, why_not_open
 from .review import Context, explained_for_good, is_undated, review
 IMAGE_TYPES = {'.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif'}
 from .photo_inbox import pending_files, process_inbox, reread
@@ -1394,8 +1394,12 @@ class ReceiptService:
             t = known.get(transaction_url)
             if t is None:
                 raise ValueError("that payment isn't in the bank accounts being matched")
-            if not needs_receipt(t):
-                raise ValueError("that payment already has its receipt in FreeAgent")
+            why = why_not_open(t)
+            if why:
+                log.info("payment %s can't take a receipt: unexplained=%s explanation=%s locked=%s attachments=%s",
+                         transaction_url, t.get("unexplained_amount"), t.get("explanation_url"),
+                         t.get("explanation_locked"), t.get("explanation_attachments"))
+                raise ValueError(f"Can't use that payment: {why}.")
         changes: dict[str, Any] = {"transaction_url": transaction_url or None}
         # A receipt with no date can't be matched, so choosing its payment
         # did nothing ("Use this" on an undated photo). It takes the payment's
@@ -1987,6 +1991,8 @@ class ReceiptService:
                                                          **(self._review_line(*in_match[t["url"]])
                                                             if kind == "in_match" else {})},
                 "suggestion": suggestion,
+                # no receipt, but FreeAgent won't take one through here: why
+                "blocked": why_not_open(t) if kind == "missing" else None,
                 # the payment's own FreeAgent settings, and FreeAgent's explanation if it has one
                 "settings": self.payment_settings(t["url"]),
                 "freeagent": {**(self._freeagent_explanation(t) or {}),

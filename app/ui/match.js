@@ -1052,6 +1052,8 @@ function statementRow(t) {
     if (fa.connected && !approveBlocker(r)) {
       action = `<button class="btn small primary" data-action="st-approve" data-url="${esc(t.url)}" data-id="${r.id}">Approve</button>`;
     }
+  } else if (t.status === "missing" && t.blocked) {
+    label = "No receipt"; detail = "Attach it in FreeAgent";
   } else if (t.status === "missing" && t.suggestion) {
     detail = t.suggestion.kind === "email" ? "An email may be the receipt" : "An ignored file may be the receipt";
   }
@@ -1318,6 +1320,11 @@ function panelHtml(t) {
       ${learnHtml(r)}
       ${lastFilingHtml(r)}
       <div class="m-actions">${link}<button class="btn" data-action="st-other">Another file</button>${removeExplanationButton(t)}</div></div>`;
+  }
+  if (t.blocked) {
+    return `${head}<div class="st-pbody">
+      <div class="m-wait"><div class="t">Can't add a receipt here</div><div class="b">${esc(t.blocked[0].toUpperCase() + t.blocked.slice(1))}.</div></div>
+      ${fa.web ? `<div class="m-actions"><a class="btn" href="${esc(fa.web)}" target="_blank" rel="noopener">Open FreeAgent</a></div>` : ""}</div>`;
   }
   // missing (or choosing another file)
   const s = t.suggestion;
