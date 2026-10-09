@@ -233,6 +233,16 @@ def test_iso_dates_are_never_read_day_first() -> None:
     assert _parse_date("03/09/2026", []) == "2026-09-03"
 
 
+def test_the_subject_suggested_is_a_piece_of_the_real_subject() -> None:
+    from app.supplier_builder import _subject_hint
+
+    hint = _subject_hint("Your Thursday evening trip with Uber",
+                         ["Your Monday morning trip with Uber", "Your Friday evening trip with Uber"])
+    assert hint and hint.lower() in "your thursday evening trip with uber", hint
+    assert _subject_hint("Your Thursday evening trip with Uber") == "evening trip with Uber"
+    assert _subject_hint("Your booking confirmation for 12 Oct") == "Your booking confirmation for"
+
+
 if __name__ == "__main__":
     failures = 0
     for name, func in sorted(globals().items()):
