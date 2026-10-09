@@ -1073,11 +1073,14 @@ function statementRow(t) {
   }
   // a suggested file shows its receipt on hover, as in the candidate list
   const thumb = t.status === "in_match" && r ? thumbUrl(r) : "";
+  // a found email shows the email on hover
+  const mail = t.status === "missing" && !t.blocked && t.suggestion?.kind === "email" && t.suggestion.message_id
+    ? `data-peek-mail="${esc(t.suggestion.message_id)}" data-peek-account="${esc(t.suggestion.account || "")}"` : "";
   return `<tr class="${look} ${t.url === m.stSel ? "selected" : ""}" data-action="st-sel" data-url="${esc(t.url)}">
     <td class="d">${esc(statementDate(t.date))}</td>
     <td class="mono">${esc(t.description)}</td>
     <td class="r amt ${t.amount > 0 ? "in" : ""}">${t.amount > 0 ? "+" : "−"}${esc(money(Math.abs(t.amount), "GBP"))}</td>
-    <td><div class="st-rec"><span class="st-rec-what" ${thumb ? `data-peek="${esc(thumb)}"` : ""}><span class="st-status ${look}">${icon}<span>${esc(label)}</span></span>
+    <td><div class="st-rec"><span class="st-rec-what" ${thumb ? `data-peek="${esc(thumb)}"` : mail}><span class="st-status ${look}">${icon}<span>${esc(label)}</span></span>
       <span class="muted">${esc(detail)}</span></span><span class="grow"></span>${action}</div></td></tr>`;
 }
 
@@ -1210,9 +1213,21 @@ peek.className = "st-peek";
 peek.hidden = true;
 document.body.appendChild(peek);
 document.addEventListener("mouseover", (e) => {
-  const row = e.target.closest?.("[data-peek]");
+  const row = e.target.closest?.("[data-peek], [data-peek-mail]");
   if (!row) { peek.hidden = true; return; }
-  if (peek.dataset.src !== row.dataset.peek) {
+  if (row.dataset.peekMail) {
+    // an email found for a payment: the email itself, in the Emails view's sandbox
+    const id = row.dataset.peekMail;
+    if (peek.dataset.src !== `mail:${id}`) {
+      peek.dataset.src = `mail:${id}`;
+      const shown = () => { if (peek.dataset.src === `mail:${id}` && em.mails[id]) peek.innerHTML = peekMailHtml(em.mails[id]); };
+      if (em.mails[id]) shown();
+      else {
+        peek.innerHTML = `<div class="m-nodoc"><span class="spinner"></span>Opening the email…</div>`;
+        whenOpen(id, row.dataset.peekAccount).then(shown);
+      }
+    }
+  } else if (peek.dataset.src !== row.dataset.peek) {
     peek.dataset.src = row.dataset.peek;
     peek.innerHTML = `<img src="${esc(row.dataset.peek)}" alt="Receipt preview">`;
   }
@@ -1224,6 +1239,13 @@ document.addEventListener("mouseover", (e) => {
   peek.hidden = false;
 });
 document.addEventListener("scroll", () => { peek.hidden = true; }, true);
+
+/** The hover preview of an email: who, what, and the email (sandboxed). */
+function peekMailHtml(mail) {
+  return `<div class="st-peek-mail"><b>${esc(mail.subject || "(no subject)")}</b>
+    <span class="muted">${esc(mail.from_name)} · ${esc(shortDate(mail.date))}</span></div>
+    ${emailFrame(mail).replace('class="doc e-frame"', 'class="st-peek-frame"')}`;
+}
 
 const VAT_RATES = [["20.0", "20% (standard)"], ["5.0", "5% (reduced)"], ["0.0", "0% (zero-rated or none)"]];
 
@@ -1343,7 +1365,9 @@ function panelHtml(t) {
   }
   // missing (or choosing another file)
   const s = t.suggestion;
-  const hint = s && t.status === "missing" ? `<div class="m-issue"><div class="t">${s.kind === "email" ? "An email may be the receipt" : "An ignored file may be the receipt"}</div>
+  const peekMail = s?.kind === "email" && s.message_id
+    ? `data-peek-mail="${esc(s.message_id)}" data-peek-account="${esc(s.account || "")}"` : "";
+  const hint = s && t.status === "missing" ? `<div class="m-issue" ${peekMail}><div class="t">${s.kind === "email" ? "An email may be the receipt" : "An ignored file may be the receipt"}</div>
       <div class="b">${esc(s.label)}</div>
       <div class="m-iss-ctl"><button class="btn small primary" data-action="st-use" data-url="${esc(t.url)}">${s.kind === "email" ? "Use that email" : "Use that file"}</button></div></div>` : "";
   const approvedNote = t.approved && t.status !== "filed"
