@@ -35,9 +35,8 @@ New versions arrive inside the app (**Update now**).
    bar reads the inbox, FreeAgent and email straight away.
    Photos are tidied (cut to the receipt, squared up, grey with the
    contrast lifted) only when the tidied copy reads back with the same
-   total, date, VAT and amounts; otherwise the plain photo is used. The
-   note under the photo says which, with **Show plain photo** to switch,
-   and **Open original** always opens the photo exactly as it arrived.
+   total, date, VAT and amounts; otherwise the plain photo is used.
+   **Open original** always opens the photo exactly as it arrived.
 2. **Match** lists only what needs you, each with its one problem in a few
    words: *Which day?*, *No £68.85 payment*, *Expense in
    euros*. Below are **Ready to file**, **Waiting for bank** and **Filed
