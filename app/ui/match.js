@@ -927,31 +927,41 @@ function chooseFeedHtml(fa) {
 
 const ST_LIMITS = [50, 100, 250, 0];      // a page of how many; 0: all of them
 
-/** Bank Feed's header: a month (‹ October 2026 ›), or every month with
- * how many of the latest to show. */
+/** Bank Feed's header: every month (pages at the foot), or one month
+ * (‹ October 2026 ›). */
 function stViewHtml(st) {
   const all = st.month === "all";
   const mode = (v, label) => `<button type="button" class="${(v === "all") === all ? "on" : ""}" data-action="st-view" data-mode="${v}"
       aria-pressed="${(v === "all") === all}">${label}</button>`;
-  const pick = all
-    ? `<label class="st-limit">Show <select class="setting-select" data-action="st-limit" aria-label="Payments per page">${ST_LIMITS.map((n) =>
-        `<option value="${n}" ${state.stLimit === n ? "selected" : ""}>${n ? `${n} a page` : "All"}</option>`).join("")}</select></label>`
+  const pick = all ? ""
     : `<div class="st-month"><button class="btn small" data-action="st-month" data-delta="-1" aria-label="Previous month">‹</button>
         <span>${esc(monthLabel(st.month))}</span>
         <button class="btn small" data-action="st-month" data-delta="1" aria-label="Next month">›</button></div>`;
   return `<div class="seg2" role="group" aria-label="Show">${mode("month", "Month")}${mode("all", "All")}</div>${pick}`;
 }
 
-/** Under every month's payments, a page at a time: newer, which page, older. */
+/** The page numbers to show: all when few, else the first, the last and
+ * those around this one, with gaps (null) between. */
+function pageNumbers(page, pages) {
+  if (pages <= 7) return [...Array(pages).keys()];
+  const near = [0, page - 1, page, page + 1, pages - 1].filter((n) => n >= 0 && n < pages);
+  const list = [...new Set(near)].sort((a, b) => a - b);
+  return list.flatMap((n, i) => (i && n - list[i - 1] > 1 ? [null, n] : [n]));
+}
+
+/** Under every month's payments: Page 1 2 3 …, and how many a page. */
 function stMoreHtml(st) {
   const total = st.total_payments || 0, size = st.limit || 0;
-  if (st.month !== "all" || !size || total <= size) return "";
-  const page = Math.floor((st.offset || 0) / size), pages = Math.ceil(total / size);
-  const from = page * size + 1, to = Math.min(total, (page + 1) * size);
-  return `<div class="st-more st-pager">
-    <button class="btn small" data-action="st-page" data-delta="-1" ${page <= 0 ? "disabled" : ""}>‹ Newer</button>
-    <span class="muted">Page ${page + 1} of ${pages} · ${from}–${to} of ${total}</span>
-    <button class="btn small" data-action="st-page" data-delta="1" ${page >= pages - 1 ? "disabled" : ""}>Older ›</button></div>`;
+  if (st.month !== "all" || total <= ST_LIMITS[0]) return "";       // fits on the smallest page
+  const page = size ? Math.floor((st.offset || 0) / size) : 0, pages = size ? Math.ceil(total / size) : 1;
+  const numbers = pages > 1 ? `<span class="muted">Page</span>
+    <button class="btn small" data-action="st-page" data-page="${page - 1}" ${page <= 0 ? "disabled" : ""} aria-label="Newer">‹</button>
+    ${pageNumbers(page, pages).map((n) => n === null ? `<span class="muted">…</span>`
+      : `<button class="btn small st-pnum ${n === page ? "on" : ""}" data-action="st-page" data-page="${n}" ${n === page ? 'aria-current="page"' : ""}>${n + 1}</button>`).join("")}
+    <button class="btn small" data-action="st-page" data-page="${page + 1}" ${page >= pages - 1 ? "disabled" : ""} aria-label="Older">›</button>` : "";
+  const per = `<label class="st-limit">Show <select class="setting-select" data-action="st-limit" aria-label="Payments per page">${ST_LIMITS.map((n) =>
+      `<option value="${n}" ${state.stLimit === n ? "selected" : ""}>${n ? `${n} per page` : "All"}</option>`).join("")}</select></label>`;
+  return `<div class="st-more st-pager">${numbers}<span class="grow"></span>${per}</div>`;
 }
 
 function renderStatement() {
@@ -1740,14 +1750,13 @@ document.addEventListener("click", async (e) => {
       });
     case "st-filter": state.stFilter = target.dataset.filter; return render();
     case "st-view":
-    case "st-limit-more":
-      if (action === "st-view") { state.stView = target.dataset.mode === "all" ? "all" : "month"; setPref("stViewMode", state.stView); }
-      else { state.stLimit = Number(target.dataset.limit) || 0; setPref("stLimit", state.stLimit); }
+      state.stView = target.dataset.mode === "all" ? "all" : "month";
+      setPref("stViewMode", state.stView);
       state.stPage = 0;
       state.statement = null; m.stSel = null;
       return refresh(true);
     case "st-page":
-      state.stPage = Math.max(0, state.stPage + Number(target.dataset.delta));
+      state.stPage = Math.max(0, Number(target.dataset.page) || 0);
       state.statement = null; m.stSel = null;
       $("#content").querySelector(".st-wrap")?.scrollTo(0, 0);
       return refresh(true);

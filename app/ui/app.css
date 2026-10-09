@@ -564,6 +564,10 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
 .st-limit { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
 .st-limit select { width: auto; min-width: 116px; max-width: none; }
 .st-more { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 4px 0; }
+.st-pager { justify-content: flex-start; flex-wrap: wrap; gap: 6px; }
+.st-pager .grow { flex: 1; }
+.st-pnum { min-width: 30px; justify-content: center; }
+.st-pnum.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 .st-body { padding: 20px 24px 40px; display: flex; flex-direction: column; gap: 18px; max-width: 1180px; width: 100%; }
 .st-summary { border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; display: flex; flex-wrap: wrap; gap: 18px 32px; align-items: center; }
 .st-summary .main { flex: 1 1 320px; min-width: 0; }
