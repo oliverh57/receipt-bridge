@@ -41,7 +41,7 @@ const em = {
   dialog: null,           // the email whose "Convert to receipt" dialog is open
   dialogError: "",
   lastAdd: null,          // the email last added, whose failure its header shows
-  images: false,          // show remote images in emails
+  images: true,           // load the pictures emails link to ("Hide images" stops them)
   searchTimer: null,
   drawn: {},              // the HTML of each part on screen, so unchanged parts aren't redrawn
 };
@@ -188,7 +188,7 @@ function openDialog(id) {
 function closeEmailDialog() {
   em.dialog = null;
   em.dialogError = "";
-  em.drawn.dialog = undefined;
+  em.drawn.dialog = em.drawn.preview = undefined;
   const host = $("#modal");
   if (host.querySelector(".e-dialog")) host.innerHTML = "";
 }
@@ -396,8 +396,7 @@ function dialogHtml(mail) {
   const known = mail.in_files;
   const before = known && ["ignored", "failed", "deleted"].includes(known.status)
     ? `<div class="m-note e-dnote">This email is in Archived. Adding it moves it back to Files.</div>` : "";
-  return `<div class="m-overlay e-overlay"><section class="m-dialog wide e-dialog m-keep" role="dialog" aria-modal="true" aria-labelledby="e-dialog-title">
-      <h2 id="e-dialog-title">Convert to receipt</h2>
+  return `<h2 id="e-dialog-title">Convert to receipt</h2>
       <p class="sub">${esc(mail.subject || "(no subject)")} · ${esc(mail.from_name)}. ${found}</p>
       <div class="m-kv">
         <span class="k">Supplier</span>${input("supplier", "text", 'placeholder="Who is it from?" autocomplete="off"')}
@@ -407,7 +406,6 @@ function dialogHtml(mail) {
           `<option value="${v}" ${f.vat_choice === v ? "selected" : ""}>${l}</option>`).join("")}</select>${f.vat_choice === "amount"
           ? input("vat", "text", 'inputmode="decimal" placeholder="0.00" autocomplete="off" aria-label="VAT amount"')
           : `<span class="e-vat-note muted">${esc(vatNote(f, d))}</span>`}</span>
-        <span class="k">Receipt</span><span class="e-doc-name">${d.pdf ? `${PAPERCLIP} ${esc(d.pdf)}` : "This email, saved as a PDF"}</span>
       </div>
       ${others.length ? `<div class="e-others"><span class="muted">Other amounts:</span>${others.map((a) =>
         `<button type="button" class="e-other" data-action="e-amount" data-amount="${a.amount.toFixed(2)}" data-currency="${esc(a.currency)}"
@@ -422,12 +420,24 @@ function dialogHtml(mail) {
       <div class="m-dialog-foot">
         <button class="btn" data-action="e-cancel">Cancel</button>
         <button class="btn primary" data-action="e-add">${f.paid_by === "personal" ? "Add as an expense" : "Add to Files"} ${kbd("⏎", true)}</button>
-      </div>
-    </section></div>`;
+      </div>`;
 }
 
-/** The dialog lives in #modal, over the whole window. Redrawn only when
- * something in it changed, keeping the field being typed in. */
+/** Beside the form: what becomes the receipt. The attached PDF, or the
+ * email itself (it's printed to a PDF), in the same sandbox as the view. */
+function previewHtml(mail) {
+  const d = mail.draft;
+  const head = `<div class="e-dlabel">Receipt</div><div class="e-doc-name">${d.pdf ? `${PAPERCLIP} ${esc(d.pdf)}` : "This email, saved as a PDF"}</div>`;
+  const params = new URLSearchParams({ account: mail.account, t: TOKEN });
+  const body = d.pdf
+    ? `<iframe class="e-pdf" title="${esc(d.pdf)}" src="/api/emails/${encodeURIComponent(mail.id)}/pdf?${params}"></iframe>`
+    : emailFrame(mail).replace('class="doc e-frame"', 'class="e-pdf"');
+  return `<div class="e-dphead">${head}</div>${body}`;
+}
+
+/** The dialog lives in #modal, over the whole window: the form, and the
+ * receipt beside it. Each half is redrawn only when it changed, so the
+ * preview never reloads as you type, and the field being typed in stays. */
 function drawEmailDialog() {
   const host = $("#modal");
   const mail = em.dialog && em.mails[em.dialog];
@@ -435,12 +445,22 @@ function drawEmailDialog() {
     if (em.dialog) closeEmailDialog();
     return;
   }
+  if (!host.querySelector(".e-dialog")) {
+    host.innerHTML = `<div class="m-overlay e-overlay"><section class="m-dialog e-dialog m-keep" role="dialog" aria-modal="true"
+        aria-labelledby="e-dialog-title"><div class="e-dform"></div><div class="e-dpreview"></div></section></div>`;
+    em.drawn.dialog = em.drawn.preview = undefined;
+  }
+  const preview = previewHtml(mail);
+  if (em.drawn.preview !== preview) {
+    host.querySelector(".e-dpreview").innerHTML = preview;
+    em.drawn.preview = preview;
+  }
   const html = dialogHtml(mail);
-  if (em.drawn.dialog === html && host.querySelector(".e-dialog")) return;
+  if (em.drawn.dialog === html) return;
   const focus = document.activeElement;
   const field = host.contains(focus) ? focus.dataset.field || focus.dataset.action : null;
   const at = host.contains(focus) ? focus.selectionStart : null;
-  host.innerHTML = html;
+  host.querySelector(".e-dform").innerHTML = html;
   em.drawn.dialog = html;
   if (field) {
     const again = host.querySelector(`[data-field="${field}"]`) || host.querySelector(`[data-action="${field}"]`);

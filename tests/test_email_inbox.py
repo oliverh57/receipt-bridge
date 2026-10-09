@@ -98,6 +98,18 @@ def test_the_draft_reads_supplier_date_total_and_vat() -> None:
     assert {a["amount"] for a in draft["amounts"]} >= {180.0, 150.0}
 
 
+def test_pictures_inside_the_email_are_shown_in_place() -> None:
+    raw = (b'From: Shop <a@shop.test>\nSubject: Receipt\nMIME-Version: 1.0\n'
+           b'Content-Type: multipart/related; boundary="X"\n\n--X\nContent-Type: text/html\n\n'
+           b'<img src="cid:logo@shop"><img src="cid:gone">\n--X\nContent-Type: image/png\n'
+           b'Content-ID: <logo@shop>\nContent-Transfer-Encoding: base64\n\niVBORw0KGgo=\n--X--\n')
+    message = Email.from_bytes(raw)
+    assert message.attachments == [], "a picture in the email isn't an attachment"
+    html = message.html_with_images()
+    assert '<img src="data:image/png;base64,iVBORw0KGgo=">' in html and 'src="cid:gone"' in html
+    assert message.html_with_images(limit=1) == message.html, "too big: left as it was"
+
+
 def test_nothing_is_guessed_when_the_email_shows_no_money() -> None:
     draft = email_inbox.draft(email("m1", "Hello", "See you soon", sender="friend@example.test"))
     assert draft["total"] is None and draft["vat"] is None and draft["currency"] == "GBP"
@@ -298,6 +310,11 @@ def test_the_api_needs_the_token_and_a_real_message_id() -> None:
         opened = client.get("/api/emails/hotel1", headers={"x-receipt-bridge": token}).json()
         assert opened["subject"] == "Your receipt" and opened["attachments"][0]["filename"] == "invoice.pdf"
         assert "data" not in opened["attachments"][0], "attachment bytes stay on the server"
+        pdf = client.get(f"/api/emails/hotel1/pdf?t={token}")
+        assert pdf.status_code == 200 and pdf.content == b"%PDF-1.4 hotel"
+        assert pdf.headers["content-type"] == "application/pdf"
+        assert client.get(f"/api/emails/lunch1/pdf?t={token}").status_code == 404
+        assert client.get("/api/emails/hotel1/pdf").status_code == 403
         bad = client.post("/api/emails/hotel1/add", json={"total": "abc"}, headers={"x-receipt-bridge": token})
         assert bad.status_code == 400 and "number" in bad.json()["detail"]
         known = client.post("/api/emails/known", json={"ids": ["hotel1"]}, headers={"x-receipt-bridge": token})

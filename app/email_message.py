@@ -63,6 +63,9 @@ class Email:
     html: str = ""
     plain: str = ""
     attachments: list[dict] = field(default_factory=list)
+    # Pictures inside the email itself, by Content-ID: the HTML shows them
+    # as <img src="cid:…">. {cid: (content type, bytes)}
+    inline_images: dict[str, tuple[str, bytes]] = field(default_factory=dict, repr=False)
 
     _text_cache: str | None = field(default=None, repr=False, compare=False)
     _attachment_text_cache: str | None = field(
@@ -120,6 +123,25 @@ class Email:
 
         self._attachment_text_cache = "\n".join(chunks)
         return self._attachment_text_cache
+
+    def html_with_images(self, limit: int = 8 * 1024 * 1024) -> str:
+        """The HTML with its own pictures in place: each `cid:` reference
+        becomes a data: URL, up to `limit` bytes in all, so it shows without
+        the attachments (in the app, and when the email is printed)."""
+        if not self.inline_images or "cid:" not in self.html:
+            return self.html
+        import base64
+
+        budget = [limit]
+
+        def swap(match: re.Match) -> str:
+            found = self.inline_images.get(html_lib.unescape(match.group(1)))
+            if not found or len(found[1]) > budget[0]:
+                return match.group(0)
+            budget[0] -= len(found[1])
+            return f"data:{found[0]};base64,{base64.b64encode(found[1]).decode()}"
+
+        return re.sub(r"cid:([^\"'\s)>]+)", swap, self.html, flags=re.I)
 
     @property
     def text(self) -> str:
@@ -184,6 +206,7 @@ class Email:
     def from_email_message(cls, parsed: EmailMessage) -> "Email":
         html_body, plain_body = "", ""
         attachments: list[dict] = []
+        inline_images: dict[str, tuple[str, bytes]] = {}
 
         for part in parsed.walk():
             if part.is_multipart():
@@ -191,6 +214,11 @@ class Email:
             content_type = part.get_content_type()
             disposition = str(part.get("Content-Disposition") or "")
             payload = part.get_payload(decode=True) or b""
+            cid = str(part.get("Content-ID") or "").strip().strip("<>")
+            if cid and content_type.startswith("image/") and payload:
+                inline_images[cid] = (content_type, payload)
+                if "attachment" not in disposition:
+                    continue
             if "attachment" in disposition:
                 attachments.append(
                     {
@@ -227,4 +255,5 @@ class Email:
             html=html_body,
             plain=plain_body,
             attachments=attachments,
+            inline_images=inline_images,
         )

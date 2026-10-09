@@ -347,6 +347,21 @@ def create_app(service: ReceiptService) -> FastAPI:
         except Exception as exc:
             raise gmail_failed(exc) from exc
 
+    @app.get("/api/emails/{message_id}/pdf")
+    def email_pdf(message_id: str, account: str = "") -> Response:
+        """The email's attached PDF, for the preview in "Convert to receipt"
+        (an <iframe>, so the token comes as ?t=)."""
+        gmail_id(message_id)
+        try:
+            found = service.email_pdf(account, message_id)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except Exception as exc:
+            raise gmail_failed(exc) from exc
+        if found is None:
+            raise HTTPException(404, "This email has no PDF attached")
+        return Response(found[1], media_type="application/pdf", headers={"Content-Disposition": "inline"})
+
     @app.post("/api/emails/{message_id}/add")
     def email_add(message_id: str, body: EmailAdd) -> dict[str, Any]:
         gmail_id(message_id)

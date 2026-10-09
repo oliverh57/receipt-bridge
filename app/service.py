@@ -2475,7 +2475,7 @@ class ReceiptService:
             out.write_bytes(attached[0]["data"])
             return out, "attachment"
         import html as html_lib
-        body = message.html or f"<pre>{html_lib.escape(message.plain or '')}</pre>"
+        body = message.html_with_images() or f"<pre>{html_lib.escape(message.plain or '')}</pre>"
         pool = BrowserPool(headless=self.config.headless,
                            block_trackers=bool(self.config.pdf.get("block_trackers", True)))
         try:
@@ -2574,12 +2574,21 @@ class ReceiptService:
             "from_address": address,
             "to": message.recipient,
             "date": message.date.isoformat() if message.date else "",
-            "html": message.html,
+            "html": message.html_with_images(),
             "text": message.text,
             "attachments": attachments,
             "draft": email_inbox.draft(message),
             "in_files": self.emails_in_files([message_id]).get(message_id),
         }
+
+    def email_pdf(self, account: str, message_id: str) -> tuple[str, bytes] | None:
+        """The PDF an email carries, which becomes the receipt: (filename,
+        bytes), or None. Shown beside "Convert to receipt"; the email is in
+        memory already, from being opened."""
+        chosen, client = self._mail_client(account)
+        message = self._cached_email(chosen, client, message_id)
+        attached = [a for a in message.pdf_attachments() if a.get("data")]
+        return (attached[0].get("filename") or "receipt.pdf", attached[0]["data"]) if attached else None
 
     def add_email(self, account: str, message_id: str, fields: dict[str, Any]) -> bool:
         """"Add to Files" on an email: queued, as printing it takes a browser.
