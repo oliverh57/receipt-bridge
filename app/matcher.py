@@ -89,6 +89,26 @@ def needs_receipt(t: dict[str, Any]) -> bool:
         and not t.get("explanation_locked")
 
 
+def why_not_open(t: dict[str, Any]) -> str | None:
+    """Why a payment out can't take a receipt here (needs_receipt is False),
+    in a few words for the person; None when it can."""
+    if needs_receipt(t):
+        return None
+    if float(t["amount"]) >= 0:
+        return "it's money in"
+    unexplained = t.get("unexplained_amount")
+    if unexplained not in (None, 0, 0.0):
+        return (f"FreeAgent has it partly explained (£{-float(unexplained):.2f} of "
+                f"£{-float(t['amount']):.2f} still to explain). Finish it in FreeAgent")
+    if t.get("explanation_attachments"):
+        return "it already has its receipt in FreeAgent"
+    if t.get("explanation_locked"):
+        return "FreeAgent has locked its explanation (a closed period?). Attach the receipt in FreeAgent"
+    if not t.get("explanation_url"):
+        return "FreeAgent has it split into several explanations. Attach the receipt in FreeAgent"
+    return "FreeAgent won't take a receipt for it"
+
+
 def _days(t: dict[str, Any], when: date) -> int:
     return (date.fromisoformat(t["dated_on"]) - when).days
 

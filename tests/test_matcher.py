@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from app.matcher import match_receipts, supplier_token  # noqa: E402
+from app.matcher import match_receipts, supplier_token, why_not_open  # noqa: E402
 
 GBP = {"GBP"}
 
@@ -146,6 +146,19 @@ def test_a_wrongly_chosen_payment_points_to_the_exact_one() -> None:
     assert match_receipts([fair], FEED, GBP)[1].better is None
     taken = [talk, rc(2, "2026-10-07", 5.49, "Talk360")]                      # the exact one is another's
     assert match_receipts(taken, feed, GBP)[1].better is None
+
+
+def test_a_payment_that_cant_take_a_receipt_says_why() -> None:
+    """Shown as "No receipt" in Bank Feed, but FreeAgent's explanation is in
+    the way: say what, not "already has its receipt"."""
+    base = tx(1, "2026-10-08", -5.49, "TALK360")
+    assert why_not_open(base) is None
+    assert "partly explained (£2.00 of £5.49" in why_not_open({**base, "unexplained_amount": -2.0})
+    one = {**base, "unexplained_amount": 0, "explanation_url": "e/1"}
+    assert why_not_open(one) is None, "one unlocked explanation, no receipt: attach to it"
+    assert "locked" in why_not_open({**one, "explanation_locked": 1})
+    assert "already has its receipt" in why_not_open({**one, "explanation_attachments": 1})
+    assert "several explanations" in why_not_open({**base, "unexplained_amount": 0})
 
 
 def test_a_pinned_payment_wins_even_when_the_amount_differs() -> None:
