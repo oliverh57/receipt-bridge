@@ -365,6 +365,18 @@ def create_app(service: ReceiptService) -> FastAPI:
     def emails_known(body: EmailIds) -> dict[str, Any]:
         return service.emails_in_files(body.ids)
 
+    @app.post("/api/emails/ignore")
+    def emails_ignore(body: dict[str, Any]) -> dict[str, Any]:
+        """Right-click → Ignore: an email flagged as a receipt that isn't one
+        (or `ignored: false`, Don't ignore). Remembered on this Mac."""
+        ids = body.get("ids")
+        if not isinstance(ids, list) or not ids or len(ids) > 500:
+            raise HTTPException(400, "ids: a list of Gmail message ids")
+        for message_id in ids:
+            gmail_id(str(message_id))
+        service.ignore_emails([str(i) for i in ids], body.get("ignored", True) is not False)
+        return {"ok": True}
+
     def gmail_id(message_id: str) -> str:
         if not re.fullmatch(r"[A-Za-z0-9_-]{6,64}", message_id):
             raise HTTPException(400, "Not a Gmail message id")

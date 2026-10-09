@@ -26,6 +26,7 @@ const em = {
   account: "",            // the mailbox chosen in the list ("" = the first)
   q: "",                  // the search, as Gmail search syntax
   receiptsOnly: true,     // "Likely receipts" (the default) instead of "All mail"
+  pill: "all",            // the bar over the list: all | todo (receipts to check) | added | ignored
   key: "",                // what the list was loaded for (account, search, filter)
   list: null,             // {account, emails[], next}
   loading: false,
@@ -263,13 +264,31 @@ function emailsHead() {
     </header>`;
 }
 
-/** Above the list: the search, and All mail / Likely receipts. */
+/** Where an email stands: added to Files, ignored, a receipt still to
+ * check, or just mail. */
+function emailState(x) {
+  const known = x.in_files?.status;
+  if (["pending", "exported", "filed"].includes(known)) return "added";
+  if (x.ignored || ["ignored", "failed", "deleted"].includes(known)) return "ignored";
+  return x.receipt ? "todo" : "mail";
+}
+
+const E_PILLS = [["all", "All", ""], ["todo", "To check", "seg-miss"], ["added", "Added", "seg-done"], ["ignored", "Ignored", "e-dot-ignored"]];
+
+/** Above the list: the search, All mail / Likely receipts, and the bar to
+ * sort through them (as in Bank Feed): all, to check, added, ignored. */
 function emailsTools() {
   const filter = (on, label, value) => `<button type="button" class="${on ? "on" : ""}" data-action="e-filter" data-receipts="${value}"
       aria-pressed="${on}">${label}</button>`;
+  const rows = em.list?.emails || [];
+  const count = (k) => (k === "all" ? rows.length : rows.filter((x) => emailState(x) === k).length);
+  const pills = rows.length ? `<div class="st-pills e-pills" role="group" aria-label="Show">${E_PILLS.map(([k, label, dot]) =>
+      `<button class="st-pill ${em.pill === k ? "on" : ""}" data-action="e-pill" data-pill="${k}" aria-pressed="${em.pill === k}">${
+        dot ? `<i class="${dot}"></i>` : ""}<span>${label}</span><b>${count(k)}</b></button>`).join("")}</div>` : "";
   return `<label class="m-search e-search">${ICON.search}<input type="search" placeholder="Search mail: supplier, amount, from:…" aria-label="Search mail"
         data-action="e-search" value="${esc(em.q)}" autocomplete="off" spellcheck="false"></label>
-    <div class="seg2 e-filter" role="group" aria-label="Show">${filter(!em.receiptsOnly, "All mail", "0")}${filter(em.receiptsOnly, "Likely receipts", "1")}</div>`;
+    <div class="seg2 e-filter" role="group" aria-label="Show">${filter(!em.receiptsOnly, "All mail", "0")}${filter(em.receiptsOnly, "Likely receipts", "1")}</div>
+    ${pills}`;
 }
 
 function emailsList() {
@@ -278,7 +297,13 @@ function emailsList() {
       <div class="e-retry"><button class="btn small" data-action="e-reload">Try again</button></div></div>`;
   }
   if (!em.list) return `<div class="m-none"><span class="spinner" aria-hidden="true"></span> ${em.q.trim() ? "Searching…" : "Loading…"}</div>`;
-  const rows = em.list.emails;
+  const all = em.list.emails;
+  const rows = em.pill === "all" ? all : all.filter((x) => emailState(x) === em.pill);
+  if (all.length && !rows.length) {
+    return `<div class="m-none">${{ todo: "Nothing left to check here.", added: "None of these are in Files yet.",
+      ignored: "Nothing ignored here." }[em.pill] || "Nothing here."}
+      <div class="e-retry"><button class="btn small" data-action="e-pill" data-pill="all">Show all</button></div></div>`;
+  }
   if (!rows.length) {
     return `<div class="m-none">${em.q.trim() ? `No emails match “${esc(em.q.trim())}”.` : em.receiptsOnly ? "No likely receipts found." : "No emails."}
       ${em.receiptsOnly ? `<div class="e-retry"><button class="btn small" data-action="e-filter" data-receipts="0">Show all mail</button></div>` : ""}</div>`;
@@ -292,15 +317,16 @@ const IN_FILES = { pending: "In Files", exported: "Saved", filed: "Saved", ignor
 
 function emailRow(x) {
   const on = x.id === em.sel;
-  const known = x.in_files && IN_FILES[x.in_files.status];
+  const known = (x.in_files && IN_FILES[x.in_files.status]) || (x.ignored ? "Ignored" : "");
+  const flag = emailState(x) === "ignored" ? "" : x.receipt;     // ignored: no longer marked as a receipt
   const badges = [
-    x.receipt === "likely" ? `<span class="e-badge likely">Receipt</span>` : x.receipt === "maybe" ? `<span class="e-badge maybe">Receipt?</span>` : "",
+    flag === "likely" ? `<span class="e-badge likely">Receipt</span>` : flag === "maybe" ? `<span class="e-badge maybe">Receipt?</span>` : "",
     known ? `<span class="e-badge done">${esc(known)}</span>` : "",
     x.has_attachment ? `<span class="e-clip">${PAPERCLIP}</span>` : "",
     x.amount ? `<span class="e-amt">${esc(money(x.amount.amount, x.amount.currency))}</span>` : "",
   ].join("");
   const why = x.why?.length ? `Looks like a receipt: ${x.why.join(", ").toLowerCase()}.` : "";
-  return `<button type="button" class="m-row e-row ${x.receipt ? `e-${x.receipt}` : ""} ${x.unread ? "unread" : ""} ${known ? "e-known" : ""} ${on ? "selected" : ""}"
+  return `<button type="button" class="m-row e-row ${flag ? `e-${flag}` : ""} ${x.unread ? "unread" : ""} ${known ? "e-known" : ""} ${on ? "selected" : ""}"
       data-action="e-pick" data-id="${esc(x.id)}" aria-pressed="${on}" ${why ? `title="${esc(why)}"` : ""}>
       <span class="txt">
         <span class="top"><span class="v">${esc(x.from_name || x.from_address || "Unknown sender")}</span><span class="e-date">${esc(mailDate(x.date))}</span></span>
@@ -575,6 +601,9 @@ document.addEventListener("click", (e) => {
     case "e-pick":
       if (target.dataset.id === em.sel && em.mails[em.sel]) return;
       return pick(target.dataset.id);
+    case "e-pill":
+      em.pill = target.dataset.pill;
+      return render();
     case "e-filter":
       em.receiptsOnly = target.dataset.receipts === "1";
       return emailsLoad();
@@ -706,10 +735,13 @@ document.addEventListener("contextmenu", (e) => {
   const menu = document.createElement("div");
   menu.className = "ctx-menu";
   menu.setAttribute("role", "menu");
+  const flagged = x && emailState(x) === "todo";
   menu.innerHTML = `<div class="ctx-head">${esc(x?.from_name || "Email")}</div>
     <button type="button" role="menuitem" data-action="ctx-e-convert" data-id="${esc(id)}" ${done ? "disabled" : ""}>
       ${done ? "Already in Files" : "Convert to receipt"}</button>
-    <button type="button" role="menuitem" data-action="ctx-e-recurring" data-id="${esc(id)}">Turn into recurring receipt</button>`;
+    <button type="button" role="menuitem" data-action="ctx-e-recurring" data-id="${esc(id)}">Turn into recurring receipt</button>
+    ${x?.ignored ? `<button type="button" role="menuitem" data-action="ctx-e-ignore" data-id="${esc(id)}" data-ignored="0">Don't ignore</button>`
+      : flagged ? `<button type="button" role="menuitem" data-action="ctx-e-ignore" data-id="${esc(id)}" data-ignored="1">Ignore: not a receipt</button>` : ""}`;
   document.body.appendChild(menu);
   const box = menu.getBoundingClientRect();
   menu.style.left = `${Math.max(4, Math.min(e.clientX, innerWidth - box.width - 4))}px`;
@@ -722,6 +754,7 @@ document.addEventListener("click", async (e) => {
   if (!item || item.disabled) return;
   const { action, id } = item.dataset;
   closeContextMenu();
+  if (action === "ctx-e-ignore") return ignoreEmail(id, item.dataset.ignored === "1");
   const mail = await whenOpen(id);
   if (!mail) return;
   if (action === "ctx-e-convert") openDialog(id);
@@ -749,4 +782,16 @@ async function openEmailForPayment(hint, t) {
   em.dialogError = "";
   drawEmailDialog();
   document.querySelector('.e-dialog input[data-field="supplier"]')?.focus();
+}
+
+/** Right-click → Ignore (or Don't ignore): kept on this Mac; it moves to
+ * the Ignored pill and isn't suggested for a payment in Bank Feed. */
+async function ignoreEmail(id, ignored) {
+  const x = findEmail(id);
+  try { await api("/api/emails/ignore", { method: "POST", body: { ids: [id], ignored } }); }
+  catch (err) { return toast(`<b>Not changed.</b> ${esc(err.message)}`); }
+  if (x) x.ignored = ignored;
+  render();
+  undoToast(ignored ? `Ignored: ${x?.subject || "that email"}` : "No longer ignored",
+    ignored ? () => ignoreEmail(id, false) : null);
 }
