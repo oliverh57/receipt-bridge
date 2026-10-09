@@ -174,6 +174,38 @@ def list_row(header: dict[str, Any], account: str) -> dict[str, Any]:
     }
 
 
+def _vat_of(text: str, candidates: list[Any], currency: str, total: float | None) -> float | None:
+    """The VAT printed, never more than 20% of the total (the highest UK
+    rate). A tax table (SumUp: "A (20%) VAT £36.75 £7.35 £44.10", net, tax,
+    total) is read by its columns; failing that, the largest amount labelled
+    VAT that could be VAT; failing that, an amount that is exactly 20% or 5%
+    VAT of the total, on an email that mentions VAT or tax."""
+    if total is None:
+        return None
+    cap = total * 20 / 120 + 0.011
+    if currency == "GBP":
+        from decimal import Decimal
+
+        from .receipt_text import find_vat_lines
+
+        try:
+            found, _lines = find_vat_lines([l for l in text.splitlines() if l.strip()], "GBP", Decimal(str(total)))
+        except Exception:
+            found = None
+        if found is not None and 0 < float(found) <= cap:
+            return round(float(found), 2)
+    labelled = [float(c.value.replace(",", "")) for c in candidates if _vat_label(c.label) and c.currency == currency]
+    plausible = [v for v in labelled if 0 < v <= cap]
+    if plausible:
+        return max(plausible)
+    if re.search(r"\b(vat|tax)\b", text, re.I):
+        for c in candidates:
+            amount = float(c.value.replace(",", ""))
+            if any(abs(amount - total * rate / (100 + rate)) <= 0.011 for rate in (20, 5)):
+                return amount
+    return None
+
+
 def draft(message: Any) -> dict[str, Any]:
     """What the email would become: supplier, date, total, VAT, read from the
     whole email and any PDF it carries. The user can change any of it before
@@ -188,11 +220,7 @@ def draft(message: Any) -> dict[str, Any]:
     best = ranked[0] if ranked else None
     total = float(best.value.replace(",", "")) if best else None
     currency = (best.currency if best else "") or "GBP"
-    vats = sorted((c for c in candidates if _vat_label(c.label) and c.currency == currency),
-                  key=lambda c: -float(c.value.replace(",", "")))
-    vat = float(vats[0].value.replace(",", "")) if vats else None
-    if vat is not None and total is not None and vat >= total:
-        vat = None
+    vat = _vat_of(message.text + ("\n" + message.attachment_text if pdfs else ""), candidates, currency, total)
     return {
         "supplier": _supplier_name(display, domain) if (display or domain) else "",
         "date": message.date_iso,

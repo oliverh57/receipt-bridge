@@ -243,8 +243,9 @@ async function refresh(force = false) {
     || Date.now() - (state.renderedAt || 0) > 60000;
   // …nor while a field or dropdown in the detail is in use (a button with
   // focus is not "in use": that would leave the screen stale after a click)
-  const typing = document.activeElement?.matches?.("input:not([type=checkbox]), select, textarea")
-    && document.activeElement.closest(".filing, .m-keep, .m-search");
+  const typing = (document.activeElement?.matches?.("input:not([type=checkbox]), select, textarea")
+    && document.activeElement.closest(".filing, .m-keep, .m-search"))
+    || document.querySelector(".st-hint-mail:hover");      // reading a found email: a redraw would scroll it back up
   if (due && !typing) {
     render();
     state.renderedAt = Date.now();

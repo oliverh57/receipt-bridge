@@ -1259,6 +1259,23 @@ document.addEventListener("mouseover", (e) => {
 });
 document.addEventListener("scroll", () => { peek.hidden = true; }, true);
 
+/** The email found for a payment, in its "An email may be the receipt"
+ * box: the whole email zoomed to the box's width, scrolling inside it. */
+function hintMailHtml(s) {
+  const mail = em.mails[s.message_id];
+  if (!mail) {
+    const tried = (m.hintTried ||= new Set());
+    if (tried.has(s.message_id) && em.opening !== s.message_id) return "";    // couldn't be opened: just the button
+    if (!tried.has(s.message_id)) {
+      tried.add(s.message_id);
+      setTimeout(() => openEmail(s.message_id, s.account || ""), 0);          // redraws when it's here
+    }
+    return `<div class="st-hint-mail loading"><span class="spinner"></span>Opening the email…</div>`;
+  }
+  // laid out narrower than the hover preview: most emails are about 600px, wider ones still shrink to fit
+  return `<div class="st-hint-mail">${emailFrame(mail, { fit: true, layout: 520 }).replace('class="doc e-frame"', 'class="st-hint-frame"')}</div>`;
+}
+
 /** The hover preview of an email: who, what, and the whole email
  * (sandboxed), zoomed to the preview's width like a page. */
 function peekMailHtml(mail) {
@@ -1387,6 +1404,7 @@ function panelHtml(t) {
   const s = t.suggestion;
   const hint = s && t.status === "missing" ? `<div class="m-issue"><div class="t">${s.kind === "email" ? "An email may be the receipt" : "An ignored file may be the receipt"}</div>
       <div class="b">${esc(s.label)}</div>
+      ${s.kind === "email" && s.message_id ? hintMailHtml(s) : ""}
       <div class="m-iss-ctl"><button class="btn small primary" data-action="st-use" data-url="${esc(t.url)}">${s.kind === "email" ? "Use that email" : "Use that file"}</button></div></div>` : "";
   const approvedNote = t.approved && t.status !== "filed"
     ? `<div class="m-wait"><div class="t">Approved in FreeAgent</div><div class="b">Nothing to do. You can still attach a receipt below.</div></div>` : "";
