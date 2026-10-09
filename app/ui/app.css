@@ -792,9 +792,6 @@ img.doc, .doc img, .m-doc img { -webkit-user-drag: none; user-select: none; }
 .m-bulk-row .v { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .m-bulk-row .a { font-variant-numeric: tabular-nums; }
 
-/* category already set by FreeAgent's own explanation */
-.fa-tag { flex: 0 0 auto; font-size: 11px; font-weight: 600; color: var(--good); background: var(--good-bg);
-  border-radius: 4px; padding: 2px 6px; white-space: nowrap; }
 
 /* Statement summary: the bar, and one row of pills that key it and filter */
 .st-done { font-size: 12px; margin-top: 2px; }
@@ -952,6 +949,9 @@ img.doc, .doc img, .m-doc img { -webkit-user-drag: none; user-select: none; }
 .e-dialog .m-kv .pair { flex-wrap: nowrap; }
 .e-dialog .m-kv .pair .edit-input { flex: 1 1 60px; }
 .e-dialog .m-kv .pair select.e-cur { flex: 0 0 auto; height: 26px; }
+.e-dialog .m-kv .pair select.e-vat { flex: 0 0 auto; width: auto; height: 26px; }
+.e-vat-note { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.e-doc-name { display: inline-flex; align-items: center; gap: 5px; min-width: 0; overflow-wrap: anywhere; }
 .e-dlabel { margin: 18px 0 0; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
 .e-dnote { margin-top: 12px; }
 .e-others { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 12px; font-size: 12px; }

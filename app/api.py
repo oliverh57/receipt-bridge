@@ -92,6 +92,7 @@ class EmailAdd(BaseModel):
     total: float | str | None = None
     currency: str = "GBP"
     vat: float | str | None = None
+    vat_choice: str = "auto"
     paid_by: str = "business"
 
 

@@ -336,7 +336,7 @@ function categoryName(url) { return (state.categories || []).find((c) => c.url =
 function categoryHtml(r, editable) {
   if (!editable) return esc(r.will_file?.category || "—");
   return `<span class="pair"><select data-action="set-category" data-id="${r.id}" aria-label="Category">${categoryOptions(r.category)}</select>${
-    r.category_from_freeagent ? `<span class="fa-tag" title="Set in FreeAgent. Choosing another changes it there.">From FreeAgent</span>`
+    r.category_from_freeagent ? ""
     : r.freeagent_category && r.payment?.explained ? `<span class="ai" title="Saving updates FreeAgent's category. Undo restores it.">Overrides FreeAgent</span>`
     : r.ai_guess?.category ? `<span class="ai" title="Suggested from the supplier and receipt. Change it if it's wrong.">Guess</span>` : ""}</span>`;
 }
@@ -1124,8 +1124,8 @@ document.addEventListener("scroll", () => { peek.hidden = true; }, true);
 const VAT_RATES = [["20.0", "20% (standard)"], ["5.0", "5% (reduced)"], ["0.0", "0% (zero-rated or none)"]];
 
 /** The payment's own FreeAgent details: category, VAT and re-billing.
- * A payment FreeAgent already explained starts from its explanation
- * (tagged "From FreeAgent"); change any of them and "Approve" (at the
+ * A payment FreeAgent already explained starts from its explanation;
+ * change any of them and "Approve" (at the
  * foot of the panel) sends it. Otherwise set them and "No receipt needed" explains it. */
 function paymentCardHtml(t) {
   const fa = state.snap.freeagent || {};
@@ -1144,7 +1144,7 @@ function paymentCardHtml(t) {
         `<option value="${v}" ${vatRate === v ? "selected" : ""}>${l}</option>`).join("")}</select>${own && vatRate ? tag("vat_rate", vatRate) : ""}</span>` : "";
   const changed = own && Object.keys(own.changes || {}).length;
   const updated = t.explained_here?.state === "updated";
-  return `<div class="m-card"><div class="m-card-head"><span>In FreeAgent</span>${own ? `<span class="fa-tag" title="Already explained in FreeAgent. Changes here update it.">From FreeAgent</span>` : ""}</div>
+  return `<div class="m-card"><div class="m-card-head"><span>In FreeAgent</span></div>
     <div class="m-kv">
       <span class="k">Category</span><span class="pair"><select data-action="pay-category" data-url="${esc(t.url)}" aria-label="Category">${categoryOptions(category)}</select>${own ? tag("category", category) : ""}</span>
       ${vat}
