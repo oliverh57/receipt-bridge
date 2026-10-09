@@ -182,7 +182,8 @@ def review(row: Any, match: Match | None, ctx: Context, *, overdue: bool) -> dic
         if match.exact:
             chips.append("Amount")
         else:
-            chips.append(f"+{_money(-float(t['amount']) - float(total or 0))}")
+            more = -float(t["amount"]) - float(total or 0)
+            chips.append(f"{'+' if more > 0 else '−'}{_money(abs(more))}")
         if match.alias_hit:
             chips.append("Name")
         if match.days is not None:
@@ -194,7 +195,12 @@ def review(row: Any, match: Match | None, ctx: Context, *, overdue: bool) -> dic
                    "amount": float(t["amount"]), "chips": chips, "pinned": match.pinned,
                    # further apart than a card usually takes to settle (you chose it)
                    "far": match.days is not None and not -DAYS_BEFORE <= match.days <= DAYS_AFTER,
-                   "explained": explained_for_good(t), "guess": is_guess(t)}
+                   "explained": explained_for_good(t), "guess": is_guess(t),
+                   # you chose this one, but this other payment is the exact amount
+                   "better": None if match.better is None else {
+                       "url": match.better["url"], "date": match.better["dated_on"],
+                       "amount": float(match.better["amount"]),
+                       "description": (match.better.get("description") or "").split("//")[0]}}
     options = []
     if match and match.options:
         for t in match.options:
@@ -291,5 +297,6 @@ def _vat_text(row: Any, ctx: Context, match: Match | None) -> str:
     text = " + ".join(texts)
     if match and match.transaction is not None and not match.exact:
         tip = -float(match.transaction["amount"]) - float(row["total"])
-        text += f" + {_money(tip)} tip (0%)"
+        if tip > 0:                     # a smaller payment isn't filed at all
+            text += f" + {_money(tip)} tip (0%)"
     return text

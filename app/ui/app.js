@@ -1384,6 +1384,7 @@ function move(delta) {
 function setView(view) {
   if (view === state.view) return;
   if (state.view === "emails") closeEmailDialog();
+  if (state.view === "statement") m.linkFile = null;    // leaving Bank Feed ends "Link to other payment"
   state.view = view;
   state.receiptsKey = "";
   state.selectedId = null;
