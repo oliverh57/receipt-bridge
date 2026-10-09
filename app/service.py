@@ -77,6 +77,8 @@ EMAIL_HINT_SEARCHES = 25
 # The Emails view: emails per page of the list, and whole emails kept in
 # memory so opening one again (or adding it) doesn't download it twice.
 EMAIL_PAGE = 50
+# The recurring receipts Receipt Bridge ships with: all Reset app keeps.
+SHIPPED_RULES = {"trainline.yaml"}
 EMAIL_RECEIPT_PAGES = 4          # "Likely receipts": Gmail pages read for one page of the list
 EMAILS_CACHED = 12
 # Category suggestions asked of the on-device model per run.
@@ -602,8 +604,6 @@ class ReceiptService:
         return self._enqueue("reset", self._run_reset)
 
     def _run_reset(self) -> None:
-        from .supplier_builder import HEADER
-
         self._set_activity(busy=True, kind="reset", label="Resetting Receipt Bridge", started_at=_now(), log=[])
         data = self.config.data_dir.resolve()
         if data in (Path("/"), Path.home().resolve()) or len(data.parts) < 3:
@@ -638,11 +638,14 @@ class ReceiptService:
         for key in (self.config.credentials_file, self.config.freeagent_credentials_file):
             key.unlink(missing_ok=True)
 
-        # 3. recurring receipts made here (the ones shipped with the app stay)
-        for rule in self.config.watchers_dir.glob("*.yaml"):
+        # 3. recurring receipts: all but the ones the app ships with (and the
+        # "_example" template). Rules shipped by older versions (Yesim, Uber…)
+        # are left by updates, so this is where they go too.
+        for rule in self.config.watchers_dir.glob("*.y*ml"):
+            if rule.name in SHIPPED_RULES or rule.name.startswith("_"):
+                continue
             try:
-                if rule.read_text(encoding="utf-8").startswith(HEADER):
-                    rule.unlink()
+                rule.unlink()
             except OSError as exc:
                 log.warning("reset: %s: %s", rule.name, exc)
 
