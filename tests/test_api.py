@@ -589,6 +589,44 @@ def test_about_shows_the_version_the_eula_and_real_licences() -> None:
         assert client.get("/api/about/licence?name=nothing-here", headers={"x-receipt-bridge": token}).status_code == 404
 
 
+def test_reset_app_goes_back_to_a_fresh_install_but_keeps_original_photos() -> None:
+    from app.supplier_builder import HEADER
+
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        rules = base / "watchers"
+        rules.mkdir()
+        (rules / "trainline.yaml").write_text("# Trainline booking confirmations.\nid: trainline\n")
+        (rules / "uber.yaml").write_text(HEADER + "id: uber\n")
+        service = ReceiptService(Config(raw={
+            "data_dir": str(base / "data"), "export_dir": str(base / "exports"), "watchers_dir": str(rules),
+            "photo_inbox": str(base / "inbox"), "gmail": {"credentials_file": str(base / "credentials.json")},
+            "freeagent": {"credentials_file": str(base / "freeagent_credentials.json")}}))
+        data = service.config.data_dir
+        _stage(service, 2)
+        service.db.set_state("pref:theme", "dark")
+        service.set_setup_done(True)
+        (base / "credentials.json").write_text("{}")
+        (base / "freeagent_credentials.json").write_text("{}")
+        (data / "accounts").mkdir(exist_ok=True)
+        (data / "accounts" / "me@example.test.json").write_text("{}")
+        for keep in ("photos/2026/receipt.jpg", "bin/receipt-reader", "app.log"):
+            (data / keep).parent.mkdir(parents=True, exist_ok=True)
+            (data / keep).write_text("x")
+        client, token = _client(service)
+        assert client.post("/api/reset", json={}, headers={"x-receipt-bridge": token}).status_code == 400
+        assert client.post("/api/reset", json={"confirm": "reset"}, headers={"x-receipt-bridge": token}).json()["queued"]
+        service._run_reset()                               # the worker isn't running in tests
+        assert service.receipts("pending") == [] and service.db.get_state("pref:theme") is None
+        assert not service.snapshot()["setup"]["done"] and service.accounts.list() == []
+        assert not (base / "credentials.json").exists() and not (base / "freeagent_credentials.json").exists()
+        assert not (data / "pdfs").exists() and not (data / "accounts").exists()
+        assert sorted(p.name for p in rules.iterdir()) == ["trainline.yaml"], "only rules made in the app go"
+        for keep in ("photos/2026/receipt.jpg", "bin/receipt-reader", "app.log"):
+            assert (data / keep).exists(), keep
+        assert service.snapshot()["outcome"]["message"] == "Receipt Bridge is reset."
+
+
 if __name__ == "__main__":
     failures = 0
     for name, func in sorted(globals().items()):

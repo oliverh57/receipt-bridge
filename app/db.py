@@ -154,6 +154,18 @@ class Database:
             conn.executescript(SCHEMA)
         self._migrate()
 
+    def wipe(self) -> None:
+        """Empty every table at once (Reset app). In place, in one
+        transaction: anything reading meanwhile sees all of it or none,
+        never a database without its tables."""
+        with self.connect() as conn:
+            tables = [row[0] for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")]
+            for table in tables:
+                conn.execute(f'DELETE FROM "{table}"')
+        with self.connect() as conn:
+            conn.execute("VACUUM")
+
     def _migrate(self) -> None:
         """Bring an existing database up to the current shape."""
         with self.connect() as conn:

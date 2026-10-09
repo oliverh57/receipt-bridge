@@ -215,6 +215,14 @@ def create_app(service: ReceiptService) -> FastAPI:
             headers={"Content-Disposition": "inline"},
         )
 
+    @app.post("/api/reset")
+    def reset(body: dict[str, Any]) -> dict[str, Any]:
+        """Settings → General → Reset app. The body must say so, so no stray
+        request can wipe the app."""
+        if body.get("confirm") != "reset":
+            raise HTTPException(400, 'Send {"confirm": "reset"} to reset the app')
+        return {"queued": service.reset_app()}
+
     @app.get("/api/about")
     def about_info() -> dict[str, Any]:
         from . import about
