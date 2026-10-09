@@ -36,7 +36,7 @@ from typing import Any
 
 import requests
 
-VERSION = "1.1.26"
+VERSION = "1.1.27"
 DEFAULT_REPO = "oliverh57/receipt-bridge"
 API = "https://api.github.com"
 USER_AGENT = f"Receipt Bridge/{VERSION}"
