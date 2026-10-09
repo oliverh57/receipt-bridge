@@ -573,6 +573,22 @@ def test_photos_waiting_from_before_tidying_get_tidied_but_keep_their_details() 
         assert row["vendor"] == "Greggs (corrected by hand)" and row["total"] == 99.99
         assert service._tidy_candidates() == [], "tried again"
 
+def test_about_shows_the_version_the_eula_and_real_licences() -> None:
+    from app.updates import VERSION
+
+    with tempfile.TemporaryDirectory() as tmp:
+        client, token = _client(_service(Path(tmp)))
+        about = client.get("/api/about", headers={"x-receipt-bridge": token}).json()
+        assert about["version"] == VERSION and about["copyright"].startswith("©")
+        assert "End User Licence Agreement" in about["eula"] and "## 4." in about["eula"]
+        names = {p["name"].lower(): p for p in about["open_source"]}
+        assert names["fastapi"]["licence"] == "MIT" and names["fastapi"]["has_text"]
+        assert "pip" not in names, "the installer's own tools aren't shipped"
+        text = client.get("/api/about/licence?name=fastapi", headers={"x-receipt-bridge": token}).json()["text"]
+        assert "MIT" in text and "Permission is hereby granted" in text
+        assert client.get("/api/about/licence?name=nothing-here", headers={"x-receipt-bridge": token}).status_code == 404
+
+
 if __name__ == "__main__":
     failures = 0
     for name, func in sorted(globals().items()):

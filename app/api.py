@@ -215,6 +215,24 @@ def create_app(service: ReceiptService) -> FastAPI:
             headers={"Content-Disposition": "inline"},
         )
 
+    @app.get("/api/about")
+    def about_info() -> dict[str, Any]:
+        from . import about
+        from .updates import VERSION
+
+        return about.about(VERSION, service.config.credentials_file.exists(),
+                           service.config.freeagent_credentials_file.exists(), service.config.data_dir)
+
+    @app.get("/api/about/licence")
+    def about_licence(name: str) -> dict[str, Any]:
+        """One open-source package's licence text (they can be long)."""
+        from . import about
+
+        text = about.licence_text(name)
+        if text is None:
+            raise HTTPException(404, "No licence text for that package")
+        return {"name": name, "text": text}
+
     @app.get("/api/supplier-names")
     def supplier_names() -> list[str]:
         return service.supplier_names()

@@ -1023,6 +1023,7 @@ function renderSettings() {
   const log = (s.activity.log.length ? s.activity.log : s.last_log || []).join("\n");
 
   const sections = {
+    about: state.settingsTab === "about" ? aboutHtml() : "",
     freeagent: freeagentCard(s.freeagent),
 
     email: `
@@ -1094,7 +1095,100 @@ const SETTINGS_TABS = [
   ["freeagent", "FreeAgent", "Where receipts are matched and filed."],
   ["email", "Email receipts", "Optional. Finds receipts from these suppliers in Gmail and adds them to Files."],
   ["general", "General", "Startup, appearance, notifications, receipt inbox, archive and updates."],
+  ["about", "About", "Version, licence, terms, and the software Receipt Bridge is built on."],
 ];
+
+// ---- Settings → About ----------------------------------------------------
+
+async function loadAbout() {
+  if (state.aboutLoading) return;
+  state.aboutLoading = true;
+  try { state.about = await api("/api/about"); } catch (err) { state.about = { error: err.message }; }
+  state.aboutLoading = false;
+  render();
+}
+
+/** The EULA (docs/EULA.md): a title line, "## " headings, "- " lists, paragraphs. */
+function eulaHtml(text) {
+  const blocks = String(text || "").trim().split(/\n\s*\n/);
+  return blocks.map((b, i) => {
+    if (i === 0) return `<p class="eula-title">${esc(b)}</p>`;
+    if (b.startsWith("## ")) return `<h4>${esc(b.slice(3))}</h4>`;
+    const lines = b.split("\n");
+    if (lines.every((l) => l.startsWith("- "))) return `<ul>${lines.map((l) => `<li>${esc(l.slice(2))}</li>`).join("")}</ul>`;
+    if (lines[0].startsWith("## ")) return `<h4>${esc(lines[0].slice(3))}</h4><p>${esc(lines.slice(1).join(" "))}</p>`;
+    return `<p>${esc(b.replace(/\n/g, " "))}</p>`;
+  }).join("");
+}
+
+function aboutHtml() {
+  const a = state.about;
+  if (!a) { loadAbout(); return `<div class="card"><div class="card-note">Loading…</div></div>`; }
+  if (a.error) return `<div class="card"><div class="card-note">${esc(a.error)}</div></div>`;
+  const u = state.snap.update;
+  const status = !u ? "" : u.restart_needed ? `Version ${esc(u.latest.replace(/^v/i, ""))} is installed. Restart to use it.`
+    : u.available ? `Version ${esc(u.latest.replace(/^v/i, ""))} is available.`
+    : u.checking ? "Checking for updates…" : u.latest ? "Up to date." : "";
+  const keys = a.licence.google && a.licence.freeagent ? "Licensed: the Google and FreeAgent keys are installed."
+    : a.licence.google || a.licence.freeagent ? `Partly licensed: only the ${a.licence.google ? "Google" : "FreeAgent"} key is installed.`
+    : "No licence file installed yet.";
+  const oss = a.open_source.map((p) => {
+    const text = (state.licences || {})[p.name];
+    const body = !p.has_text ? (p.url ? `<p class="sub">Licence text: <a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.url)}</a></p>` : "")
+      : text === undefined ? `<p class="sub">Loading…</p>` : `<pre class="licence-text">${esc(text)}</pre>`;
+    return `<details class="oss" data-licence="${esc(p.name)}" ${p.has_text ? 'data-has-text="1"' : ""}>
+        <summary><span class="oss-name">${esc(p.name)}</span><span class="sub">${esc(p.version)}</span><span class="grow"></span><span class="oss-lic">${esc(p.licence)}</span></summary>
+        ${body}</details>`;
+  }).join("");
+  return `
+    <div class="card about-head">
+      <div class="card-row"><span class="about-mark" aria-hidden="true">🧾</span>
+        <div class="grow"><div class="about-name">${esc(a.name)}</div>
+          <div class="sub">Version ${esc(a.version)} · ${esc(a.copyright)}</div>
+          ${status ? `<div class="sub">${status}</div>` : ""}</div>
+        ${u?.available && u.can_install ? updateButton(u) : `<button class="btn small" data-action="update-check" ${u?.checking ? "disabled" : ""}>Check for updates</button>`}</div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>Licence</h3></div>
+      <div class="card-row"><div class="grow">This copy<div class="sub">${esc(keys)} The keys identify Receipt Bridge; you sign in to your own Gmail and FreeAgent.</div></div></div>
+      ${a.licence.google && a.licence.freeagent ? "" : licenceDrop()}
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>Your data</h3></div>
+      <div class="card-note">Your receipts, the emails kept as receipts and the database stay on this Mac. Receipt Bridge only
+        talks to Google (to read email, read-only), FreeAgent (to read your bank feed and file what you approve), suppliers' websites
+        (to download a receipt an email links to) and GitHub (for updates).</div>
+      <div class="card-row"><div class="grow">Kept in<div class="sub selectable"><code>${esc(a.data_dir)}</code></div></div></div>
+    </div>
+
+    <div class="card">
+      <details class="about-doc"><summary>End user licence agreement</summary><div class="eula">${eulaHtml(a.eula)}</div></details>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>Open-source software</h3></div>
+      <div class="card-note">Receipt Bridge is built on these, each used under its own licence. Click one to read it.</div>
+      <div class="oss-list">${oss}</div>
+    </div>`;
+}
+
+// A package's licence text is fetched the first time it's opened.
+document.addEventListener("toggle", (e) => {
+  const d = e.target;
+  if (!d.matches?.("details.oss[data-has-text]") || !d.open) return;
+  const name = d.dataset.licence;
+  state.licences ||= {};
+  if (name in state.licences) return;
+  state.licences[name] = undefined;
+  api(`/api/about/licence?name=${encodeURIComponent(name)}`)
+    .then((r) => { state.licences[name] = r.text; })
+    .catch(() => { state.licences[name] = "The licence text couldn't be read."; })
+    .then(render);
+}, true);
+
+window.rbShowAbout = () => { state.settingsTab = "about"; if (state.view === "settings") render(); else setView("settings"); };
 
 // ---- first-run setup guide ---------------------------------------------
 //

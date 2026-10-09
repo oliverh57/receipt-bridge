@@ -703,7 +703,6 @@ function renderArchived() {
   const sel = all.find((r) => r.id === m.asel) || null;
   const head = `<header class="m-head">
       <div class="m-title"><span>Archived</span><span class="sub">Ignored files and unreadable emails. Nothing to do here.</span></div>
-      ${searchHtml("Supplier or amount")}
       ${(state.receipts || []).length ? `<button class="btn small danger" data-action="a-clear">Clear archive</button>` : ""}
     </header>`;
   const note = (r) => r.status === "failed" ? (r.error || "Couldn't be read") : "Ignored";
@@ -720,7 +719,7 @@ function renderArchived() {
           ${sel.status === "failed" ? `<button class="btn" data-action="a-retry" data-id="${sel.id}">Read again</button>` : ""}
           <button class="btn danger" data-action="a-delete" data-id="${sel.id}">Delete</button></div>
       </div></div>` : `<div class="m-empty"><div class="big">Nothing archived</div></div>`;
-  drawSplit(head, list, detail, sel);
+  drawSplit(head, list, detail, sel, "", searchHtml("Supplier or amount"));   // the search above the list, as in Files
 }
 
 // ---- Expenses: the claims already saved to FreeAgent, a month at a time ---------------
