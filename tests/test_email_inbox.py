@@ -59,6 +59,9 @@ def test_newsletters_sales_and_sign_in_emails_are_not_receipts() -> None:
         ("Reset your password", "Use this code to sign in", []),
         ("Lunch on Friday?", "Are you free at 1?", []),
         ("Weekly newsletter", "Top stories this week", ["CATEGORY_PROMOTIONS"]),
+        ("[you/receipt-bridge] Possible valid secrets bypassed", "Secrets bypassed push protection", []),
+        ("[you/receipt-bridge] Google OAuth2 Keys exposed on GitHub", "GitGuardian has detected keys", []),
+        ("Re: receipt-bridge release notes", "Shipping 1.1.6 today", []),
     ]:
         assert email_inbox.judge(subject, "Shop <news@shop.test>", snippet, labels).level is None, subject
 

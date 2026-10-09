@@ -899,11 +899,16 @@ img.doc, .doc img, .m-doc img { -webkit-user-drag: none; user-select: none; }
 .e-signin-note { color: var(--muted); font-size: 12px; line-height: 1.45; }
 
 .e-top { flex: 0 0 auto; }
-.e-search { flex: 0 1 300px; }
 .e-account { max-width: 220px; }
 .btn.icon { display: inline-flex; align-items: center; justify-content: center; width: 28px; padding: 0; }
 
-.e-queue { flex-basis: 360px; }
+/* the list column: search and filter above the emails */
+.e-col { flex: 0 0 360px; min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--line); background: var(--panel); }
+.e-tools { flex: 0 0 auto; display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 8px; border-bottom: 1px solid var(--line); }
+.e-tools .e-search { flex: none; width: 100%; height: 30px; background: var(--bg); }
+.e-filter { display: flex; }
+.e-filter button { flex: 1; }
+.e-col .e-queue { flex: 1 1 auto; border-right: 0; }
 .e-row { position: relative; }
 .e-row .v { font-weight: 500; }
 .e-row.unread .v, .e-row.unread .e-subj { font-weight: 650; }
@@ -928,29 +933,31 @@ img.doc, .doc img, .m-doc img { -webkit-user-drag: none; user-select: none; }
 .m-none .spinner { display: inline-block; vertical-align: -2px; margin-right: 6px; }
 .m-empty .spinner { width: 18px; height: 18px; }
 
+/* the email: full width, "Convert to receipt" beside who sent it */
 .e-h1 { overflow-wrap: anywhere; }
-/* narrow: the form above the email; wide: the email, and the form beside it */
-.e-detail { container-type: inline-size; }
-.e-grid { flex-direction: column; flex-wrap: nowrap; align-items: stretch; }
-.e-grid > .e-side { flex: none; max-width: 560px; }
-.e-grid > .e-figure { flex: none; min-width: 0; }
-@container (min-width: 720px) {
-  .e-grid { flex-direction: row; align-items: flex-start; }
-  .e-grid > .e-side { order: 2; flex: 0 0 300px; position: sticky; top: 0; }
-  .e-grid > .e-figure { flex: 1 1 auto; }
-}
+.e-subline { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-top: 2px; }
+.e-subline .m-dsub { margin-top: 0; min-width: 0; }
+.e-actions { display: flex; align-items: center; gap: 8px; }
+.e-note { margin-top: 8px; }
+.e-figure { margin: 16px 0 0; width: 100%; min-width: 0; }
 .e-doc { padding: 0; overflow: hidden; }
-.m-doc iframe.e-frame { height: max(420px, calc(100vh - 230px)); border-radius: 10px; }
+.m-doc iframe.e-frame { height: max(420px, calc(100vh - 220px)); border-radius: 10px; }
 .e-caption { display: flex; flex-direction: column; gap: 6px; color: var(--muted); }
 .e-caption .link { font-size: inherit; padding: 0; }
 .e-files { display: flex; flex-wrap: wrap; gap: 6px 12px; }
 .e-file { display: inline-flex; align-items: center; gap: 4px; color: var(--ink); }
-.e-side .m-kv .pair { flex-wrap: nowrap; }
-.e-side .m-kv .pair .edit-input { flex: 1 1 60px; }
-.e-side .m-kv .pair select.e-cur { flex: 0 0 auto; height: 26px; }
+
+/* the "Convert to receipt" dialog */
+.e-dialog { overflow-y: auto; }
+.e-dialog .m-kv { margin-top: 0; }
+.e-dialog .m-kv .pair { flex-wrap: nowrap; }
+.e-dialog .m-kv .pair .edit-input { flex: 1 1 60px; }
+.e-dialog .m-kv .pair select.e-cur { flex: 0 0 auto; height: 26px; }
+.e-dlabel { margin: 18px 0 0; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.e-dnote { margin-top: 12px; }
 .e-others { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 12px; font-size: 12px; }
 .e-other { border: 1px solid var(--line); border-radius: 999px; background: var(--bg); color: var(--ink); font: inherit; font-size: 12px;
   padding: 2px 9px; cursor: pointer; font-variant-numeric: tabular-nums; }
 .e-other:hover { background: var(--hover); }
 .e-other span { color: var(--muted); }
-@media (max-width: 1040px) { .e-queue { flex-basis: 300px; } }
+@media (max-width: 1040px) { .e-col { flex-basis: 300px; } }
