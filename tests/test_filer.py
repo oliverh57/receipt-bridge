@@ -1,6 +1,6 @@
 """Filing into FreeAgent, against a fake FreeAgent. Made-up values. No network.
 
-What must hold: dry run sends nothing; a plan with problems sends nothing;
+What must hold: a plan with problems sends nothing;
 a payment already explained isn't touched; an interrupted filing is
 recovered by reading FreeAgent, not by posting twice; undo deletes only
 what this app created.
@@ -85,23 +85,11 @@ def plan(db, rid, **kw):
     return plan_for(db.get_receipt(rid), **args)
 
 
-def test_dry_run_sends_nothing_and_records_the_request() -> None:
-    db, rid, tmp = env()
-    with tmp:
-        client = FakeClient()
-        file_receipt(client, db, rid, plan(db, rid), dry_run=True)
-        assert client.calls == []
-        state = json.loads(db.get_receipt(rid)["freeagent_json"])
-        assert state["state"] == "dry_run" and state["body"]["bank_transaction"] == TX["url"]
-        assert "data" not in (state["attachment"] or {}), "no file bytes in the preview"
-        assert db.get_receipt(rid)["status"] == PENDING
-
-
 def test_files_an_explanation_then_attaches_the_receipt() -> None:
     db, rid, tmp = env()
     with tmp:
         client = FakeClient()
-        file_receipt(client, db, rid, plan(db, rid), dry_run=False)
+        file_receipt(client, db, rid, plan(db, rid))
         names = [c[0] for c in client.calls]
         assert names == ["get", "create_explanation", "attach"], names
         body = client.calls[1][1]
@@ -121,7 +109,7 @@ def test_a_plan_with_problems_sends_nothing() -> None:
         p = plan(db, rid, category_url=None)
         assert "Choose a category" in p.problems
         try:
-            file_receipt(client, db, rid, p, dry_run=False)
+            file_receipt(client, db, rid, p)
         except FilingError:
             pass
         else:
@@ -134,7 +122,7 @@ def test_a_payment_already_explained_is_not_touched() -> None:
     with tmp:
         client = FakeClient(unexplained=0)
         try:
-            file_receipt(client, db, rid, plan(db, rid), dry_run=False)
+            file_receipt(client, db, rid, plan(db, rid))
         except FilingError as exc:
             assert "already" in str(exc)
         else:
@@ -147,12 +135,12 @@ def test_an_interrupted_filing_is_recovered_not_reposted() -> None:
     with tmp:
         first = FakeClient(fail_attach=True)
         try:
-            file_receipt(first, db, rid, plan(db, rid), dry_run=False)
+            file_receipt(first, db, rid, plan(db, rid))
         except ConnectionError:
             pass
         assert json.loads(db.get_receipt(rid)["freeagent_json"])["state"] == "explained"
         again = FakeClient()
-        file_receipt(again, db, rid, plan(db, rid), dry_run=False)
+        file_receipt(again, db, rid, plan(db, rid))
         assert [c[0] for c in again.calls] == ["attach"], "explanation must not be created twice"
         assert db.get_receipt(rid)["status"] == FILED
 
@@ -163,7 +151,7 @@ def test_a_filing_cut_off_before_the_reply_is_found_by_its_reference() -> None:
         db.update_receipt(rid, {"freeagent_json": json.dumps({"state": "filing", "transaction": TX["url"]})})
         client = FakeClient(explanations=[{"url": "https://fa.test/v2/bank_transaction_explanations/42",
                                            "receipt_reference": f"RB-{rid}"}])
-        file_receipt(client, db, rid, plan(db, rid), dry_run=False)
+        file_receipt(client, db, rid, plan(db, rid))
         assert "create_explanation" not in [c[0] for c in client.calls]
         assert json.loads(db.get_receipt(rid)["freeagent_json"])["url"].endswith("/42")
 
@@ -174,7 +162,7 @@ def test_a_personal_payment_files_as_an_expense_with_the_receipt() -> None:
         client = FakeClient()
         p = plan(db, rid, transaction=None)
         assert p.kind == "expense" and not p.problems, p.problems
-        file_receipt(client, db, rid, p, dry_run=False)
+        file_receipt(client, db, rid, p)
         body = client.calls[0][1]
         assert body["user"] == USER and body["currency"] == "EUR" and body["gross_value"] == "-19.34"
         assert "sales_tax_rate" not in body, "foreign VAT isn't reclaimed"
@@ -214,7 +202,7 @@ def test_a_set_price_isnt_shared_out_between_vat_rates() -> None:
 def test_unfile_deletes_only_what_was_created() -> None:
     db, rid, tmp = env()
     with tmp:
-        file_receipt(FakeClient(), db, rid, plan(db, rid), dry_run=False)
+        file_receipt(FakeClient(), db, rid, plan(db, rid))
         client = FakeClient()
         unfile(client, db, rid)
         assert client.calls == [("delete", "https://fa.test/v2/bank_transaction_explanations/99")]
@@ -252,7 +240,7 @@ def test_a_mixed_rate_receipt_is_split_one_explanation_per_rate() -> None:
         client.get_url = lambda url: {"bank_transaction": {"url": url, "amount": "-7.05", "unexplained_amount": "-7.05"}}
         created = iter(["https://fa.test/e/1", "https://fa.test/e/2"])
         client.create_explanation = lambda body: (client._write("create_explanation", body), {"url": next(created)})[1]
-        file_receipt(client, db, rid, p, dry_run=False)
+        file_receipt(client, db, rid, p)
         assert [c[0] for c in client.calls] == ["create_explanation", "create_explanation", "attach"]
         state = json.loads(db.get_receipt(rid)["freeagent_json"])
         assert state["urls"] == ["https://fa.test/e/1", "https://fa.test/e/2"]
@@ -288,7 +276,7 @@ def test_a_mixed_rate_expense_becomes_one_expense_per_rate() -> None:
         client = FakeClient()
         made = iter(["https://fa.test/x/1", "https://fa.test/x/2"])
         client.create_expense = lambda body: (client._write("create_expense", body), {"url": next(made)})[1]
-        file_receipt(client, db, rid, p, dry_run=False)
+        file_receipt(client, db, rid, p)
         bodies = [c[1] for c in client.calls]
         assert "attachment" in bodies[0] and "attachment" not in bodies[1], "receipt attached once"
         undo = FakeClient()
@@ -303,7 +291,7 @@ def test_an_interrupted_expense_is_found_by_its_reference() -> None:
         client = FakeClient()
         client.get_all = lambda path, key, params: [{"url": "https://fa.test/x/9", "receipt_reference": f"RB-{rid}"},
                                                      {"url": "https://fa.test/x/8", "receipt_reference": "RB-other"}]
-        file_receipt(client, db, rid, plan(db, rid, transaction=None), dry_run=False)
+        file_receipt(client, db, rid, plan(db, rid, transaction=None))
         assert "create_expense" not in [c[0] for c in client.calls]
         assert json.loads(db.get_receipt(rid)["freeagent_json"])["urls"] == ["https://fa.test/x/9"]
 
@@ -317,7 +305,7 @@ def test_an_already_explained_payment_only_gets_the_receipt_attached() -> None:
         client = FakeClient()
         client.get_url = lambda url: {"bank_transaction": {"url": url, "dated_on": "2026-03-05",
             "bank_transaction_explanations": [{"url": "https://fa.test/e/7", "attachments": [], "is_locked": False}]}}
-        file_receipt(client, db, rid, p, dry_run=False)
+        file_receipt(client, db, rid, p)
         assert [c[0] for c in client.calls] == ["attach"], "nothing created, nothing changed"
         assert client.calls[0][1] == "https://fa.test/e/7"
         undo = FakeClient()
@@ -342,7 +330,7 @@ def test_rebilling_an_already_explained_payment_and_undoing_it() -> None:
         client.get_url = lambda url: {"bank_transaction": {"url": url, "dated_on": "2026-03-05",
             "bank_transaction_explanations": [{"url": "https://fa.test/e/7", "attachments": [], "is_locked": False}]}}
         client.update_explanation = lambda url, changes: client._write("update", url, changes)
-        file_receipt(client, db, rid, p, dry_run=False)
+        file_receipt(client, db, rid, p)
         assert [c[0] for c in client.calls] == ["update", "attach"], client.calls
         undo = FakeClient()
         undo.remove_explanation_attachments = lambda url, atts: undo._write("remove", url, atts)
@@ -368,7 +356,7 @@ def test_choosing_another_category_on_an_explained_payment_changes_it_there() ->
             "bank_transaction_explanations": [{"url": "https://fa.test/e/7", "attachments": [], "is_locked": False,
                                                "category": "https://fa.test/v2/categories/285"}]}}
         client.update_explanation = lambda url, changes: client._write("update", url, changes)
-        file_receipt(client, db, rid, p, dry_run=False)
+        file_receipt(client, db, rid, p)
         assert client.calls[0] == ("update", "https://fa.test/e/7", {"category": CATEGORY})
         undo = FakeClient()
         undo.remove_explanation_attachments = lambda url, atts: undo._write("remove", url, atts)
@@ -404,7 +392,7 @@ def test_attaching_refuses_if_freeagent_has_a_receipt_there_now() -> None:
         client.get_url = lambda url: {"bank_transaction": {"url": url, "dated_on": "2026-03-05",
             "bank_transaction_explanations": [{"url": "https://fa.test/e/7", "attachments": [{"url": "a"}]}]}}
         try:
-            file_receipt(client, db, rid, plan(db, rid, transaction=explained_tx), dry_run=False)
+            file_receipt(client, db, rid, plan(db, rid, transaction=explained_tx))
         except FilingError as exc:
             assert "already has a receipt" in str(exc)
         else:
@@ -443,17 +431,12 @@ def test_editing_a_claim_changes_the_same_expense_in_place() -> None:
     not deleted and made again, and its receipt isn't sent a second time."""
     db, rid, tmp = env(paid_by="personal")
     with tmp:
-        file_receipt(FakeClient(), db, rid, plan(db, rid, transaction=None), dry_run=False)
+        file_receipt(FakeClient(), db, rid, plan(db, rid, transaction=None))
         db.update_receipt(rid, {"total": 23.00})
         other = "https://fa.test/v2/categories/285"
 
-        dry = FakeClient()
-        update_claim(dry, db, rid, plan(db, rid, transaction=None, category_url=other), dry_run=True)
-        assert dry.calls == [], "a dry run sends nothing"
-        assert json.loads(db.get_receipt(rid)["freeagent_json"])["update"]["state"] == "dry_run"
-
         client = FakeClient()
-        update_claim(client, db, rid, plan(db, rid, transaction=None, category_url=other), dry_run=False)
+        update_claim(client, db, rid, plan(db, rid, transaction=None, category_url=other))
         assert [c[:2] for c in client.calls] == [("update_expense", "https://fa.test/v2/expenses/3")]
         body = client.calls[0][2]
         assert body["gross_value"] == "-23.00" and body["category"] == other and "attachment" not in body
@@ -469,11 +452,11 @@ def test_editing_a_claim_changes_the_same_expense_in_place() -> None:
 def test_a_claim_whose_vat_split_changed_is_not_edited_in_place() -> None:
     db, rid, tmp = env(paid_by="personal", total=7.05)
     with tmp:
-        file_receipt(FakeClient(), db, rid, plan(db, rid, transaction=None), dry_run=False)
+        file_receipt(FakeClient(), db, rid, plan(db, rid, transaction=None))
         db.update_receipt(rid, {"vat": 0.52, "extra_json": {"vat_lines": [["20", "0.52", "3.10"]]}})
         client = FakeClient()
         try:
-            update_claim(client, db, rid, plan(db, rid, transaction=None), dry_run=False)
+            update_claim(client, db, rid, plan(db, rid, transaction=None))
         except FilingError as exc:
             assert "VAT split" in str(exc)
         else:

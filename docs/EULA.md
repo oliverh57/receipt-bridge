@@ -19,7 +19,7 @@ Receipt Bridge works with accounts that are yours: your Gmail, your FreeAgent, a
 Your receipts, the copies of your emails it keeps and its database stay on your Mac. We don't receive them. Receipt Bridge talks only to:
 
 - Google, to read the emails you ask it to (read-only: it can't send, change or delete mail);
-- FreeAgent, to read your bank feed and categories, and to save explanations, attachments and expense claims when you file them (nothing is saved while dry run is on);
+- FreeAgent, to read your bank feed and categories, and to save explanations, attachments and expense claims when you file them;
 - suppliers' websites, to download a receipt an email links to;
 - GitHub, to check for and download updates of Receipt Bridge;
 - the senders of emails you open, when an email shows pictures from the web.

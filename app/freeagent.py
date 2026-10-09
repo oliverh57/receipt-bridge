@@ -1,7 +1,7 @@
 """FreeAgent API: sign-in, reading, and filing (PLAN.md §7).
 
-Writes are off unless a caller sets `writes_allowed`: only app/filer.py
-does, and only when dry run is off (PLAN.md §9). Every request uses API
+Writes are off unless a caller sets `writes_allowed`: only the filing
+code does (PLAN.md §9). Every request uses API
 version 2026-09-01, where explanation attachments go through their own
 endpoint; that becomes FreeAgent's default on 1 December 2026.
 
@@ -45,7 +45,7 @@ class NotConnected(FreeAgentError):
 
 
 class WritesOff(FreeAgentError):
-    """A write was attempted while writes are switched off (dry run)."""
+    """A write was attempted by code that hadn't switched writes on."""
 
 
 @dataclass

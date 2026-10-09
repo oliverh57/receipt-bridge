@@ -461,11 +461,6 @@ function lastFilingHtml(r) {
   if (f.state === "filing" || f.state === "explained") {
     return `<div class="m-note warn">Saving to FreeAgent was interrupted. Retrying won't create a duplicate.</div>`;
   }
-  if (f.state === "dry_run") {
-    const parts = f.parts && f.parts.length > 1 ? f.parts : f.body;
-    return `<details class="m-dry"><summary>Last dry run: what would be sent</summary><pre class="selectable">${
-      esc(JSON.stringify(parts, null, 2))}${f.attachment ? `\n\nattachment: ${esc(f.attachment.file_name)}` : ""}</pre></details>`;
-  }
   return "";
 }
 
@@ -490,14 +485,12 @@ function fileBlocker(r) {
 
 async function fileOne(r, next) {
   if (fileBlocker(r)) return;
-  const fa = state.snap.freeagent || {};
   // an expense still to check is checked by filing it: one press, straight to FreeAgent
   if (r.stage === "check") await api(`/api/receipts/${r.id}/fields`, { method: "POST", body: { checked: true } });
   await api("/api/receipts/file", { method: "POST", body: { ids: [r.id] } });
   if (next) next();
   const what = r.paid_by === "personal" ? "Expense" : "Linked";
-  if (fa.dry_run) undoToast(`Dry run for ${r.supplier}: nothing sent`, null);
-  else undoToast(`${what}: ${r.supplier} ${amountOf(r)} saved to FreeAgent`, () => api(`/api/receipts/${r.id}/unfile`, { method: "POST" }));
+  undoToast(`${what}: ${r.supplier} ${amountOf(r)} saved to FreeAgent`, () => api(`/api/receipts/${r.id}/unfile`, { method: "POST" }));
 }
 
 async function setPaid(r, to) {
@@ -627,7 +620,7 @@ function saveAllHtml(g) {
   const ready = g.expense.filter((r) => !fileBlocker(r));
   if (!fa.connected || ready.length < 2) return "";
   const busy = state.snap.queued.some((q) => q.startsWith("file:"));
-  return `<button class="btn primary small" data-action="m-file-all" data-kind="expense" ${busy ? "disabled" : ""}>${fa.dry_run ? "Dry run" : "Save"} ${ready.length} expenses</button>`;
+  return `<button class="btn primary small" data-action="m-file-all" data-kind="expense" ${busy ? "disabled" : ""}>Save ${ready.length} expenses</button>`;
 }
 
 const STAGE_CHIP = { check: ["To check", "warn"], link: ["Ready to link", "info"], waiting: ["Waiting for a payment", "quiet"],
@@ -674,7 +667,7 @@ function fileDetailHtml(r) {
   const blocker = fileBlocker(r);
   const primary = personal ? (!fa.connected ? `<span class="m-note">Connect FreeAgent in Settings to claim.</span>`
       : blocker ? `<button class="btn" disabled>${esc(blocker)}</button>`
-      : `<button class="btn primary" data-action="x-file" data-id="${r.id}">File to expenses${fa.dry_run ? " (dry run)" : ""} ${kbd("⏎", true)}</button>`)
+      : `<button class="btn primary" data-action="x-file" data-id="${r.id}">File to expenses ${kbd("⏎", true)}</button>`)
     : canOk ? `<button class="btn primary" data-action="m-checked" data-id="${r.id}">Looks right ${kbd("⏎", true)}</button>`
     : r.stage === "link"
     ? `<button class="btn primary" data-action="m-to-statement" data-id="${r.id}">Link in Bank Feed ${kbd("⏎", true)}</button>`
@@ -840,12 +833,11 @@ function claimPanelHtml(r) {
 /** Editing a claim: the same details as in Files, saved here as you go;
  * "Update FreeAgent" changes the expense already there, in place. */
 function claimEditHtml(r) {
-  const fa = state.snap.freeagent || {};
   return `<div class="m-note">Changes save here as you go. Click <b>Update FreeAgent</b> to send them.</div>
     ${fieldsHtml(r)}
     ${expenseCardHtml(r)}
     ${claimUpdateNote(r)}
-    <div class="m-actions"><button class="btn primary" data-action="x-update" data-id="${r.id}">Update FreeAgent${fa.dry_run ? " (dry run)" : ""}</button>
+    <div class="m-actions"><button class="btn primary" data-action="x-update" data-id="${r.id}">Update FreeAgent</button>
       <button class="btn" data-action="x-edit" data-id="">Done</button></div>
     ${docFigure(r)}`;
 }
@@ -853,7 +845,7 @@ function claimEditHtml(r) {
 function claimUpdateNote(r) {
   const u = r.filing?.update;
   if (!u) return "";
-  return `<div class="m-note">${u.state === "dry_run" ? "Dry run: nothing sent." : `Updated in FreeAgent ${esc(shortDate(u.at))}.`}</div>`;
+  return `<div class="m-note">Updated in FreeAgent ${esc(shortDate(u.at))}.</div>`;
 }
 
 // ---- Statement: where files get linked ---------------------------------------------------
@@ -981,7 +973,7 @@ function renderStatement() {
   const ready = (st.rows || []).map(suggestedFile).filter((r) => r && !fileBlocker(r) && r.group === "ready");
   const busy = state.snap.queued.some((q) => q.startsWith("file:"));
   const linkAll = fa.connected && ready.length
-    ? `<button class="btn primary small" data-action="m-file-all" data-kind="link" ${busy ? "disabled" : ""}>${fa.dry_run ? "Dry run" : "Link"} ${ready.length} ready</button>` : "";
+    ? `<button class="btn primary small" data-action="m-file-all" data-kind="link" ${busy ? "disabled" : ""}>Link ${ready.length} ready</button>` : "";
 
   content.innerHTML = `<div class="st-split ${sel ? "with-panel" : ""}"><div class="st-wrap">
     <header class="m-head">
@@ -1233,20 +1225,12 @@ function paymentCardHtml(t) {
       ${rebillFields(rebill || null, `data-url="${esc(t.url)}"`, tag("rebill", rebill || null))}
     </div>
     ${changed ? `<div class="m-note">Your changes are sent when you approve. <button class="link" data-action="st-revert" data-url="${esc(t.url)}">Keep FreeAgent's</button></div>` : ""}
-    ${updated ? `<div class="m-note">You changed FreeAgent's explanation here. <button class="link" data-action="st-unexplain" data-url="${esc(t.url)}">Undo</button></div>` : ""}
-    ${lastExplainHtml(t)}</div>`;
-}
-
-function lastExplainHtml(t) {
-  const x = t.explained_here;
-  if (!x || x.state !== "dry_run") return "";
-  return `<details class="m-dry"><summary>Last dry run: what would be sent</summary><pre class="selectable">${esc(JSON.stringify(x.body, null, 2))}</pre></details>`;
+    ${updated ? `<div class="m-note">You changed FreeAgent's explanation here. <button class="link" data-action="st-unexplain" data-url="${esc(t.url)}">Undo</button></div>` : ""}</div>`;
 }
 
 /** "Approve" with no receipt: explained and approved in FreeAgent, with
  * the category you set or FreeAgent's own (its guess, replaced). On a
- * payment already approved it sends the changes you made. Always sent,
- * never a dry run. */
+ * payment already approved it sends the changes you made. */
 function noReceiptButton(t) {
   const fa = state.snap.freeagent || {};
   const changed = t.freeagent?.explained && Object.keys(t.freeagent.changes || {}).length;
@@ -1364,17 +1348,16 @@ function fileAllHtml() {
     if (res && res.at !== f.since) { f.phase = "done"; f.results = res.results; f.message = res.message || ""; }
   }
   const expense = f.kind === "expense";
-  const sandbox = fa.environment === "sandbox" && !fa.dry_run
+  const sandbox = fa.environment === "sandbox"
     ? `<div class="m-sandbox"><b>Sandbox</b><span>These go to your practice company, not your real books.</span></div>` : "";
   if (f.phase === "confirm" || f.phase === "running") {
     const total = f.items.reduce((s, r) => s + Number(r.total || 0), 0);
     const vat = f.items.reduce((s, r) => s + Number(r.vat || 0), 0);
-    const verb = fa.dry_run ? "Dry run" : expense ? "Save" : "Link";
+    const verb = expense ? "Save" : "Link";
     const noun = expense ? "expense" : "payment";
     return `<div class="m-overlay"><section class="m-dialog wide" role="dialog" aria-label="Confirm">
-      <h2>${verb} ${f.items.length} ${noun}${f.items.length === 1 ? "" : "s"}${fa.dry_run ? "" : " to FreeAgent"}?</h2>
-      <p class="sub">${fa.dry_run ? "Dry run: nothing is sent."
-        : expense ? "Each is saved as an expense claim with its receipt. You can undo them later."
+      <h2>${verb} ${f.items.length} ${noun}${f.items.length === 1 ? "" : "s"} to FreeAgent?</h2>
+      <p class="sub">${expense ? "Each is saved as an expense claim with its receipt. You can undo them later."
         : `Attaches a receipt to each ${esc(accountName())} payment. You can undo each one in Bank Feed.`}</p>
       <div class="m-fa-list">${f.items.map((r) => `<div class="m-fa-row">
           <span class="v">${esc(r.supplier)}</span>
@@ -1392,18 +1375,18 @@ function fileAllHtml() {
   const ok = (f.results || []).filter((x) => x.ok);
   const skipped = (f.results || []).length - ok.length;
   return `<div class="m-overlay"><section class="m-dialog wide" role="dialog" aria-label="Finished">
-    <h2>${f.message ? "Nothing was saved" : fa.dry_run ? "Dry run done" : `Saved ${ok.length} of ${(f.results || []).length}`}</h2>
+    <h2>${f.message ? "Nothing was saved" : `Saved ${ok.length} of ${(f.results || []).length}`}</h2>
     <p class="sub">${f.message ? esc(f.message)
       : skipped ? `${skipped} skipped to avoid overwriting anything.`
-      : fa.dry_run ? "Nothing was sent." : "All done."}</p>
+      : "All done."}</p>
     <div class="m-fa-list">${(f.results || []).map((x) => `<div class="m-fa-res ${x.ok ? "" : "skip"}">
         <span class="ic">${x.ok ? ICON.filed : ICON.check}</span>
         <div class="txt"><div class="top"><b>${esc(x.vendor || "Receipt")}</b> <span class="muted">${esc(money(x.total, "GBP"))}</span>
             <span class="grow"></span>${!x.ok ? `<button class="link" data-action="m-fa-open" data-id="${x.id}">Open in Files</button>`
-              : fa.web && !fa.dry_run ? `<a class="link" href="${esc(fa.web)}" target="_blank" rel="noopener">View in FreeAgent</a>` : ""}</div>
+              : fa.web ? `<a class="link" href="${esc(fa.web)}" target="_blank" rel="noopener">View in FreeAgent</a>` : ""}</div>
           <div class="m-sub">${esc(x.note)}</div></div></div>`).join("")}</div>
     <div class="m-dialog-foot">
-      ${ok.length && !fa.dry_run ? `<button class="btn" data-action="m-fa-undo">Undo all ${ok.length}</button>` : ""}
+      ${ok.length ? `<button class="btn" data-action="m-fa-undo">Undo all ${ok.length}</button>` : ""}
       <button class="btn primary" data-action="m-fa-cancel">Done</button></div></section></div>`;
 }
 
@@ -1597,9 +1580,8 @@ document.addEventListener("click", async (e) => {
       return act(async () => { await api("/api/receipts/unfile", { method: "POST", body: { ids } }); undoToast(`Undoing ${ids.length}`, null); });
     }
     case "m-fa-cancel": {
-      // after a real save, Undo all stays on offer for a few seconds
-      const fa = state.snap.freeagent || {};
-      const ids = m.fileAll?.phase === "done" && !fa.dry_run ? (m.fileAll.results || []).filter((x) => x.ok).map((x) => x.id) : [];
+      // after a save, Undo all stays on offer for a few seconds
+      const ids = m.fileAll?.phase === "done" ? (m.fileAll.results || []).filter((x) => x.ok).map((x) => x.id) : [];
       m.fileAll = null; $("#modal").innerHTML = "";
       if (ids.length) {
         undoToast(`Saved ${ids.length} to FreeAgent`, () => api("/api/receipts/unfile", { method: "POST", body: { ids } }), `Undo all ${ids.length}`);
@@ -1673,7 +1655,7 @@ document.addEventListener("click", async (e) => {
     case "st-explain":
       return act(async () => {
         await api("/api/statement/explain", { method: "POST", body: { url: target.dataset.url } });
-        if (!(state.snap.freeagent || {}).dry_run) undoToast("Explaining it in FreeAgent…",
+        undoToast("Explaining it in FreeAgent…",
           () => api("/api/statement/unexplain", { method: "POST", body: { url: target.dataset.url } }));
       });
     case "st-revert":

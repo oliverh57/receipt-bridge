@@ -39,7 +39,7 @@ on one background worker; poll `/api/state` and watch `version`,
 `freeagent`: `{has_credentials, environment ("sandbox"|"live"), connected,
 error, vat: {registered, scheme, currency, company}, bank_accounts:
 [{url, name, currency, type, status, is_personal, chosen}], categories (a
-count), last_sync, transactions, dry_run, projects}`. There is no app-wide auto-filing switch.
+count), last_sync, transactions, projects}`. There is no app-wide auto-filing switch.
 
 ## Receipts
 
@@ -61,14 +61,14 @@ Each receipt:
 | `vat_treatment` | supplier setting: `printed` or `reverse_charge` |
 | `auto_file` | you ticked "Link {supplier} automatically from now on" for this supplier |
 | `match` | `null` (no account chosen) or `{status, reason, candidates, transaction}`. `status`: `matched` (a payment chosen; identical ones resolve to the nearest date), `choose` (no date on the receipt, several fit), `waiting` (none yet), `expense_but_found` (marked personal but an exact business payment exists), `not_applicable`. `overdue: true` when `waiting` longer than `freeagent.waiting_days`: show it as needing attention. `transaction`: `{date, amount, description, explained}`; `explained: true` means FreeAgent already explained it, and filing will only attach the receipt |
-| `filing` | last filing state or `null`: `{state, kind, ...}`. `state`: `dry_run` (has `body`, `parts[]`, `attachment`: the exact request), `problem` (`message`), `filing`/`explained` (interrupted; filing again resumes), `filed`, `unfiled`. `kind`: `explanation`, `expense`, `attach` |
+| `filing` | last filing state or `null`: `{state, kind, ...}`. `state`: `problem` (`message`), `filing`/`explained` (interrupted; filing again resumes), `filed`, `unfiled`. `kind`: `explanation`, `expense`, `attach` |
 | `error`, `account`, `exported_at`, `export_folder`, `watcher` | as before |
 
 | Call | Body | Does |
 |---|---|---|
 | `POST /api/files/upload?name=&paid_by=business|personal` | the file's bytes | a file dropped on Files or Expenses: into the receipt inbox, read at once. Photos (JPEG, PNG, HEIC, WebP) and PDFs, up to 30 MB |
 | `POST /api/receipts/{id}/fields` | `checked: true` ("Looks right": settles the file's doubts, except a total, currency or payer that's still blank), or any of `vendor`, `purchased_on` (YYYY-MM-DD), `total`, `currency` (3 letters), `category` (URL), `paid_by`, `vat_treatment`, `auto_file` (bool: the supplier's "link automatically" approval), `rebill` | correct a receipt. Clears that field's flags; remembers category, VAT treatment and the auto-link approval per supplier, and supplier name per VAT number. 400 with a reason if invalid |
-| `POST /api/receipts/file` | `{ids: [..]}` | queue filing (or a dry run, per settings). Read results from `filing` and `outcome` |
+| `POST /api/receipts/file` | `{ids: [..]}` | queue filing. Read results from `filing` and `outcome` |
 | `POST /api/receipts/{id}/unfile` | — | queue undo: deletes only what the app created (or removes only the attachment it added) |
 | `POST /api/receipts/status` | `{ids, status: "pending"|"ignored"}` | ignore / restore |
 | `POST /api/receipts/{id}/retry` | — | email: fetch the supplier's PDF again; photo: read the archived original again |
@@ -113,7 +113,7 @@ Auto-linking is only ever per supplier and only when you ask: `fields`
 default; `false` turns it off). Filing by hand never turns it on. Then a
 receipt from that supplier links and saves itself when the payment matches
 exactly with its name, nothing needs checking, the category isn't a guess,
-it isn't an expense, and dry run is off.
+and it isn't an expense.
 
 | Call | Body | Does |
 |---|---|---|
@@ -125,7 +125,7 @@ it isn't an expense, and dry run is off.
 | `POST /api/statement/find-emails` | — | look in Gmail now (it also runs after each FreeAgent read and email check) |
 | `POST /api/statement/add-file` | `{paid_by?}` | the Mac's file picker; the file goes into the receipt inbox (`{added: path | null}`) |
 
-`state.file_results` after File / File all: `{at, dry_run, automatic, message?,
+`state.file_results` after File / File all: `{at, automatic, message?,
 results: [{id, vendor, total, ok, note}]}`. A skipped one's `note` says why,
 e.g. "This payment was explained in FreeAgent since the last check, so it was
 left alone. The receipt is back in Match."
@@ -142,7 +142,6 @@ FreeAgent"); links to a single explanation aren't documented.
 | `POST /api/freeagent/disconnect` | — | forget the sign-in and the cached data |
 | `POST /api/freeagent/accounts` | `{urls: [...]}` | choose business bank accounts (from `freeagent.bank_accounts`) |
 | `GET /api/freeagent/categories` | — | `[{url, description, nominal_code, group}]`; `group` is `admin_expenses_categories`, `cost_of_sales_categories`, `general_categories` |
-| `POST /api/freeagent/dry-run` | `{on: bool}` | |
 | `POST /api/freeagent/sync` | — | queue a read now |
 
 ## Receipt inbox (folders)
@@ -179,12 +178,12 @@ saves to, and its iCloud link (`SHORTCUT_URL` in app/setup_guide.py, or config
 | Endpoint | Body | Does |
 |---|---|---|
 | `POST /api/statement/payment` | `{url, changes: {category?, vat_rate?: "20.0"\|"5.0"\|"0.0", rebill?}}` | Saves the payment's category / VAT rate / re-billing; returns `{settings}` |
-| `POST /api/statement/explain` | `{url, reason?}` | "No receipt needed" with a category: explains the whole payment in FreeAgent, nothing attached (dry run: records the request only) |
-| `POST /api/statement/update-explanation` | `{url}` | A payment FreeAgent explained: sends what you changed (category, VAT rate, re-bill) to its explanation (dry run: records the request only) |
+| `POST /api/statement/explain` | `{url, reason?}` | "No receipt needed" with a category: explains the whole payment in FreeAgent, nothing attached |
+| `POST /api/statement/update-explanation` | `{url}` | A payment FreeAgent explained: sends what you changed (category, VAT rate, re-bill) to its explanation |
 | `POST /api/statement/payment-reset` | `{url}` | "Keep FreeAgent's": forgets what you set on the payment |
 | `POST /api/statement/unexplain` | `{url}` | Undo: deletes the explanation the app made, or puts FreeAgent's own one back as it was |
 
-Statement rows carry `approved` (FreeAgent's explanation is approved there: `marked_for_review` false; status `approved` when it has no receipt, counted as done), `settings`, `freeagent: {explained, category, vat_rate, rebill, changes}` (FreeAgent's own explanation, and what you changed that isn't sent yet) and `explained_here` (`{state: dry_run|filed, body, url?}`).
+Statement rows carry `approved` (FreeAgent's explanation is approved there: `marked_for_review` false; status `approved` when it has no receipt, counted as done), `settings`, `freeagent: {explained, category, vat_rate, rebill, changes}` (FreeAgent's own explanation, and what you changed that isn't sent yet) and `explained_here` (`{state: filed|updated, body, url?}`).
 
 ## Emails (any one email into Files)
 

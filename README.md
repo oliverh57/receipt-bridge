@@ -48,9 +48,7 @@ New versions arrive inside the app (**Update now**).
 3. **Linking.** You approve every link: **Link** in Statement (⏎), or
    **Link N ready** for all the clean suggestions at once, with **Undo all**.
    The one exception is a supplier you've ticked *Link {supplier}
-   automatically from now on* for: its exact matches link themselves. Dry
-   run is on until you switch it off in Settings → FreeAgent: it shows the
-   exact request and sends nothing.
+   automatically from now on* for: its exact matches link themselves.
 4. **Statement** shows every payment in a month and whether it has a
    receipt: filed, in Match, or missing. For a missing one: **Use that
    email** (an email showing that amount was found in Gmail), **Add photo**,

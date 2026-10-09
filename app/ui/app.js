@@ -54,8 +54,8 @@ function esc(value) {
 }
 
 /** Bank marks: [name pattern, text, background, text colour, logo key]. Specific names first.
- * The logo is the bank's own icon from data/bank-logos (fetched by tools/fetch_bank_logos.py,
- * not shipped); the coloured monogram shows until it loads, or when there is none. */
+ * The logo is the bank's own icon, fetched from its website the first time (not shipped);
+ * the coloured monogram shows until it loads, or when there is none. */
 const BANK_MARKS = [
   [/mettle/i, "M", "#00a9a0", "#fff", "mettle"],
   [/royal bank of scotland|\brbs\b/i, "RBS", "#0a2240", "#fff", "rbs"],
@@ -463,9 +463,8 @@ function fileAllButton() {
   if (!fa?.connected) return "";
   const ready = readyToFile();
   const busy = state.snap.queued.some((q) => q.startsWith("file:"));
-  const label = fa.dry_run ? `Dry run ${ready.length || ""} matched` : `File ${ready.length || ""} matched`;
   return `<button class="btn primary" data-action="file-all" ${ready.length && !busy ? "" : "disabled"}
-    title="Receipts with exactly one matching bank payment, a category and nothing to check${fa.dry_run ? ". Dry run: nothing is sent" : ""}">${label}</button>`;
+    title="Receipts with exactly one matching bank payment, a category and nothing to check">File ${ready.length || ""} matched</button>`;
 }
 
 function listHead() {
@@ -662,12 +661,10 @@ function filingHtml(r) {
   else if (!r.category) blocker = "Choose a category";
   else if (!personal && !tx) blocker = "No bank payment matched yet";
   const filing = state.snap.queued.some((q) => q.startsWith("file:"));
-  const label = fa.dry_run ? "Dry run" : personal ? "File as expense" : "File to FreeAgent";
+  const label = personal ? "File as expense" : "File to FreeAgent";
   const last = r.filing;
   let lastHtml = "";
-  if (last?.state === "dry_run") {
-    lastHtml = `<details class="dry"><summary>Last dry run: what would be sent</summary><pre class="selectable">${esc(JSON.stringify(last.parts && last.parts.length > 1 ? last.parts : last.body, null, 2))}${last.attachment ? `\n\nattachment: ${esc(last.attachment.file_name)} (${esc(last.attachment.content_type)})` : ""}</pre></details>`;
-  } else if (last?.state === "problem") {
+  if (last?.state === "problem") {
     lastHtml = `<div class="note">${esc(last.message)}</div>`;
   } else if (last?.state === "filing" || last?.state === "explained") {
     lastHtml = `<div class="note">A filing was interrupted. Filing again picks it up without creating a second entry.</div>`;
@@ -681,9 +678,9 @@ function filingHtml(r) {
           <option value="personal" ${personal ? "selected" : ""}>Personally: claim as an expense</option></select></label>
       ${fa.vat?.registered ? `<label class="field"><span>VAT</span><span class="pair">${vatMenuHtml(r)}</span></label>` : ""}
       <div class="file-row">
-        <button class="btn small ${fa.dry_run ? "" : "primary"}" data-action="file" data-id="${r.id}" ${blocker || filing ? "disabled" : ""}
-          title="${esc(blocker || (fa.dry_run ? "Builds the request and shows it; nothing is sent" : "Creates the entry in FreeAgent and attaches this receipt"))}">${label}</button>
-        <span class="sub">${esc(blocker || (fa.dry_run ? "Dry run is on: nothing is sent to FreeAgent." : ""))}</span>
+        <button class="btn small primary" data-action="file" data-id="${r.id}" ${blocker || filing ? "disabled" : ""}
+          title="${esc(blocker || "Creates the entry in FreeAgent and attaches this receipt")}">${label}</button>
+        <span class="sub">${esc(blocker)}</span>
       </div>
       ${lastHtml}
     </div>`;
@@ -913,8 +910,6 @@ function freeagentCard(fa) {
       ${vatSchemeRow(fa.vat)}
       <div class="card-note">Match receipts against:</div>
       ${accounts || `<div class="card-note">No bank accounts yet.</div>`}
-      <div class="card-row"><div class="grow">Dry run<div class="sub">${fa.dry_run ? "On: nothing is sent to FreeAgent" : "<b>Off: changes are saved to FreeAgent</b>"}${fa.environment === "sandbox" ? " (sandbox)" : ""}</div></div>
-        <label class="switch"><input type="checkbox" data-action="fa-dry-run" ${fa.dry_run ? "checked" : ""} aria-label="Dry run"><span></span></label></div>
       <div class="card-note">${synced}.</div>
     </div>`;
 }
@@ -1270,8 +1265,7 @@ function setupFreeagentHtml(fa) {
         ${fa.environment === "sandbox" ? ` <span class="pill unknown">Sandbox</span>` : ""}</div>
       <div class="setup-q">Which account does the business pay from?</div>
       <div class="card">${accounts || `<div class="card-note"><span class="spinner"></span>Loading your bank accounts…</div>`}</div>
-      ${none ? `<div class="setup-note warn">Tick at least one.</div>` : ""}
-      <div class="setup-note">Dry run is on: nothing is sent to FreeAgent until you turn it off in Settings → FreeAgent.</div>`;
+      ${none ? `<div class="setup-note warn">Tick at least one.</div>` : ""}`;
   }
   return `<h3>Connect FreeAgent</h3>
     <p>Receipts are matched to your bank payments and filed there.</p>${body}`;
@@ -1569,8 +1563,7 @@ document.addEventListener("click", (e) => {
       });
     case "file-all": {
       const ids = readyToFile().map((r) => r.id);
-      const dry = state.snap.freeagent?.dry_run;
-      if (!dry && !confirm(`File ${ids.length} receipt${ids.length === 1 ? "" : "s"} into FreeAgent?`)) return;
+      if (!confirm(`File ${ids.length} receipt${ids.length === 1 ? "" : "s"} into FreeAgent?`)) return;
       return act(() => api("/api/receipts/file", { method: "POST", body: { ids } }));
     }
     case "file":
@@ -1668,10 +1661,6 @@ document.addEventListener("change", (e) => {
   if (e.target.dataset.action === "connect-date") {
     state.gmailAsk.date = e.target.value;
     render();
-    return;
-  }
-  if (e.target.dataset.action === "fa-dry-run") {
-    act(() => api("/api/freeagent/dry-run", { method: "POST", body: { on: e.target.checked } }));
     return;
   }
   if (e.target.dataset.action === "fa-vat-scheme") {

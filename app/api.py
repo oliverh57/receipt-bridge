@@ -34,6 +34,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from . import bank_logos
 from .db import EXPORTED, FAILED, IGNORED, PENDING
 from .freeagent import VAT_SCHEMES, FreeAgentError
 from .service import ReceiptService
@@ -146,14 +147,12 @@ def create_app(service: ReceiptService) -> FastAPI:
 
     @app.get("/bank-logo/{key}")
     def bank_logo(key: str):
-        """A bank's own icon, fetched to data/bank-logos by tools/fetch_bank_logos.py.
+        """A bank's own icon, fetched from its website the first time (app/bank_logos.py).
         Never shipped with the app; a missing one makes the UI fall back to a monogram."""
-        folder = service.config.data_dir / "bank-logos"
-        if re.fullmatch(r"[a-z0-9]+", key):
-            for ext in (".svg", ".png", ".ico", ".jpg"):
-                if (folder / (key + ext)).is_file():
-                    return FileResponse(folder / (key + ext), headers={"Cache-Control": "max-age=86400"})
-        raise HTTPException(404)
+        found = bank_logos.find(key, service.config.data_dir / "bank-logos")
+        if found is None:
+            raise HTTPException(404)
+        return FileResponse(found, headers={"Cache-Control": "max-age=86400"})
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> HTMLResponse:
@@ -439,13 +438,6 @@ def create_app(service: ReceiptService) -> FastAPI:
     @app.get("/api/freeagent/categories")
     def freeagent_categories() -> list[dict[str, Any]]:
         return service._freeagent_reference().get("categories", [])
-
-    @app.post("/api/freeagent/dry-run")
-    def freeagent_dry_run(body: dict[str, Any]) -> dict[str, Any]:
-        if not isinstance(body.get("on"), bool):
-            raise HTTPException(400, "on must be true or false")
-        service.set_freeagent_dry_run(body["on"])
-        return {"ok": True}
 
     @app.post("/api/freeagent/vat-scheme")
     def freeagent_vat_scheme(body: dict[str, Any]) -> dict[str, Any]:

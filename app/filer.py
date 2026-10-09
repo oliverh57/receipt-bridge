@@ -7,8 +7,6 @@
 
 Safety, in order:
 
-* **Dry run** (the default): the exact request is built and stored for you
-  to read; nothing is sent.
 * **A plan is checked before anything is sent**: total, date, category,
   the transaction's amount, VAT, an attachable file. Any problem stops it.
 * **Pre-flight**: the transaction is read back from FreeAgent just before
@@ -59,13 +57,6 @@ class Plan:
     transaction_url: str | None = None
     problems: list[str] = field(default_factory=list)
     parts: list[dict[str, Any]] = field(default_factory=list)   # every explanation to create
-
-    def preview(self) -> dict[str, Any]:
-        """What would be sent, without the file's bytes."""
-        return {"kind": self.kind, "body": self.body, "parts": self.parts or [self.body],
-                "attachment": None if not self.attachment else
-                {k: v for k, v in self.attachment.items() if k != "path"},
-                "transaction": self.transaction_url}
 
 
 def _now() -> str:
@@ -378,14 +369,11 @@ def _our_expenses(client: FreeAgent, dated_on: str, ref: str) -> list[str]:
     return [e["url"] for e in expenses if e.get("receipt_reference") == ref]
 
 
-def file_receipt(client: FreeAgent, db: Database, receipt_id: int, plan: Plan, *, dry_run: bool) -> str:
+def file_receipt(client: FreeAgent, db: Database, receipt_id: int, plan: Plan) -> str:
     """File one receipt; returns a line for the activity log."""
     row = db.get_receipt(receipt_id)
     if plan.problems:
         raise FilingError("; ".join(plan.problems))
-    if dry_run:
-        _record(db, receipt_id, {"state": "dry_run", **plan.preview()})
-        return f"Dry run: {plan.kind} for {row['vendor']} prepared, nothing sent"
 
     client.writes_allowed = True
     try:
@@ -554,7 +542,7 @@ def update_existing_explanation(client: FreeAgent, transaction_url: str, explana
     return before
 
 
-def update_claim(client: FreeAgent, db: Database, receipt_id: int, plan: Plan, *, dry_run: bool) -> str:
+def update_claim(client: FreeAgent, db: Database, receipt_id: int, plan: Plan) -> str:
     """Change an expense already claimed, in place: FreeAgent keeps the same
     entries, with their receipt attached. A different VAT split can't be
     changed in place, so that one means undoing the claim and filing again."""
@@ -570,9 +558,6 @@ def update_claim(client: FreeAgent, db: Database, receipt_id: int, plan: Plan, *
     parts = plan.parts or [plan.body]
     if len(parts) != len(urls):
         raise FilingError("The VAT split has changed: undo the claim, then file it again")
-    if dry_run:
-        _record(db, receipt_id, {**state, "update": {"state": "dry_run", "parts": parts, "at": _now()}})
-        return f"Dry run: the change to {row['vendor']}'s expense was prepared, nothing sent"
     client.writes_allowed = True
     try:
         for url, part in zip(urls, parts):
