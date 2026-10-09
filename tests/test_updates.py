@@ -130,6 +130,20 @@ def test_pushing_a_new_version_is_enough() -> None:
     assert found["notes"] == "Faster matching"
 
 
+def test_whats_new_leaves_out_the_lines_git_adds() -> None:
+    message = ("Receipt Bridge 1.1.11\n\nRight-click files in Files to ignore them.\n\n"
+               "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n"
+               "Claude-Session: https://claude.ai/code/session_01WkECyK7HhwW8X1T7H2QeGz\n"
+               "Signed-off-by: Someone <s@example.com>\n")
+    assert updates.notes_from(message) == "Receipt Bridge 1.1.11\n\nRight-click files in Files to ignore them."
+    # words that merely contain a colon stay
+    assert updates.notes_from("Fixed: the currency box\nNote: VAT is 20%") == "Fixed: the currency box\nNote: VAT is 20%"
+    branch = _branch("1.3.0")
+    branch[f"{BASE}/commits/main"] = FakeResponse(200, {"sha": "abc123", "commit": {
+        "message": message, "committer": {"date": "2026-10-07T10:00:00Z"}}})
+    assert "Claude-Session" not in updates.latest(REPO, session=FakeGitHub(branch))["notes"]
+
+
 def test_a_release_of_the_same_version_supplies_its_notes() -> None:
     found = updates.latest(REPO, session=FakeGitHub({**_branch("1.3.0"), **_release("v1.3.0")}))
     assert found["version"] == "v1.3.0" and found["notes"] == "Longer notes."
