@@ -308,6 +308,30 @@ def test_the_receipt_can_be_any_pdf_or_picture_the_email_carries() -> None:
         pass
 
 
+def test_an_email_added_for_a_payment_is_approved_straight_away() -> None:
+    """Bank Feed's "Use that email" → Add and approve: linked in one go,
+    with the category set on the payment."""
+    service, _rid, tmp = make()
+    with tmp:
+        url = "tx/u"
+        service.db.set_state(f"email_hint:{url}", json.dumps({"message_id": "m1"}))
+        service.db.set_state(f"payment:{url}", json.dumps({"category": CATEGORY}))
+        pdf = Path(tmp.name) / "r.pdf"
+        pdf.write_bytes(b"%PDF-1.4")
+        service._mail_client = lambda account="": (SimpleNamespace(email="me@example.test"), None)
+        service._cached_email = lambda chosen, client, mid: SimpleNamespace(thread_id="t", subject="Receipt",
+                                                                            date_iso="2026-09-15")
+        service._email_document = lambda message, hint, document="": (pdf, "rendered_email")
+        approved = []
+        service._run_approve = lambda u, rid: approved.append((u, rid))
+        service._run_add_email("me@example.test", "m1", {"supplier": "Adobe", "date": "2026-09-15", "total": 16.94,
+            "currency": "GBP", "vat": None, "vat_choice": "auto", "paid_by": "business", "payment_url": url})
+        rid = approved[0][1]
+        row = service.db.get_receipt(rid)
+        assert approved == [(url, rid)] and row["transaction_url"] == url and row["category"] == CATEGORY
+        assert service.db.get_state(f"email_hint:{url}") is None
+
+
 def test_a_payment_approved_in_freeagent_is_done() -> None:
     """Approved there (not a guess awaiting review): done in the Statement,
     with or without a receipt. A guess waiting for review still needs one."""

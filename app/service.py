@@ -2814,8 +2814,14 @@ class ReceiptService:
             self._finish("email-add", False, "That email is already a receipt.")
             return
         if fields.get("payment_url"):
-            self.db.delete_state(f"email_hint:{fields['payment_url']}")
-            self._finish("email-add", True, f"Added the {supplier} email, paired with its payment.")
+            # "Use that email": approved and linked straight away, with the
+            # category set on the payment (else FreeAgent's, remembered, guessed)
+            url = fields["payment_url"]
+            self.db.delete_state(f"email_hint:{url}")
+            chosen_category = self.payment_settings(url).get("category")
+            if chosen_category and not self.db.get_receipt(receipt_id)["category"]:
+                self.db.update_receipt(receipt_id, {"category": chosen_category})
+            self._run_approve(url, receipt_id)
             return
         where = "an expense" if fields["paid_by"] == "personal" else "a receipt"
         self._finish("email-add", True, f"Added the {supplier} email to Files as {where}.")

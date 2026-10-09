@@ -206,7 +206,8 @@ async function submitDialog() {
     await api(`/api/emails/${encodeURIComponent(id)}/add`, { method: "POST",
       body: { account: mail.account, supplier: f.supplier, date: f.date, total: f.total, currency: f.currency,
               vat: f.vat, vat_choice: f.vat_choice, paid_by: f.paid_by,
-              payment_url: em.forPayment?.id === id ? em.forPayment.url : "", document: f.document || "" } });
+              payment_url: em.forPayment?.id === id ? em.forPayment.url : "", document: f.document || "",
+              ...(em.forPayment?.id === id ? { paid_by: "business" } : {}) } });
   } catch (err) {
     em.dialogError = err.message;
     return render();
@@ -214,7 +215,7 @@ async function submitDialog() {
   em.lastAdd = id;
   const paired = em.forPayment?.id === id;
   closeEmailDialog();
-  toast(paired ? `Adding the ${esc(f.supplier || "email")} email for this payment…`
+  toast(paired ? `Adding the ${esc(f.supplier || "email")} email and approving the payment…`
     : `Adding the ${esc(f.supplier || "email")} email to Files${f.paid_by === "personal" ? " as an expense" : ""}…`);
   refresh(true);
 }
@@ -406,7 +407,7 @@ function dialogHtml(mail) {
   const paired = em.forPayment?.id === mail.id ? em.forPayment : null;
   return `<h2 id="e-dialog-title">Convert to receipt</h2>
       <p class="sub">${esc(mail.subject || "(no subject)")} · ${esc(mail.from_name)}. ${found}</p>
-      ${paired ? `<div class="m-note e-pnote">For the ${esc(paired.label)} payment.</div>` : ""}
+      ${paired ? `<div class="m-note e-pnote">For the ${esc(paired.label)} payment. Adding it approves and links it in FreeAgent.</div>` : ""}
       <div class="m-kv">
         <span class="k">Supplier</span>${input("supplier", "text", 'placeholder="Who is it from?" list="supplier-names" autocomplete="off"')}
         <span class="k">Date</span>${input("date", "date")}
@@ -419,16 +420,16 @@ function dialogHtml(mail) {
       ${others.length ? `<div class="e-others"><span class="muted">Other amounts:</span>${others.map((a) =>
         `<button type="button" class="e-other" data-action="e-amount" data-amount="${a.amount.toFixed(2)}" data-currency="${esc(a.currency)}"
           title="Use this as the total">${esc(money(a.amount, a.currency))}${a.label ? ` <span>${esc(a.label)}</span>` : ""}</button>`).join("")}</div>` : ""}
-      <div class="e-dlabel">Paid with</div>
+      ${paired ? "" : `<div class="e-dlabel">Paid with</div>
       <div class="pw" role="group" aria-label="Paid with">
         ${pw("business", bankBadge(bank), "", bank, "Business account · linked in Bank Feed")}
         ${pw("personal", ICON.cash, "personal", "Expense", "Paid personally · claimed back")}
-      </div>
+      </div>`}
       ${before}
       ${em.dialogError ? `<div class="m-note warn">${esc(em.dialogError)}</div>` : ""}
       <div class="m-dialog-foot">
         <button class="btn" data-action="e-cancel">Cancel</button>
-        <button class="btn primary" data-action="e-add">${paired ? "Add for this payment" : f.paid_by === "personal" ? "Add as an expense" : "Add to Files"} ${kbd("⏎", true)}</button>
+        <button class="btn primary" data-action="e-add">${paired ? "Add and approve" : f.paid_by === "personal" ? "Add as an expense" : "Add to Files"} ${kbd("⏎", true)}</button>
       </div>`;
 }
 
