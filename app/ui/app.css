@@ -75,6 +75,11 @@ button { font: inherit; color: inherit; }
 }
 .nav-item:hover { background: var(--hover); }
 .nav-item.active { background: var(--selected); color: var(--selected-ink); font-weight: 600; }
+/* the sidebar's icons, and the line around Bank Feed and Expenses */
+.nav-item .nav-ic { display: inline-flex; flex: 0 0 16px; margin-right: 9px; color: var(--muted); }
+.nav-item.active .nav-ic { color: var(--accent); }
+.nav-item .nav-label { flex: 1; min-width: 0; text-align: left; }
+.nav-sep { height: 1px; margin: 6px 10px; background: var(--line); }
 .count { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
 .count.warn { color: var(--warn); }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bad); }
