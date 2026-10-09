@@ -234,6 +234,54 @@ def test_a_payment_freeagent_explained_starts_from_its_explanation() -> None:
         assert row()["freeagent"]["changes"] == {}
 
 
+def test_correcting_a_linked_payments_category_sticks() -> None:
+    """Linked, then the category was wrong: changed in Bank Feed, sent to
+    FreeAgent's explanation, kept on the receipt and for the supplier."""
+    service, rid, tmp = make()
+    with tmp:
+        acct, url = "https://fa.test/v2/bank_accounts/1", "https://fa.test/v2/bank_transactions/5"
+        other = "https://fa.test/v2/categories/285"
+        ref = json.loads(service.db.get_state("freeagent:reference"))
+        ref["bank_accounts"] = [{"url": acct, "name": "Example Bank", "currency": "GBP"}]
+        ref["categories"].append({"url": other, "description": "Internet & Telephone", "nominal_code": "285",
+                                  "group": "admin_expenses_categories"})
+        service.db.set_state("freeagent:reference", json.dumps(ref))
+        service.db.set_state("freeagent:accounts", json.dumps([acct]))
+        service.db.save_bank_transactions([{"url": url, "bank_account": acct, "dated_on": "2026-09-16", "amount": "-16.94",
+            "unexplained_amount": "0", "description": "Adobe",
+            "bank_transaction_explanations": [{"url": "e/9", "category": CATEGORY, "sales_tax_rate": "20.0",
+                                               "marked_for_review": False, "attachment": {"url": "a/1"}}]}])
+        service.db.update_receipt(rid, {"category": CATEGORY, "freeagent_json": json.dumps(
+            {"state": "filed", "transaction": url, "url": "e/9"})})
+        service.db.set_status(rid, "filed")
+        row = lambda: next(r for r in service.statement(acct, "2026-09")["rows"] if r["url"] == url)
+        assert row()["status"] == "filed" and row()["freeagent"]["explained"]
+        service.set_payment_settings(url, {"category": other})
+        assert row()["freeagent"]["changes"] == {"category": other}
+        sent = []
+        service._freeagent = lambda: SimpleNamespace(connected=True)
+        service._run_freeagent_sync = lambda: None
+        original = filer.update_existing_explanation
+        filer.update_existing_explanation = lambda c, u, exp, changes: sent.append(changes) or {}
+        try:
+            service._run_approve(url, None)
+        finally:
+            filer.update_existing_explanation = original
+        assert sent == [{"category": other}]
+        assert service.db.get_receipt(rid)["category"] == other
+        assert service.db.get_state("category_for:example cafe ltd") == other
+
+
+def test_an_email_for_a_payment_must_be_for_one_that_can_take_it() -> None:
+    service, _rid, tmp = make()
+    with tmp:
+        try:
+            service.add_email("", "m1", {"supplier": "Adobe", "total": "16.94", "payment_url": "tx/gone"})
+            raise AssertionError("added for a payment that isn't there")
+        except ValueError as exc:
+            assert "isn't in the statement" in str(exc)
+
+
 def test_a_payment_approved_in_freeagent_is_done() -> None:
     """Approved there (not a guess awaiting review): done in the Statement,
     with or without a receipt. A guess waiting for review still needs one."""

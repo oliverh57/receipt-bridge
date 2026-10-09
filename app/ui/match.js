@@ -1251,7 +1251,7 @@ function paymentCardHtml(t) {
       ${vat}
       ${rebillFields(rebill || null, `data-url="${esc(t.url)}"`, tag("rebill", rebill || null))}
     </div>
-    ${changed ? `<div class="m-note">Your changes are sent when you approve. <button class="link" data-action="st-revert" data-url="${esc(t.url)}">Keep FreeAgent's</button></div>` : ""}
+    ${changed ? `<div class="m-note">Your changes are sent when you ${t.status === "filed" ? "save" : "approve"}. <button class="link" data-action="st-revert" data-url="${esc(t.url)}">Keep FreeAgent's</button></div>` : ""}
     ${updated ? `<div class="m-note">You changed FreeAgent's explanation here. <button class="link" data-action="st-unexplain" data-url="${esc(t.url)}">Undo</button></div>` : ""}</div>`;
 }
 
@@ -1263,7 +1263,7 @@ function noReceiptButton(t) {
   const changed = t.freeagent?.explained && Object.keys(t.freeagent.changes || {}).length;
   if (t.status !== "missing") {
     return fa.connected && changed && t.amount < 0
-      ? `<button class="btn primary" data-action="st-approve" data-url="${esc(t.url)}" data-changes="1">Approve changes</button>` : "";
+      ? `<button class="btn primary" data-action="st-approve" data-url="${esc(t.url)}" data-changes="1">${t.status === "filed" ? "Save to FreeAgent" : "Approve changes"}</button>` : "";
   }
   if (!fa.connected) return `<button class="btn" data-action="st-none" data-url="${esc(t.url)}">Approve</button>`;
   if (!(t.settings?.category || t.freeagent?.category)) return `<button class="btn" disabled>Choose a category to approve</button>`;
@@ -1292,9 +1292,10 @@ function panelHtml(t) {
       <button class="link" data-action="st-close" aria-label="Close">✕</button></div>`;
   if (t.status === "filed") {
     return `${head}<div class="st-pbody">
-      <div class="m-wait"><div class="t">${t.approved ? "Approved and linked" : "Linked"} to the ${esc(t.receipt?.vendor || "")} receipt</div><div class="b">Saved to FreeAgent${t.approved ? " and approved there" : ""}. Nothing more to do.</div></div>
+      <div class="m-wait"><div class="t">${t.approved ? "Approved and linked" : "Linked"} to the ${esc(t.receipt?.vendor || "")} receipt</div><div class="b">Saved to FreeAgent${t.approved ? " and approved there" : ""}.</div></div>
+      ${paymentCardHtml(t)}
       ${t.receipt ? docFigure(filedFile(t)) : ""}
-      <div class="m-actions">${t.receipt ? `<button class="btn" data-action="m-unfile" data-id="${t.receipt.id}">Undo link</button>` : ""}
+      <div class="m-actions">${noReceiptButton(t)}${t.receipt ? `<button class="btn" data-action="m-unfile" data-id="${t.receipt.id}">Undo link</button>` : ""}
         ${fa.web ? `<a class="btn" href="${esc(fa.web)}" target="_blank" rel="noopener">View in FreeAgent</a>` : ""}</div></div>`;
   }
   if (t.status === "not_needed" && t.explained_here?.state === "filed") {
@@ -1372,7 +1373,7 @@ function renderMatchModal() {
     }
     return;
   }
-  if (host.querySelector(".m-overlay")) host.innerHTML = "";      // never touch the supplier dialogs
+  if (host.querySelector(".m-overlay:not(.e-overlay):not(.wiz-overlay)")) host.innerHTML = "";      // never touch the supplier or email dialogs
 }
 
 function fileAllHtml() {
@@ -1747,9 +1748,13 @@ document.addEventListener("click", async (e) => {
         await api("/api/freeagent/accounts", { method: "POST", body: { urls: [target.dataset.url] } });
         toast("Reading its payments from FreeAgent…");
       });
-    case "st-use":
+    case "st-use": {
+      const t = stPayment(target.dataset.url);
+      // an email: shown in the Convert to receipt dialog first, to check it
+      if (t?.suggestion?.kind === "email" && t.suggestion.message_id) return openEmailForPayment(t.suggestion, t);
       // the status line shows the fetch; the outcome toast says how it went
       return act(() => api("/api/statement/use-suggestion", { method: "POST", body: { url: target.dataset.url } }));
+    }
     case "st-open":
       m.sel = id;
       m.reveal = true;
@@ -1931,7 +1936,7 @@ document.addEventListener("keydown", (e) => {
     return;
   }
   if (m.fileAll?.phase === "confirm" && e.key === "Enter") { e.preventDefault(); document.querySelector('[data-action="m-fa-confirm"]')?.click(); return; }
-  if (m.fileAll || wiz.open || ed.open || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (m.fileAll || wiz.open || ed.open || em.dialog || e.metaKey || e.ctrlKey || e.altKey) return;
   if (document.activeElement?.matches("input:not([type=checkbox]), select, textarea")) return;
   const move = (rows, key, get, set) => {
     const i = rows.findIndex((x) => get(x) === key);
