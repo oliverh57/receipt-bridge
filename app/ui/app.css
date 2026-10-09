@@ -943,8 +943,21 @@ img.doc, .doc img, .m-doc img { -webkit-user-drag: none; user-select: none; }
 .e-files { display: flex; flex-wrap: wrap; gap: 6px 12px; }
 .e-file { display: inline-flex; align-items: center; gap: 4px; color: var(--ink); }
 
-/* the "Convert to receipt" dialog */
-.e-dialog { overflow-y: auto; }
+/* the "Convert to receipt" dialog: the form, and the receipt beside it */
+.m-dialog.e-dialog { width: min(1180px, calc(100vw - 32px)); height: min(860px, calc(100vh - 100px)); max-height: none;
+  flex-direction: row; padding: 0; }
+.e-dialog .e-dform { flex: 0 0 460px; min-width: 0; overflow-y: auto; padding: 22px 24px 20px; display: flex; flex-direction: column; }
+.e-dialog .e-dform .m-dialog-foot { margin-top: auto; padding-top: 18px; }
+.e-dialog .e-dpreview { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 8px; padding: 18px 20px 20px;
+  background: var(--panel); border-left: 1px solid var(--line); }
+.e-dphead { display: flex; align-items: baseline; gap: 10px; }
+.e-dphead .e-dlabel { margin: 0; }
+.e-pdf { flex: 1 1 auto; width: 100%; min-height: 0; border: 0; border-radius: 8px; background: #fff; }
+@media (max-width: 960px) {          /* no room beside it: just the form */
+  .m-dialog.e-dialog { width: min(520px, calc(100vw - 32px)); height: auto; max-height: calc(100vh - 100px); }
+  .e-dialog .e-dform { flex: 1 1 auto; }
+  .e-dialog .e-dpreview { display: none; }
+}
 .e-dialog .m-kv { margin-top: 0; }
 .e-dialog .m-kv .pair { flex-wrap: nowrap; }
 .e-dialog .m-kv .pair .edit-input { flex: 1 1 60px; }
