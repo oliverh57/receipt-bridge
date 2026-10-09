@@ -648,6 +648,16 @@ function headHtml(r) {
     <div class="m-dsub">${esc(r.date ? longDate(r.date) : "No date on receipt")} · ${esc(source)}</div>`;
 }
 
+/** Its exact payment already has a receipt in FreeAgent: this is most
+ * likely a copy of one filed before (or before a Reset). */
+function inFreeAgentHtml(r) {
+  const x = r.in_freeagent;
+  if (!x) return "";
+  return `<div class="m-issue"><div class="t">Already in FreeAgent?</div>
+    <div class="b">${esc(x.description)} on ${esc(shortDate(x.date))} (${esc(money(-x.amount, "GBP"))}) already has a receipt there. This is probably a copy.</div>
+    <div class="m-iss-ctl"><button class="btn small" data-action="m-ignore" data-id="${r.id}">Ignore this copy</button></div></div>`;
+}
+
 function fileDetailHtml(r) {
   let payment = "";
   if (r.stage === "link" && r.payment) {
@@ -675,6 +685,7 @@ function fileDetailHtml(r) {
   const fa = state.snap.freeagent || {};
   const personal = savedPaid(r) === "personal";
   if (personal) payment = expenseExtrasHtml(r) + expenseCardHtml(r);
+  payment = inFreeAgentHtml(r) + payment;
   const blocker = fileBlocker(r);
   const primary = personal ? (!fa.connected ? `<span class="m-note">Connect FreeAgent in Settings to claim.</span>`
       : blocker ? `<button class="btn" disabled>${esc(blocker)}</button>`

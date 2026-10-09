@@ -492,8 +492,10 @@ class Database:
                 t.get("description") or t.get("full_description") or "",
                 1 if t.get("is_manual") else 0, t.get("updated_at"), now,
                 only.get("url") if only else None,
-                len(only.get("attachments") or []) + (1 if only.get("attachment") else 0) if only else None,
-                1 if only and only.get("is_locked") else 0,
+                # every explanation's: one split by VAT rate has its receipt on the first
+                sum(len(e.get("attachments") or []) + (1 if e.get("attachment") else 0) for e in explanations)
+                if explanations else None,
+                1 if any(e.get("is_locked") for e in explanations) else 0,
                 only.get("category") if only else None,
                 # FreeAgent's own VAT rate and re-billing on it, for the Statement
                 json.dumps({k: only.get(k) for k in EXPLANATION_FIELDS}) if only else None,

@@ -146,6 +146,11 @@ class ReceiptService:
         self.accounts = AccountStore(config)
         adopt_legacy_scan_state(self.db, self.accounts)
         self._forget_dry_runs()
+        if not self.db.get_state("tidied:split_explanations"):
+            # payments split across explanations were stored without their
+            # attachments: read the whole history again on the next sync
+            self.db.delete_state("freeagent:last_sync")
+            self.db.set_state("tidied:split_explanations", "1")
 
         # Posts system notifications. The macOS shell supplies one (with a
         # `status` and `send`); the CLI and tests run without.

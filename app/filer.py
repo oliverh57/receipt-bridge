@@ -122,8 +122,9 @@ def vat_parts(row: Any, gross: Decimal, vat_registered: bool
     """([(gross for this part, sales_tax_rate to send)], problem).
 
     Not VAT registered → one part, no rate. Nothing printed, or "not a VAT
-    receipt" → one part at 0%. One rate fits the printed VAT → one part. Two
-    rates → a part per printed VAT line plus the remainder at 0%."""
+    receipt" → one part at 0%. One rate fits the printed VAT → one part at it.
+    Otherwise (two rates, like a non-taxable top-up with a 20% fee) → still
+    one part, with the VAT amount as printed: a receipt is never split."""
     if not vat_registered:
         return [(gross, None)], None
     extra = _extra(row)
@@ -148,9 +149,7 @@ def vat_parts(row: Any, gross: Decimal, vat_registered: bool
     if printed is None and (row["currency"] if "currency" in row.keys() else "GBP") in (None, "GBP"):
         # Nothing read when it arrived (a supplier rule with no VAT field):
         # read it now from the document's text, kept for its highlights
-        printed, lines = _vat_from_layout(extra, gross)
-        if printed is not None:
-            extra = {**extra, "vat_lines": lines}
+        printed, _lines = _vat_from_layout(extra, gross)
     if not printed:
         return [(gross, "0.0")], None
     vat = Decimal(str(printed))
@@ -158,26 +157,9 @@ def vat_parts(row: Any, gross: Decimal, vat_registered: bool
         if abs(vat - gross * rate / (100 + rate)) <= Decimal("0.02"):
             return [(gross, f"{rate}.0")], None
 
-    parts: list[tuple[Decimal, str | None]] = []
-    for line in extra.get("vat_lines") or []:
-        rate = Decimal(line[0]) if line[0] else None
-        line_vat = Decimal(line[1])
-        if rate is None or rate == 0:
-            continue
-        line_gross = Decimal(line[2]) if line[2] else _pennies(line_vat * (100 + rate) / rate)
-        if _vat_of(line_gross, rate) != line_vat:
-            return [], (f"VAT £{line_vat} at {rate}% doesn't come out to the penny on £{line_gross}. "
-                        "File this one in FreeAgent by hand.")
-        parts.append((line_gross, f"{int(rate)}.0" if rate == rate.to_integral() else str(rate)))
-    if not parts:
-        return [], (f"VAT £{vat} doesn't fit a single UK rate on £{gross}, and the receipt doesn't "
-                    "show its VAT per rate. File this one in FreeAgent by hand.")
-    remainder = gross - sum((g for g, _ in parts), Decimal(0))
-    if remainder < 0:
-        return [], "The VAT lines add up to more than the total. File this one by hand."
-    if remainder > 0:
-        parts.append((remainder, "0.0"))
-    return parts, None
+    if vat > _vat_of(gross, Decimal(20)) + PENNY:
+        return [], f"VAT £{vat} is more than 20% of £{gross}. Check the total and VAT."
+    return [(gross, f"{MANUAL}{_pennies(vat)}")], None
 
 
 def vat_rate(row: Any, gross: Decimal, vat_registered: bool) -> tuple[str | None, str | None]:

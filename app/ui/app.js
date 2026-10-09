@@ -2023,7 +2023,7 @@ function renderWizardPreview() {
   const matches = p.matches == null ? "" : `<div class="sub">Matches ${p.matches} email${p.matches === 1 ? "" : "s"} in the past year</div>`;
   const vatNumber = p.vat_number ? `VAT number ${esc(p.vat_number)}` : "no VAT number found";
   const vat = wiz.choices.vat === VAT_REVERSE ? `<div class="sub">VAT: reverse charge</div>`
-    : p.vat != null ? `<div class="sub">VAT ${esc(money(p.vat, p.currency))} (${esc(p.vat_rate)}) · ${vatNumber}</div>`
+    : p.vat != null ? `<div class="sub">VAT ${esc(money(p.vat, p.currency))}${p.vat_rate ? ` (${esc(p.vat_rate)})` : ""} · ${vatNumber}</div>`
     : `<div class="sub">No VAT claimed</div>`;
   box.innerHTML = `<div class="sub">Saved as</div><div class="filename selectable">${esc(p.filename)}</div>${vat}${matches}`;
 }

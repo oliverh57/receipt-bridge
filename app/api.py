@@ -988,7 +988,7 @@ def create_app(service: ReceiptService) -> FastAPI:
         """The VAT a scan would read from this email, and the rate it files at."""
         from decimal import Decimal
 
-        from .filer import vat_rate
+        from .filer import MANUAL, vat_rate
         from .pipeline import read_vat_from_text
 
         if values.get("vat") in (None, "") and not any(f.name == "vat" for f in watcher.fields):
@@ -998,7 +998,8 @@ def create_app(service: ReceiptService) -> FastAPI:
             return {"vat": None, "vat_rate": ""}
         rate, problem = vat_rate({"vat": vat, "extra_json": json.dumps({"vat_lines": values.get("vat_lines")})},
                                  Decimal(str(values["total"])), True)
-        return {"vat": float(vat), "vat_rate": f"{float(rate):g}%" if rate else "", "vat_problem": problem or ""}
+        shown = rate and not rate.startswith(MANUAL)      # two rates: the VAT as printed, no one rate
+        return {"vat": float(vat), "vat_rate": f"{float(rate):g}%" if shown else "", "vat_problem": problem or ""}
 
     @app.post("/api/suppliers/{watcher_id}/edit")
     def supplier_edit(watcher_id: str, body: dict[str, Any]) -> dict[str, Any]:
