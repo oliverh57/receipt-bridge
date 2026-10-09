@@ -806,7 +806,7 @@ class ReceiptService:
     @staticmethod
     def _bank_account(row: Any) -> str | None:
         """The one bank account this receipt was paid from, if its supplier
-        rule says so (Settings → Email receipts → Paid with)."""
+        rule says so (Settings → Email → Paid with)."""
         try:
             return (json.loads(row["extra_json"] or "{}") if row["extra_json"] else {}).get("bank_account") or None
         except ValueError:

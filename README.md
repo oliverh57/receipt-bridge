@@ -31,7 +31,7 @@ New versions arrive inside the app (**Update now**).
    *business account* or *personally*. It lands in the receipt inbox
    (iCloud Drive by default; any synced folder, set in Settings) and appears
    in **Match** within a minute. Email receipts (the optional email tool,
-   Settings → Email receipts) arrive every 6 hours. **Check now** in the top
+   Settings → Email) arrive every 6 hours. **Check now** in the top
    bar reads the inbox, FreeAgent and email straight away.
    Photos are tidied (cut to the receipt, squared up, grey with the
    contrast lifted) only when the tidied copy reads back with the same
