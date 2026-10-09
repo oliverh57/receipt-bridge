@@ -1016,6 +1016,13 @@ img.doc, .doc img, .m-doc img { -webkit-user-drag: none; user-select: none; }
 .about-doc > summary::after, .oss > summary::after { content: "›"; margin-left: 8px; color: var(--muted); display: inline-block; transition: transform .15s; }
 .about-doc[open] > summary::after, .oss[open] > summary::after { transform: rotate(90deg); }
 .about-doc[open] > summary { border-bottom: 1px solid var(--line); }
+.about-doc > summary { display: flex; align-items: center; }
+.about-doc .about-state { margin-left: auto; font-weight: 400; color: var(--muted); }
+/* the arrow at the right edge, after the state when there is one */
+.about-doc > summary::after { margin-left: auto; }
+.about-doc > summary:has(.about-state)::after { margin-left: 10px; }
+.about-body { padding: 12px 16px; color: var(--muted); line-height: 1.5; }
+.about-doc .oss-list { border-top: 0; }
 .eula { padding: 6px 16px 14px; max-height: 420px; overflow-y: auto; line-height: 1.5; }
 .eula .eula-title { font-weight: 600; margin: 8px 0 0; }
 .eula h4 { margin: 14px 0 4px; font-size: 13px; }

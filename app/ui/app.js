@@ -1064,6 +1064,11 @@ function renderSettings() {
 
       <div class="card">
         <details class="log"><summary>Activity log</summary><pre>${esc(log || "Nothing yet.")}</pre></details>
+      </div>
+
+      <div class="card">
+        <div class="card-row"><div class="grow">Reset app<div class="sub">Signs out, removes the licence, deletes all receipts and settings. Original photos are kept.</div></div>
+          <button class="btn small danger" data-action="reset-app" ${s.queued.includes("reset") ? "disabled" : ""}>${s.queued.includes("reset") ? "Resetting…" : "Reset app…"}</button></div>
       </div>`,
   };
 
@@ -1135,9 +1140,9 @@ function aboutHtml() {
   const status = !u ? "" : u.restart_needed ? `Version ${esc(u.latest.replace(/^v/i, ""))} is installed. Restart to use it.`
     : u.available ? `Version ${esc(u.latest.replace(/^v/i, ""))} is available.`
     : u.checking ? "Checking for updates…" : u.latest ? "Up to date." : "";
-  const keys = a.licence.google && a.licence.freeagent ? "Licensed: the Google and FreeAgent keys are installed."
-    : a.licence.google || a.licence.freeagent ? `Partly licensed: only the ${a.licence.google ? "Google" : "FreeAgent"} key is installed.`
-    : "No licence file installed yet.";
+  const licensed = a.licence.google && a.licence.freeagent;
+  const keys = a.licence.google || a.licence.freeagent ? `Only the ${a.licence.google ? "Google" : "FreeAgent"} key is installed.`
+    : "Add your licence file to connect FreeAgent and Gmail.";
   const oss = a.open_source.map((p) => {
     const text = (state.licences || {})[p.name];
     const body = !p.has_text ? (p.url ? `<p class="sub">Licence text: <a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.url)}</a></p>` : "")
@@ -1156,17 +1161,15 @@ function aboutHtml() {
     </div>
 
     <div class="card">
-      <div class="card-head"><h3>Licence</h3></div>
-      <div class="card-row"><div class="grow">This copy<div class="sub">${esc(keys)} The keys identify Receipt Bridge; you sign in to your own Gmail and FreeAgent.</div></div></div>
-      ${a.licence.google && a.licence.freeagent ? "" : licenceDrop()}
+      <details class="about-doc" ${licensed ? "" : "open"}><summary>Licence<span class="about-state">${licensed ? "Installed" : "Not installed"}</span></summary>
+        <div class="about-body">${licensed ? "Google and FreeAgent keys installed." : esc(keys)}</div>
+        ${licensed ? "" : licenceDrop()}</details>
     </div>
 
     <div class="card">
-      <div class="card-head"><h3>Your data</h3></div>
-      <div class="card-note">Your receipts, the emails kept as receipts and the database stay on this Mac. Receipt Bridge only
-        talks to Google (to read email, read-only), FreeAgent (to read your bank feed and file what you approve), suppliers' websites
-        (to download a receipt an email links to) and GitHub (for updates).</div>
-      <div class="card-row"><div class="grow">Kept in<div class="sub selectable"><code>${esc(a.data_dir)}</code></div></div></div>
+      <details class="about-doc"><summary>Your data</summary>
+        <div class="about-body">Receipts and the database stay on this Mac, in <code class="selectable">${esc(a.data_dir)}</code>.
+          Receipt Bridge only connects to Google (read-only), FreeAgent, suppliers' websites and GitHub (updates).</div></details>
     </div>
 
     <div class="card">
@@ -1174,9 +1177,8 @@ function aboutHtml() {
     </div>
 
     <div class="card">
-      <div class="card-head"><h3>Open-source software</h3></div>
-      <div class="card-note">Receipt Bridge is built on these, each used under its own licence. Click one to read it.</div>
-      <div class="oss-list">${oss}</div>
+      <details class="about-doc"><summary>Open-source software<span class="about-state">${a.open_source.length}</span></summary>
+        <div class="oss-list">${oss}</div></details>
     </div>`;
 }
 
@@ -1490,6 +1492,20 @@ document.addEventListener("click", (e) => {
       return act(() => api("/api/settings", { method: "POST", body: { theme: target.dataset.theme } }));
     case "add-supplier":
       return openSupplierWizard();
+    case "reset-app":
+      if (!confirm("Reset Receipt Bridge?\n\nSigns out of Gmail and FreeAgent, removes the licence, and deletes all receipts, "
+          + "recurring receipts and settings. Original photos are kept.\n\nThis can't be undone.")) return;
+      return act(async () => {
+        await api("/api/reset", { method: "POST", body: { confirm: "reset" } });
+        toast("Resetting…", 30000);
+        // a fresh start: the page reloads into setup once it's done
+        const wait = async () => {
+          const snap = await api("/api/state").catch(() => null);
+          if (snap && !snap.queued.includes("reset")) return location.reload();
+          setTimeout(wait, 700);
+        };
+        wait();
+      });
     case "notify-frequency":
       state.snap.notification_prefs.frequency = target.dataset.frequency;
       render();

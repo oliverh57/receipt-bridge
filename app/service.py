@@ -21,6 +21,7 @@ import os
 import queue
 import re
 import secrets
+import shutil
 import subprocess
 import threading
 import time
@@ -588,6 +589,87 @@ class ReceiptService:
             return
         self._run_freeagent_sync()
         self._finish("connect", True, "Connected FreeAgent")
+
+    # ---- Reset app: back to a fresh install ---------------------------------
+
+    def reset_app(self) -> bool:
+        """Settings → General → Reset app (queued, so no scan writes as it
+        goes). Signs out of Gmail and FreeAgent, removes the licence keys,
+        deletes every receipt, the database (so every setting) and the
+        recurring receipts made in the app. Original photos are kept, and so
+        are exports and the log."""
+        self.cancel_connect()
+        return self._enqueue("reset", self._run_reset)
+
+    def _run_reset(self) -> None:
+        from .supplier_builder import HEADER
+
+        self._set_activity(busy=True, kind="reset", label="Resetting Receipt Bridge", started_at=_now(), log=[])
+        data = self.config.data_dir.resolve()
+        if data in (Path("/"), Path.home().resolve()) or len(data.parts) < 3:
+            self._finish("reset", False, f"Not resetting: the data folder ({data}) looks wrong.")
+            return
+        archive = self.photo_archive.resolve()
+        inbox = self.photo_inbox
+
+        # 1. connections, while their keys are still here to sign out with
+        for account in self.accounts.list():
+            try:
+                self.accounts.remove(account.email, revoke=True)
+            except Exception as exc:                 # one account's trouble isn't the rest's
+                log.warning("reset: signing out %s: %s", account.email, exc)
+        try:
+            client = self._freeagent()
+            if client:
+                client.disconnect()
+        except Exception as exc:
+            log.warning("reset: FreeAgent: %s", exc)
+        try:
+            if login_item.is_enabled():
+                login_item.set_enabled(False)
+        except Exception as exc:
+            log.warning("reset: open at login: %s", exc)
+        try:                                         # the iPhone Shortcut: back to the default inbox
+            setup_guide.write_shortcut_settings(self.config.photo_inbox, inbox)
+        except Exception as exc:
+            log.info("reset: shortcut settings: %s", exc)
+
+        # 2. the licence keys
+        for key in (self.config.credentials_file, self.config.freeagent_credentials_file):
+            key.unlink(missing_ok=True)
+
+        # 3. recurring receipts made here (the ones shipped with the app stay)
+        for rule in self.config.watchers_dir.glob("*.yaml"):
+            try:
+                if rule.read_text(encoding="utf-8").startswith(HEADER):
+                    rule.unlink()
+            except OSError as exc:
+                log.warning("reset: %s: %s", rule.name, exc)
+
+        # 4. the database emptied in place (every receipt and setting), then
+        # everything else in the data folder but the original photos, the
+        # compiled receipt reader and the log
+        self.db.wipe()
+        db_name = self.config.db_path.name
+        for child in data.iterdir():
+            keep = (child == archive or child in archive.parents or child.name == "bin"
+                    or child.name.startswith("app.log") or child.name.startswith(db_name))
+            if keep:
+                continue
+            try:
+                shutil.rmtree(child) if child.is_dir() and not child.is_symlink() else child.unlink()
+            except OSError as exc:
+                log.warning("reset: %s: %s", child.name, exc)
+        with self._lock:
+            self._health.clear()
+            self._email_cache.clear()
+            self._freeagent_states.clear()
+            self._file_results = None
+            self._freeagent_error = self._freeagent_problem = ""
+            self._review_counts_cache = None
+            self._last_log = []
+        log.info("reset: done")
+        self._finish("reset", True, "Receipt Bridge is reset.")
 
     def disconnect_freeagent(self) -> None:
         client = self._freeagent()
