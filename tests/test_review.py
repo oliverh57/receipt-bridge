@@ -58,6 +58,33 @@ def test_correcting_a_field_clears_only_its_warnings() -> None:
         assert flags(service, rid) == [FLAGS[-1]]
 
 
+def test_a_guessed_supplier_you_checked_is_no_longer_a_guess() -> None:
+    service, rid, tmp = make()
+    with tmp:
+        extra = json.loads(service.db.get_receipt(rid)["extra_json"])
+        service.db.update_receipt(rid, {"extra_json": {**extra, "supplier_source": "model"}})
+        same = service.db.get_receipt(rid)["vendor"]
+        service.set_receipt_fields(rid, {"vendor": same})            # left as it was, but checked
+        assert json.loads(service.db.get_receipt(rid)["extra_json"])["supplier_source"] == "you"
+        assert not any("Supplier name" in f for f in flags(service, rid))
+
+
+def test_suppliers_you_have_had_are_suggested_most_used_first() -> None:
+    service, rid, tmp = make()
+    with tmp:
+        for i, name in enumerate(["Greggs", "greggs ", "Pret", "Greggs", ""]):
+            service.db.insert_receipt({"watcher_id": "photo", "source": "photo", "source_id": f"sha256:n{i}",
+                                       "vendor": name, "total": 1.0, "currency": "GBP"})
+        for i, name in enumerate(["Boots", "Boots Ltd", "Boot", "Boots", "BOOTS UK Limited"]):
+            service.db.insert_receipt({"watcher_id": "photo", "source": "photo", "source_id": f"sha256:b{i}",
+                                       "vendor": name, "total": 1.0, "currency": "GBP"})
+        names = service.supplier_names()
+        assert names[0] == "Boots", names                 # five of them, most often spelt "Boots"
+        assert names[1] == "Greggs" and "Pret" in names and "" not in names
+        assert not any(n.lower().startswith("boot") for n in names[1:]), "one suggestion per supplier"
+        assert sum(n.lower().strip() == "greggs" for n in names) == 1
+
+
 def test_looks_right_settles_doubts_but_not_blanks() -> None:
     """Files' "Looks right": guessed supplier, possible duplicate… settled;
     a total, currency or payer that's still missing is not."""

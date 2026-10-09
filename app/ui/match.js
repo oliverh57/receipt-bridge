@@ -200,14 +200,16 @@ document.addEventListener("keydown", (e) => {
 }, true);
 
 /** The detail pane, keeping the document and the scroll across redraws. */
-function drawSplit(head, list, detail, r, foot = "") {
+function drawSplit(head, list, detail, r, foot = "", top = "") {
   const content = $("#content");
   const queueTop = content.querySelector(".m-queue")?.scrollTop || 0;
   const detailTop = content.querySelector(".m-detail")?.scrollTop || 0;
-  const oldDoc = content.querySelector(".m-doc .doc");
+  // only a file's own document: Emails' view of an email is a ".doc" too,
+  // and was being carried over into Files
+  const oldDoc = content.querySelector(".m-doc .doc:not(.e-frame)");
   content.innerHTML = `<div class="m-wrap ${m.dragging ? "dragging" : ""}">${head}
     <div class="m-body">
-      ${foot ? `<div class="m-side"><section class="m-queue" aria-label="Files">${list}</section>${foot}</div>`
+      ${foot || top ? `<div class="m-side">${top ? `<div class="m-qtop">${top}</div>` : ""}<section class="m-queue" aria-label="Files">${list}</section>${foot}</div>`
         : `<section class="m-queue" aria-label="Files">${list}</section>`}
       <section class="m-detail" aria-label="Selected file">${detail}</section>
     </div>${dropHtml()}</div>`;
@@ -261,10 +263,23 @@ const HINT_WORDS = [
   [/^Total not confirmed by a payment line\./, "Not confirmed by a payment line."],
 ];
 
-/** The warnings about one field, under it: a short line each. */
-function hintRow(list) {
-  const words = (f) => HINT_WORDS.reduce((t, [re, to]) => t.replace(re, to), f);
-  return list?.length ? `<span></span><div class="m-hints">${list.map((f) => `<div>${ICON.check}<span>${esc(words(f))}</span></div>`).join("")}</div>` : "";
+/** A field's warnings as one line. A date that's both long before the
+ * photo and over 18 months old says so once. */
+function hintText(field, list) {
+  const lines = list.map((f) => HINT_WORDS.reduce((t, [re, to]) => t.replace(re, to), f));
+  if (field === "purchased_on" && lines.length > 1) {
+    const taken = list.map((f) => f.match(/photographed (.+?)\./)).find(Boolean);
+    const old = list.some((f) => f.includes("18 months"));
+    if (taken && old) return `Over 18 months before the photo was taken (${taken[1]}). Check the date.`;
+    if (old) return lines.filter((l) => !l.includes("18 months")).join(" ");
+  }
+  return lines.join(" ");
+}
+
+/** A field's warnings, under it. Typing in the field hides them (match.js
+ * input handler); leaving it tells the app it's been checked. */
+function hintRow(list, field) {
+  return list?.length ? `<span data-hints="${field}"></span><div class="m-hints" data-hints="${field}"><div>${ICON.check}<span>${esc(hintText(field, list))}</span></div></div>` : "";
 }
 
 function fieldsHtml(r) {
@@ -273,17 +288,17 @@ function fieldsHtml(r) {
     `<input class="edit-input ${warn ? "warn" : ""}" type="${type}" data-action="set-field" data-field="${field}" data-id="${r.id}" value="${esc(value ?? "")}" ${attrs}>`;
   return `<div class="m-card"><div class="m-card-head"><span>The receipt</span></div>
     <div class="m-kv">
-      <span class="k">Supplier</span>${input("vendor", "text", r.supplier === "Unknown supplier" ? "" : r.supplier, 'placeholder="Who is it from?"', !!by.supplier)}
-      ${hintRow(by.supplier)}
+      <span class="k">Supplier</span>${input("vendor", "text", r.supplier === "Unknown supplier" ? "" : r.supplier, 'placeholder="Who is it from?" list="supplier-names" autocomplete="off"', !!by.supplier)}
+      ${hintRow(by.supplier, "vendor")}
       <span class="k">Date</span>${undated(r) && r.photo_taken
         ? `<span class="pair">${input("purchased_on", "date", (r.date || "").slice(0, 10), "", !!by.date)}<button class="btn small" data-action="m-photo-date"
             data-id="${r.id}" data-day="${esc(r.photo_taken)}" title="The receipt shows no date">Use photo date (${esc(shortDate(r.photo_taken))})</button></span>`
         : input("purchased_on", "date", (r.date || "").slice(0, 10), "", !!by.date)}
-      ${hintRow(by.date)}
+      ${hintRow(by.date, "purchased_on")}
       <span class="k">Total</span><span class="pair">${input("total", "text", r.total == null ? "" : Number(r.total).toFixed(2), 'inputmode="decimal" placeholder="0.00" autocomplete="off"', !!by.total)}
         ${currencyHtml(r)}</span>
-      ${hintRow(by.total)}
-      ${by.vat ? `<span class="k">VAT</span>${hintRow(by.vat).replace("<span></span>", "")}` : ""}
+      ${hintRow(by.total, "total")}
+      ${by.vat ? `<span class="k">VAT</span>${hintRow(by.vat, "vat").replace('<span data-hints="vat"></span>', "")}` : ""}
     </div></div>`;
 }
 
@@ -566,8 +581,6 @@ function renderFiles() {
   if (g.waiting.length) parts.push(`${g.waiting.length} waiting for a payment`);
   const head = `<header class="m-head">
       <div class="m-title"><span>Files</span><span class="sub">${esc(parts.join(" · ") || "Receipts not yet in FreeAgent")}</span></div>
-      ${searchHtml("Supplier or amount")}
-      <button class="btn small" data-action="m-add" data-paid="business">Add files…</button>
       ${saveAllHtml(g)}
     </header>`;
   const list = groupHtml("check", "To check", g.check, m.sel, fileNote, "m-pick", false)
@@ -583,7 +596,7 @@ function renderFiles() {
   const picked = m.multi.length > 1 ? all.filter((r) => m.multi.includes(r.id)) : [];
   const detail = picked.length ? bulkHtml(picked) : sel ? fileDetailHtml(sel) : `<div class="m-empty">${ICON.upload}<div class="big">Nothing to check</div>
       <div>New receipts appear here.</div></div>`;
-  drawSplit(head, list, detail, picked.length ? null : sel, `<div class="m-qfoot">${dropZone}</div>`);
+  drawSplit(head, list, detail, picked.length ? null : sel, `<div class="m-qfoot">${dropZone}</div>`, searchHtml("Supplier or amount"));
 }
 
 /** Several files picked (shift-click a range, ⌘-click to add or remove one):
@@ -747,7 +760,7 @@ function renderExpenses() {
   const content = $("#content");
   const top = content.querySelector(".st-wrap")?.scrollTop || 0;
   const panelTop = content.querySelector(".st-panel")?.scrollTop || 0;
-  const oldDoc = content.querySelector(".m-doc .doc");
+  const oldDoc = content.querySelector(".m-doc .doc:not(.e-frame)");
   const month = xMonth();
   const rows = xRows();
   if (!rows.some((r) => r.id === m.xsel)) m.xsel = null;
@@ -902,7 +915,7 @@ function renderStatement() {
   const fa = state.snap.freeagent || {};
   const top = content.querySelector(".st-wrap")?.scrollTop || 0;
   const panelTop = content.querySelector(".st-panel")?.scrollTop || 0;
-  const oldDoc = content.querySelector(".m-doc .doc");
+  const oldDoc = content.querySelector(".m-doc .doc:not(.e-frame)");
   // Connected but no bank feed chosen: ask which one, right here.
   if (fa.connected && !(fa.bank_accounts || []).some((a) => a.chosen)) {
     content.innerHTML = chooseFeedHtml(fa);
@@ -1648,6 +1661,29 @@ document.addEventListener("click", async (e) => {
       m.reveal = true;
       return setView("pending");
   }
+});
+
+/** Editing a field in Files settles its warning: gone as you type. */
+document.addEventListener("input", (e) => {
+  const el = e.target;
+  if (el.dataset?.action !== "set-field" || !el.closest(".m-inspector")) return;
+  el.dataset.edited = "1";
+  el.classList.remove("warn");
+  document.querySelectorAll(`.m-inspector [data-hints="${el.dataset.field}"]`).forEach((h) => h.remove());
+});
+
+/** …and leaving it as it was still counts as checked: the change handler
+ * (app.js) only saves a value that changed, so say so here. */
+document.addEventListener("focusout", (e) => {
+  const el = e.target;
+  if (el.dataset?.action !== "set-field" || el.dataset.edited !== "1" || !el.closest(".m-inspector")) return;
+  delete el.dataset.edited;
+  if (el.value !== el.defaultValue) return;                     // a change: app.js saves it
+  const field = el.dataset.field;
+  let value = el.value.trim() || null;
+  if (field === "total" && value !== null) value = Number(value.replace(/[£$€\s]/g, "").replace(/,(\d{1,2})$/, ".$1").replace(/,/g, ""));
+  if (value === null || (field === "total" && !Number.isFinite(value))) return;
+  act(() => api(`/api/receipts/${el.dataset.id}/fields`, { method: "POST", body: { [field]: value } }));
 });
 
 document.addEventListener("input", (e) => {
