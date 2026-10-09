@@ -39,7 +39,7 @@ const em = {
   openError: "",
   forms: {},              // the "Convert to receipt" form, by message id
   dialog: null,           // the email whose "Convert to receipt" dialog is open
-  forPayment: null,       // {id, url, label}: opened from Bank Feed's "Use that email", paired with that payment
+  forPayment: null,       // {id, url, payment, category, project}: from Bank Feed's "Use that email", for that payment
   dialogError: "",
   lastAdd: null,          // the email last added, whose failure its header shows
   images: true,           // load the pictures emails link to ("Hide images" stops them)
@@ -207,7 +207,8 @@ async function submitDialog() {
       body: { account: mail.account, supplier: f.supplier, date: f.date, total: f.total, currency: f.currency,
               vat: f.vat, vat_choice: f.vat_choice, paid_by: f.paid_by,
               payment_url: em.forPayment?.id === id ? em.forPayment.url : "", document: f.document || "",
-              ...(em.forPayment?.id === id ? { paid_by: "business" } : {}) } });
+              ...(em.forPayment?.id === id ? { paid_by: "business", category: em.forPayment.category || "",
+                                               project: em.forPayment.project || "" } : {}) } });
   } catch (err) {
     em.dialogError = err.message;
     return render();
@@ -215,7 +216,7 @@ async function submitDialog() {
   em.lastAdd = id;
   const paired = em.forPayment?.id === id;
   closeEmailDialog();
-  toast(paired ? `Adding the ${esc(f.supplier || "email")} email and approving the payment…`
+  toast(paired ? `Approving the payment with the ${esc(f.supplier || "email")} email…`
     : `Adding the ${esc(f.supplier || "email")} email to Files${f.paid_by === "personal" ? " as an expense" : ""}…`);
   refresh(true);
 }
@@ -359,17 +360,28 @@ function emailNote(mail) {
 }
 
 /** The email as its sender laid it out, in a sandbox. */
-function emailFrame(mail) {
+function emailFrame(mail, { fit = false } = {}) {
   const remote = em.images ? " https: http:" : "";
-  const csp = `default-src 'none'; style-src 'unsafe-inline'${remote}; img-src data:${remote}; font-src data:${remote}`;
+  // `fit` (a small preview): one script of ours, allowed by a nonce, zooms the
+  // email to the frame's width once it's laid out. The email's own scripts and
+  // inline handlers stay blocked by the CSP, and without allow-same-origin the
+  // frame can't reach this page or the token.
+  const nonce = fit ? Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, "0")).join("") : "";
+  const fitScript = fit ? `<script nonce="${nonce}">(function(){var r=document.documentElement;function fit(){r.style.zoom=1;`
+    + `var w=Math.max(r.scrollWidth,document.body?document.body.scrollWidth:0);r.style.zoom=Math.min(1,innerWidth/(w||1));}`
+    + `fit();addEventListener("load",fit);setTimeout(fit,400);})();</script>` : "";
+  const csp = `default-src 'none'; style-src 'unsafe-inline'${remote}; img-src data:${remote}; font-src data:${remote}`
+    + (fit ? `; script-src 'nonce-${nonce}'` : "");
   const body = mail.html
     ? mail.html.replace(/<script\b[\s\S]*?<\/script\s*>/gi, "").replace(/<(base|meta\b[^>]*http-equiv)\b[^>]*>/gi, "")
     : `<pre style="white-space:pre-wrap;font:13px/1.5 -apple-system,system-ui,sans-serif;margin:0">${esc(mail.text)}</pre>`;
   const doc = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}">`
     + `<base target="_blank"><style>html{background:#fff;color:#1d1d1f}body{margin:16px;font:14px/1.45 -apple-system,system-ui,sans-serif;overflow-wrap:anywhere}`
-    + `img{max-width:100%;height:auto}table{max-width:100%}</style></head><body>${body}</body></html>`;
+    // fit: laid out as on a desktop (at least 680px wide, nothing squeezed), then zoomed down whole
+    + (fit ? `html{min-width:680px}img{height:auto}` : `img{max-width:100%;height:auto}table{max-width:100%}`)
+    + `</style></head><body>${body}${fitScript}</body></html>`;
   // links open in the browser (a popup leaves the sandbox; the app sends it to the Mac's browser)
-  return `<iframe class="doc e-frame" title="${esc(mail.subject || "Email")}" sandbox="allow-popups allow-popups-to-escape-sandbox"
+  return `<iframe class="doc e-frame" title="${esc(mail.subject || "Email")}" sandbox="${fit ? "allow-scripts " : ""}allow-popups allow-popups-to-escape-sandbox"
     referrerpolicy="no-referrer" srcdoc="${esc(doc)}"></iframe>`;
 }
 
@@ -405,9 +417,20 @@ function dialogHtml(mail) {
   const before = known && ["ignored", "failed", "deleted"].includes(known.status)
     ? `<div class="m-note e-dnote">This email is in Archived. Adding it moves it back to Files.</div>` : "";
   const paired = em.forPayment?.id === mail.id ? em.forPayment : null;
-  return `<h2 id="e-dialog-title">Convert to receipt</h2>
+  // for a known payment: the payment, and its FreeAgent details (category, project) set here
+  const fa = state.snap.freeagent || {};
+  const payment = paired ? `<div class="e-dlabel" style="margin-top:0">Bank payment</div>
+      <div class="m-pay e-paycard">${bankBadge(accountName())}
+        <div class="who"><div class="desc">${esc(paired.payment.description)}</div><div class="sub">${esc(accountName())} · ${esc(longDate(paired.payment.date))}</div></div>
+        <span class="amt">${esc(money(paired.payment.amount, "GBP"))}</span></div>` : "";
+  const projects = fa.projects || [];
+  const inFreeAgent = paired ? `
+        <span class="k">Category</span><select data-action="e-category" aria-label="Category">${categoryOptions(paired.category)}</select>
+        ${projects.length ? `<span class="k">Project</span><select data-action="e-project" aria-label="Project"><option value="">No project</option>${
+          projects.map((p) => `<option value="${esc(p.url)}" ${p.url === paired.project ? "selected" : ""}>${esc(p.client ? `${p.client}: ${p.name}` : p.name)}</option>`).join("")}</select>` : ""}` : "";
+  return `<h2 id="e-dialog-title">${paired ? "Approve with this email" : "Convert to receipt"}</h2>
       <p class="sub">${esc(mail.subject || "(no subject)")} · ${esc(mail.from_name)}. ${found}</p>
-      ${paired ? `<div class="m-note e-pnote">For the ${esc(paired.label)} payment. Adding it approves and links it in FreeAgent.</div>` : ""}
+      ${payment}
       <div class="m-kv">
         <span class="k">Supplier</span>${input("supplier", "text", 'placeholder="Who is it from?" list="supplier-names" autocomplete="off"')}
         <span class="k">Date</span>${input("date", "date")}
@@ -415,7 +438,7 @@ function dialogHtml(mail) {
         <span class="k">VAT</span><span class="pair"><select class="e-vat" data-action="e-vat-choice" aria-label="VAT">${VAT_MENU.map(([v, l]) =>
           `<option value="${v}" ${f.vat_choice === v ? "selected" : ""}>${l}</option>`).join("")}</select>${f.vat_choice === "amount"
           ? input("vat", "text", 'inputmode="decimal" placeholder="0.00" autocomplete="off" aria-label="VAT amount"')
-          : `<span class="e-vat-note muted">${esc(vatNote(f, d))}</span>`}</span>
+          : `<span class="e-vat-note muted">${esc(vatNote(f, d))}</span>`}</span>${inFreeAgent}
       </div>
       ${others.length ? `<div class="e-others"><span class="muted">Other amounts:</span>${others.map((a) =>
         `<button type="button" class="e-other" data-action="e-amount" data-amount="${a.amount.toFixed(2)}" data-currency="${esc(a.currency)}"
@@ -429,7 +452,7 @@ function dialogHtml(mail) {
       ${em.dialogError ? `<div class="m-note warn">${esc(em.dialogError)}</div>` : ""}
       <div class="m-dialog-foot">
         <button class="btn" data-action="e-cancel">Cancel</button>
-        <button class="btn primary" data-action="e-add">${paired ? "Add and approve" : f.paid_by === "personal" ? "Add as an expense" : "Add to Files"} ${kbd("⏎", true)}</button>
+        <button class="btn primary" data-action="e-add" ${paired && !paired.category ? "disabled" : ""}>${paired ? (paired.category ? "Approve" : "Choose a category") : f.paid_by === "personal" ? "Add as an expense" : "Add to Files"} ${kbd("⏎", true)}</button>
       </div>`;
 }
 
@@ -606,6 +629,9 @@ document.addEventListener("change", (e) => {
   if (a === "e-currency" && em.forms[em.dialog]) {
     em.forms[em.dialog].currency = e.target.value;
     render();
+  } else if ((a === "e-category" || a === "e-project") && em.forPayment) {
+    em.forPayment[a === "e-category" ? "category" : "project"] = e.target.value;
+    render();
   } else if (a === "e-document" && em.forms[em.dialog]) {
     em.forms[em.dialog].document = e.target.value;
     render();
@@ -626,7 +652,10 @@ document.addEventListener("keydown", (e) => {
   if (em.dialog) {
     // the dialog has the keyboard: Esc closes it, ⏎ adds (a focused button does its own thing)
     if (e.key === "Escape") { e.preventDefault(); closeEmailDialog(); }
-    else if (e.key === "Enter" && !t.closest?.("button, select")) { e.preventDefault(); submitDialog(); }
+    else if (e.key === "Enter" && !t.closest?.("button, select")) {
+      e.preventDefault();
+      if (!em.forPayment || em.forPayment.category) submitDialog();
+    }
     return;
   }
   if (t.matches?.('input[data-action="e-search"]')) {
@@ -704,8 +733,11 @@ document.addEventListener("click", async (e) => {
 /** The email found for a payment, in the Convert to receipt dialog: check
  * it, then "Add for this payment" adds it paired with that payment. */
 async function openEmailForPayment(hint, t) {
+  const own = t.freeagent?.explained ? t.freeagent : {};
   em.forPayment = { id: hint.message_id, url: t.url,
-                    label: `${money(-t.amount, "GBP")} ${t.description} · ${shortDate(t.date)}` };
+                    payment: { description: t.description, date: t.date, amount: t.amount },
+                    category: t.settings?.category || own.category || "",
+                    project: (t.settings?.rebill || own.rebill || {}).project || "" };
   toast("Opening the email…", 2500);
   const mail = await whenOpen(hint.message_id, hint.account);
   if (!mail || em.forPayment?.id !== hint.message_id) {

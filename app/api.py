@@ -97,6 +97,8 @@ class EmailAdd(BaseModel):
     paid_by: str = "business"
     payment_url: str = ""          # from Bank Feed's "Use that email": paired with this payment
     document: str = ""             # the receipt: "" (its PDF, else the email), "email" or "att:N"
+    category: str = ""             # with payment_url: its FreeAgent category…
+    project: str = ""              # …and project (linked, not re-billed)
 
 
 class SupplierSearch(BaseModel):
