@@ -739,6 +739,53 @@ def create_app(service: ReceiptService) -> FastAPI:
         except (LicenceError, OSError) as exc:
             raise HTTPException(400, str(exc)) from exc
 
+    # ---- recurring receipts: export and import ----------------------------
+
+    @app.post("/api/suppliers/export")
+    def rules_export(body: dict[str, Any]) -> dict[str, Any]:
+        """The ticked recurring receipts into one file, saved where the Mac's
+        own Save dialog says."""
+        try:
+            data, count = service.export_rules([str(i) for i in body.get("ids") or []])
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        script = ('POSIX path of (choose file name with prompt "Save recurring receipts as" '
+                  'default name "Recurring receipts.rbrules")')
+        result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=600)
+        if result.returncode != 0:
+            return {"path": None}                       # cancelled
+        path = Path(result.stdout.strip())
+        if path.suffix != ".rbrules":
+            path = path.with_name(path.name + ".rbrules")
+        path.write_bytes(data)
+        return {"path": str(path), "count": count}
+
+    @app.post("/api/suppliers/import")
+    async def rules_import(request: Request, name: str = "") -> dict[str, Any]:
+        """A dropped .rbrules (or one rule's .yaml): the file's bytes."""
+        from .rules_io import RulesError
+
+        try:
+            return service.import_rules(await request.body(), name)
+        except RulesError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.post("/api/suppliers/import/choose")
+    def rules_import_choose() -> dict[str, Any]:
+        """The Mac's own file picker, for an export or a rule."""
+        from .rules_io import RulesError
+
+        script = ('POSIX path of (choose file with prompt "Choose recurring receipts to import" '
+                  'of type {"rbrules", "yaml", "yml", "public.yaml"})')
+        result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=600)
+        if result.returncode != 0:
+            return {"added": None}                      # cancelled
+        path = Path(result.stdout.strip())
+        try:
+            return service.import_rules(path.read_bytes(), path.name)
+        except (RulesError, OSError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+
     @app.post("/api/settings/choose-folder")
     def choose_folder(body: dict[str, Any]) -> dict[str, Any]:
         """The Mac's own folder picker. Waits for the person, so it's a

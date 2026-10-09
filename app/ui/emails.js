@@ -627,3 +627,47 @@ document.addEventListener("keydown", (e) => {
     document.querySelector('input[data-action="e-search"]')?.focus();
   }
 });
+
+// ---- right-click an email: convert it, or make its supplier recurring --------------
+// Uses Files' menu look and closing rules (match.js: .ctx-menu, closeContextMenu).
+
+/** The whole email, once it's downloaded (opening it if need be). */
+async function whenOpen(id) {
+  if (!em.mails[id]) openEmail(id);
+  for (let i = 0; i < 100 && !em.mails[id] && !em.openError; i++) await new Promise((r) => setTimeout(r, 200));
+  return em.mails[id] || null;
+}
+
+document.addEventListener("contextmenu", (e) => {
+  const row = state.view === "emails" ? e.target.closest(".e-row") : null;
+  if (!row) return;
+  e.preventDefault();
+  closeContextMenu();
+  const id = row.dataset.id;
+  if (em.sel !== id) pick(id);
+  const x = findEmail(id);
+  const done = x?.in_files && ["pending", "exported", "filed"].includes(x.in_files.status);
+  const menu = document.createElement("div");
+  menu.className = "ctx-menu";
+  menu.setAttribute("role", "menu");
+  menu.innerHTML = `<div class="ctx-head">${esc(x?.from_name || "Email")}</div>
+    <button type="button" role="menuitem" data-action="ctx-e-convert" data-id="${esc(id)}" ${done ? "disabled" : ""}>
+      ${done ? "Already in Files" : "Convert to receipt"}</button>
+    <button type="button" role="menuitem" data-action="ctx-e-recurring" data-id="${esc(id)}">Turn into recurring receipt</button>`;
+  document.body.appendChild(menu);
+  const box = menu.getBoundingClientRect();
+  menu.style.left = `${Math.max(4, Math.min(e.clientX, innerWidth - box.width - 4))}px`;
+  menu.style.top = `${Math.max(4, Math.min(e.clientY, innerHeight - box.height - 4))}px`;
+  menu.querySelector("button:not([disabled])")?.focus();
+});
+
+document.addEventListener("click", async (e) => {
+  const item = e.target.closest('.ctx-menu button[data-action^="ctx-e-"]');
+  if (!item || item.disabled) return;
+  const { action, id } = item.dataset;
+  closeContextMenu();
+  const mail = await whenOpen(id);
+  if (!mail) return;
+  if (action === "ctx-e-convert") openDialog(id);
+  else openSupplierWizardFor(mail);
+});

@@ -1039,3 +1039,5 @@ img.doc, .doc img, .m-doc img { -webkit-user-drag: none; user-select: none; }
 .oss > .sub, .oss > pre { margin: 0 16px 10px; }
 .licence-text { max-height: 280px; overflow: auto; padding: 10px 12px; border-radius: 6px; background: var(--panel); border: 1px solid var(--line);
   font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
+.about-log { margin: 0; padding: 10px 16px; max-height: 320px; overflow: auto; font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap; color: var(--muted); }

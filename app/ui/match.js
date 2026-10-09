@@ -1462,7 +1462,9 @@ document.addEventListener("drop", (e) => {
   const files = [...e.dataTransfer.files];
   const licences = files.filter((f) => f.name.toLowerCase().endsWith(".rbkey"));
   if (licences.length) installLicence(licences[0]);         // on any screen
-  const rest = files.filter((f) => !licences.includes(f));
+  const rules = files.filter((f) => f.name.toLowerCase().endsWith(".rbrules"));
+  if (rules.length) importRulesFile(rules[0]);              // recurring receipts, on any screen too
+  const rest = files.filter((f) => !licences.includes(f) && !rules.includes(f));
   if (rest.length && DROP_VIEWS.includes(state.view)) uploadFiles(rest, "business");
 });
 
@@ -1829,7 +1831,7 @@ window.addEventListener("resize", closeContextMenu);
 document.addEventListener("scroll", closeContextMenu, true);
 
 document.addEventListener("click", (e) => {
-  const item = e.target.closest(".ctx-menu button[data-action]");
+  const item = e.target.closest('.ctx-menu button[data-action="ctx-ignore"], .ctx-menu button[data-action="ctx-paid"]');
   if (!item || item.disabled) return;
   const ids = ctx.ids;
   closeContextMenu();

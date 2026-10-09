@@ -3271,6 +3271,31 @@ class ReceiptService:
         found = next((w for w in watchers if w.id == watcher_id), None)
         return found.path if found else None
 
+    def export_rules(self, ids: list[str]) -> tuple[bytes, int]:
+        """The chosen recurring receipts as one .rbrules file, each rule's
+        YAML exactly as it is. Returns (file, how many)."""
+        from . import rules_io
+
+        wanted = set(ids)
+        rules = [(w.path.name, w.path.read_text(encoding="utf-8")) for w in self.all_suppliers()[0]
+                 if w.id in wanted and w.path]
+        if not rules:
+            raise ValueError("Tick at least one recurring receipt to export.")
+        return rules_io.bundle(rules), len(rules)
+
+    def import_rules(self, data: bytes, name: str = "") -> dict[str, Any]:
+        """Add the recurring receipts in an export (or one rule's .yaml) that
+        aren't here already, and look for their receipts straight away."""
+        from . import rules_io
+
+        rules = rules_io.read(data, name)
+        have = {w.id for w in self.all_suppliers()[0]}
+        result = rules_io.install(rules, self.config.watchers_dir, have)
+        for rule in result["added"]:
+            self.rescan_supplier(rule["id"])
+        self.touch()
+        return result
+
     def suppliers(self) -> list[dict[str, Any]]:
         watchers, problems = self.all_suppliers()
         found: dict[str, int] = {}

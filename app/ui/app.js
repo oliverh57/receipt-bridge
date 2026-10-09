@@ -1019,7 +1019,6 @@ function renderSettings() {
   const theme = s.theme || "system";
   const themeButton = (value, label) =>
     `<button class="seg ${theme === value ? "on" : ""}" data-action="theme" data-theme="${value}" aria-pressed="${theme === value}">${label}</button>`;
-  const log = (s.activity.log.length ? s.activity.log : s.last_log || []).join("\n");
 
   const sections = {
     about: state.settingsTab === "about" ? aboutHtml() : "",
@@ -1030,18 +1029,22 @@ function renderSettings() {
 
       <div class="card">
         <div class="card-head"><h3>Recurring receipts</h3>
+          <button class="btn small" data-action="rules-import">Import…</button>
+          <button class="btn small" data-action="rules-export" ${(state.suppliers || []).some((w) => !w.problem) ? "" : "disabled"}>Export…</button>
           <button class="btn small" data-action="add-supplier" ${s.accounts.length ? "" : "disabled"}>+ Add recurring receipt</button></div>
-        <div class="card-note">Suppliers who email a receipt every time. Their receipts are collected by themselves.</div>
+        <div class="card-note">Suppliers who email a receipt every time: collected automatically.</div>
         ${suppliers || `<div class="card-note">Loading…</div>`}
       </div>
 
       <div class="card">
+        <div class="card-head"><h3>Automatic checks</h3></div>
         <div class="card-row"><div class="grow">Check Gmail automatically<div class="sub">Every 6 hours</div></div>
           <label class="switch"><input type="checkbox" data-action="auto-scan" ${s.auto_scan ? "checked" : ""} aria-label="Check Gmail automatically"><span></span></label></div>
       </div>`,
 
     general: `
       <div class="card">
+        <div class="card-head"><h3>App</h3></div>
         ${loginRow(s.open_at_login || {}, s.queued.includes("install-app"))}
         <div class="card-row"><div class="grow">Appearance</div>
           <div class="segmented" role="group" aria-label="Appearance">
@@ -1053,8 +1056,8 @@ function renderSettings() {
       ${inboxCard(s.photo_inbox)}
 
       <div class="card">
-        <div class="card-row"><div class="grow">Setup guide
-            <div class="sub">FreeAgent, where receipt photos go, Gmail, and adding the iPhone Shortcut.</div></div>
+        <div class="card-head"><h3>Setup guide</h3></div>
+        <div class="card-row"><div class="grow">Licence, FreeAgent, receipt folder, Gmail and the iPhone Shortcut</div>
           <button class="btn small" data-action="setup-open">Open</button></div>
       </div>
 
@@ -1063,10 +1066,7 @@ function renderSettings() {
       ${updateCard(s.update)}
 
       <div class="card">
-        <details class="log"><summary>Activity log</summary><pre>${esc(log || "Nothing yet.")}</pre></details>
-      </div>
-
-      <div class="card">
+        <div class="card-head"><h3>Reset</h3></div>
         <div class="card-row"><div class="grow">Reset app<div class="sub">Signs out, removes the licence, deletes all receipts and settings. Original photos are kept.</div></div>
           <button class="btn small danger" data-action="reset-app" ${s.queued.includes("reset") ? "disabled" : ""}>${s.queued.includes("reset") ? "Resetting…" : "Reset app…"}</button></div>
       </div>`,
@@ -1137,6 +1137,7 @@ function aboutHtml() {
   if (!a) { loadAbout(); return `<div class="card"><div class="card-note">Loading…</div></div>`; }
   if (a.error) return `<div class="card"><div class="card-note">${esc(a.error)}</div></div>`;
   const u = state.snap.update;
+  const log = (state.snap.activity.log.length ? state.snap.activity.log : state.snap.last_log || []).join("\n");
   const status = !u ? "" : u.restart_needed ? `Version ${esc(u.latest.replace(/^v/i, ""))} is installed. Restart to use it.`
     : u.available ? `Version ${esc(u.latest.replace(/^v/i, ""))} is available.`
     : u.checking ? "Checking for updates…" : u.latest ? "Up to date." : "";
@@ -1179,6 +1180,10 @@ function aboutHtml() {
     <div class="card">
       <details class="about-doc"><summary>Open-source software<span class="about-state">${a.open_source.length}</span></summary>
         <div class="oss-list">${oss}</div></details>
+    </div>
+
+    <div class="card">
+      <details class="about-doc"><summary>Activity log</summary><pre class="about-log">${esc(log || "Nothing yet.")}</pre></details>
     </div>`;
 }
 
@@ -1492,6 +1497,34 @@ document.addEventListener("click", (e) => {
       return act(() => api("/api/settings", { method: "POST", body: { theme: target.dataset.theme } }));
     case "add-supplier":
       return openSupplierWizard();
+    case "rules-export":
+      exporting.ids = new Set((state.suppliers || []).filter((w) => !w.problem).map((w) => w.id));
+      return renderExport();
+    case "rules-export-tick": {
+      const id = target.dataset.id;
+      exporting.ids.has(id) ? exporting.ids.delete(id) : exporting.ids.add(id);
+      return renderExport();
+    }
+    case "rules-export-all": {
+      const all = (state.suppliers || []).filter((w) => !w.problem).map((w) => w.id);
+      exporting.ids = new Set(exporting.ids.size === all.length ? [] : all);
+      return renderExport();
+    }
+    case "rules-export-close":
+      $("#modal").innerHTML = "";
+      return;
+    case "rules-export-save":
+      return act(async () => {
+        const res = await api("/api/suppliers/export", { method: "POST", body: { ids: [...exporting.ids] } });
+        if (!res.path) return;                                   // cancelled
+        $("#modal").innerHTML = "";
+        toast(`Exported ${res.count} recurring receipt${res.count === 1 ? "" : "s"} to <b>${esc(res.path.split("/").pop())}</b>.`);
+      });
+    case "rules-import":
+      return act(async () => {
+        const res = await api("/api/suppliers/import/choose", { method: "POST" });
+        if (res.added) toast(importedText(res), 9000);
+      });
     case "reset-app":
       if (!confirm("Reset Receipt Bridge?\n\nSigns out of Gmail and FreeAgent, removes the licence, and deletes all receipts, "
           + "recurring receipts and settings. Original photos are kept.\n\nThis can't be undone.")) return;
@@ -1719,6 +1752,44 @@ function openSupplierWizardFor(email) {
                                    sender: email.from_name, date: email.date }],
                        pick: null, analysis: null, choices: {}, preview: null });
   wizardPick(0);
+}
+
+// ---- recurring receipts: export (tick which) and import ----------------------
+
+const exporting = { ids: new Set() };
+
+function renderExport() {
+  const rules = (state.suppliers || []).filter((w) => !w.problem);
+  const n = exporting.ids.size;
+  const rows = rules.map((w) => `<label class="card-row choice">
+      <input type="checkbox" data-action="rules-export-tick" data-id="${esc(w.id)}" ${exporting.ids.has(w.id) ? "checked" : ""}>
+      <div class="grow">${esc(w.name)}</div></label>`).join("");
+  $("#modal").innerHTML = `<div class="backdrop" data-action="rules-export-close"></div>
+    <div class="modal" role="dialog" aria-modal="true" aria-label="Export recurring receipts">
+      <div class="modal-head"><h2>Export recurring receipts</h2></div>
+      <div class="modal-body"><div class="card">
+        <label class="card-row choice"><input type="checkbox" data-action="rules-export-all" ${n === rules.length ? "checked" : ""}>
+          <div class="grow"><b>All</b></div></label>${rows}</div></div>
+      <div class="modal-foot"><span class="spacer"></span>
+        <button class="btn" data-action="rules-export-close">Cancel</button>
+        <button class="btn primary" data-action="rules-export-save" ${n ? "" : "disabled"}>Export ${n}…</button></div>
+    </div>`;
+}
+
+/** After an import: what was added, and what wasn't and why. */
+function importedText(res) {
+  const added = res.added.map((r) => esc(r.name));
+  const skipped = res.skipped.map((r) => `${esc(r.name)} (${esc(r.why)})`);
+  return [added.length ? `Added ${added.join(", ")}.` : "Nothing added.",
+          skipped.length ? `Skipped ${skipped.join(", ")}.` : ""].filter(Boolean).join(" ");
+}
+
+async function importRulesFile(file) {
+  const res = await fetch(`/api/suppliers/import?name=${encodeURIComponent(file.name)}`, { method: "POST",
+    headers: { "x-receipt-bridge": TOKEN, "content-type": "application/octet-stream" }, body: file });
+  const body = await res.json().catch(() => ({}));
+  toast(res.ok ? importedText(body) : `<b>Not imported.</b> ${esc(body.detail || res.statusText)}`, 9000);
+  refresh(true);
 }
 
 function closeWizard() {
