@@ -360,7 +360,7 @@ function emailNote(mail) {
 }
 
 /** The email as its sender laid it out, in a sandbox. */
-function emailFrame(mail, { fit = false } = {}) {
+function emailFrame(mail, { fit = false, layout = 680 } = {}) {
   const remote = em.images ? " https: http:" : "";
   // `fit` (a small preview): one script of ours, allowed by a nonce, zooms the
   // email to the frame's width once it's laid out. The email's own scripts and
@@ -378,7 +378,7 @@ function emailFrame(mail, { fit = false } = {}) {
   const doc = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}">`
     + `<base target="_blank"><style>html{background:#fff;color:#1d1d1f}body{margin:16px;font:14px/1.45 -apple-system,system-ui,sans-serif;overflow-wrap:anywhere}`
     // fit: laid out as on a desktop (at least 680px wide, nothing squeezed), then zoomed down whole
-    + (fit ? `html{min-width:680px}img{height:auto}` : `img{max-width:100%;height:auto}table{max-width:100%}`)
+    + (fit ? `html{min-width:${Number(layout) || 680}px}img{height:auto}` : `img{max-width:100%;height:auto}table{max-width:100%}`)
     + `</style></head><body>${body}${fitScript}</body></html>`;
   // links open in the browser (a popup leaves the sandbox; the app sends it to the Mac's browser)
   return `<iframe class="doc e-frame" title="${esc(mail.subject || "Email")}" sandbox="${fit ? "allow-scripts " : ""}allow-popups allow-popups-to-escape-sandbox"

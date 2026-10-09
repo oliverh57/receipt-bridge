@@ -98,6 +98,21 @@ def test_the_draft_reads_supplier_date_total_and_vat() -> None:
     assert {a["amount"] for a in draft["amounts"]} >= {180.0, 150.0}
 
 
+def test_a_sumup_tax_table_gives_its_tax_not_its_net() -> None:
+    """SumUp/Square: "A (20%) VAT £36.75 £7.35 £44.10" is net, tax, total.
+    The VAT is £7.35, whether the row is one line or a cell a line; never
+    more than 20% of the total."""
+    sender = "Mikkeller Bar London <no-reply@sumup.com>"
+    items = "Baddest Behaviour x 3 £23.40\nLuke's Cider - Luke's Gospel £6.90\nTotal £44.10\n"
+    one_line = items + "Tax rate Tax Name Net Tax Total\nA (20%) VAT £36.75 £7.35 £44.10"
+    cells = items + "\n".join(["Tax rate", "Tax Name", "Net", "Tax", "Total", "A (20%)", "VAT", "£36.75", "£7.35", "£44.10"])
+    for body in (one_line, cells):
+        draft = email_inbox.draft(email("m9", "Receipt from Mikkeller Bar London", body, sender=sender))
+        assert (draft["total"], draft["vat"]) == (44.10, 7.35), (body, draft["vat"])
+    unlabelled = email_inbox.draft(email("m8", "Receipt", "Total £44.10\nVAT £36.75", sender=sender))
+    assert unlabelled["vat"] is None, "more than 20% of the total is never VAT"
+
+
 def test_pictures_inside_the_email_are_shown_in_place() -> None:
     raw = (b'From: Shop <a@shop.test>\nSubject: Receipt\nMIME-Version: 1.0\n'
            b'Content-Type: multipart/related; boundary="X"\n\n--X\nContent-Type: text/html\n\n'
