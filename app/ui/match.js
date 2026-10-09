@@ -109,30 +109,13 @@ function groupHtml(key, title, rows, sel, note, action, collapsible, hint) {
 }
 
 function docFigure(r) {
-  // a photo opens as it arrived, before any tidying
+  // a photo opens as it arrived, before any tidying: only while you're
+  // checking the file, the one time it matters
   const original = r.source === "photo" ? "original" : "pdf";
   return `<figure class="m-figure">
       <div class="m-doc">${r.has_pdf ? "" : `<div class="m-nodoc">No document</div>`}</div>
-      ${r.has_pdf ? `<figcaption><a href="/api/receipts/${r.id}/${original}?t=${encodeURIComponent(TOKEN)}" target="_blank" rel="noopener">Open original</a>${tidyNote(r)}</figcaption>` : ""}
+      ${r.has_pdf && r.stage === "check" && r.status === "pending" ? `<figcaption><a href="/api/receipts/${r.id}/${original}?t=${encodeURIComponent(TOKEN)}" target="_blank" rel="noopener">Open original</a></figcaption>` : ""}
     </figure>`;
-}
-
-/** Under a photo: how it was tidied, and a switch back to the plain copy.
- * When it wasn't tidied, why, on hover. */
-function tidyNote(r) {
-  const t = r.tidy;
-  if (!t) return "";
-  const locked = r.status === "filed";
-  const why = [...t.notes, ...(t.dropped.length ? [`Background text cut away: ${t.dropped.join(", ")}`] : [])].join("\n");
-  if (t.on) {
-    return `<span class="m-tidy" title="${esc(why)}"> · Tidied: ${esc(t.steps.join(", "))}${locked ? "" :
-      ` · <button class="link" data-action="m-tidy" data-id="${r.id}" data-on="0">Show plain photo</button>`}</span>`;
-  }
-  if (t.available) {
-    return `<span class="m-tidy" title="${esc(why)}"> · Plain photo${locked ? "" :
-      ` · <button class="link" data-action="m-tidy" data-id="${r.id}" data-on="1">Show tidied</button>`}</span>`;
-  }
-  return `<span class="m-tidy" title="${esc(why)}"> · Not tidied: it might have lost something</span>`;
 }
 
 const HL_LABEL = { supplier: "Supplier", total: "Total", date: "Date", vat_number: "VAT no." };
@@ -250,20 +233,69 @@ function issuesHtml(r, extraTitle) {
     ${list.length ? `<ul class="m-flags">${list.map((f) => `<li>${esc(f)}</li>`).join("")}</ul>` : ""}</div>`;
 }
 
+/** Which field a warning is about, so Files shows it under that field
+ * rather than in a list at the top. Anything else (a reprint, a possible
+ * duplicate) is about the whole file and stays at the top. */
+const FLAG_FIELDS = [["vat", /\bVAT\b/], ["total", /total|currency|^Dollars/i],
+  ["date", /date|dated|older than|photographed/i], ["supplier", /supplier/i], ["paid", /business account, or personally/i]];
+
+function flagsByField(r) {
+  const by = {};
+  for (const f of r.flags || []) {
+    if (f.startsWith("This doesn't look like a receipt")) continue;
+    (by[(FLAG_FIELDS.find(([, re]) => re.test(f)) || ["other"])[0]] ||= []).push(f);
+  }
+  // A name read off the photo (or the top line) without its own warning
+  if (!by.supplier && r.ai_guess?.supplier && !(r.payment?.chips || []).includes("Name")) {
+    by.supplier = ["Read from the photo. Check it's right."];
+  }
+  return by;
+}
+
+/** A warning shortened for its place under the field: the field's own
+ * name is beside it already. */
+const HINT_WORDS = [
+  [/^Supplier name guessed by the Mac\. Check it\.$/, "Read from the photo. Check it's right."],
+  [/^Supplier name taken from the top of the receipt\. Check it\.$/, "Taken from the top of the receipt. Check it's right."],
+  [/^Receipt dated .+? but photographed (.+?)\. Check the date\.$/, "Photo taken $1. Check the date."],
+  [/^Total not confirmed by a payment line\./, "Not confirmed by a payment line."],
+];
+
+/** The warnings about one field, under it: a short line each. */
+function hintRow(list) {
+  const words = (f) => HINT_WORDS.reduce((t, [re, to]) => t.replace(re, to), f);
+  return list?.length ? `<span></span><div class="m-hints">${list.map((f) => `<div>${ICON.check}<span>${esc(words(f))}</span></div>`).join("")}</div>` : "";
+}
+
 function fieldsHtml(r) {
-  const input = (field, type, value, attrs = "") =>
-    `<input class="edit-input" type="${type}" data-action="set-field" data-field="${field}" data-id="${r.id}" value="${esc(value ?? "")}" ${attrs}>`;
-  return `<div class="m-card"><div class="m-card-head"><span>The receipt</span>${r.ai_guess?.supplier && !(r.payment?.chips || []).includes("Name")
-      ? `<span class="ai" title="Not confirmed yet. Check the name.">Supplier is a guess</span>` : ""}</div>
+  const by = flagsByField(r);
+  const input = (field, type, value, attrs = "", warn = false) =>
+    `<input class="edit-input ${warn ? "warn" : ""}" type="${type}" data-action="set-field" data-field="${field}" data-id="${r.id}" value="${esc(value ?? "")}" ${attrs}>`;
+  return `<div class="m-card"><div class="m-card-head"><span>The receipt</span></div>
     <div class="m-kv">
-      <span class="k">Supplier</span>${input("vendor", "text", r.supplier === "Unknown supplier" ? "" : r.supplier, 'placeholder="Who is it from?"')}
+      <span class="k">Supplier</span>${input("vendor", "text", r.supplier === "Unknown supplier" ? "" : r.supplier, 'placeholder="Who is it from?"', !!by.supplier)}
+      ${hintRow(by.supplier)}
       <span class="k">Date</span>${undated(r) && r.photo_taken
-        ? `<span class="pair">${input("purchased_on", "date", (r.date || "").slice(0, 10))}<button class="btn small" data-action="m-photo-date"
+        ? `<span class="pair">${input("purchased_on", "date", (r.date || "").slice(0, 10), "", !!by.date)}<button class="btn small" data-action="m-photo-date"
             data-id="${r.id}" data-day="${esc(r.photo_taken)}" title="The receipt shows no date">Use photo date (${esc(shortDate(r.photo_taken))})</button></span>`
-        : input("purchased_on", "date", (r.date || "").slice(0, 10))}
-      <span class="k">Total</span><span class="pair">${input("total", "text", r.total == null ? "" : Number(r.total).toFixed(2), 'inputmode="decimal" placeholder="0.00" autocomplete="off"')}
+        : input("purchased_on", "date", (r.date || "").slice(0, 10), "", !!by.date)}
+      ${hintRow(by.date)}
+      <span class="k">Total</span><span class="pair">${input("total", "text", r.total == null ? "" : Number(r.total).toFixed(2), 'inputmode="decimal" placeholder="0.00" autocomplete="off"', !!by.total)}
         ${currencyHtml(r)}</span>
+      ${hintRow(by.total)}
+      ${by.vat ? `<span class="k">VAT</span>${hintRow(by.vat).replace("<span></span>", "")}` : ""}
     </div></div>`;
+}
+
+/** At the top of a file in Files: only what's about the whole file. The
+ * rest is shown under its field. */
+function fileIssuesHtml(r) {
+  const notReceipt = (r.issues || []).includes("Not a receipt?");
+  const other = flagsByField(r).other || [];
+  if (!notReceipt && !other.length) return "";
+  return `<div class="m-issue small">${notReceipt
+      ? `<div class="t">This doesn't look like a receipt</div><div class="b">No amount, date or VAT number found. Ignore it or enter the details.</div>` : ""}
+    ${other.map((f) => `<div class="b">${esc(f)}</div>`).join("")}</div>`;
 }
 
 /** The receipt shows no date of its own (the date may be the photo's). */
@@ -637,7 +669,7 @@ function fileDetailHtml(r) {
   return `${headHtml(r)}
     <div class="m-dgrid">${docFigure(r)}
       <div class="m-inspector m-keep">
-        ${r.stage === "check" ? issuesHtml(r) : ""}
+        ${r.stage === "check" ? fileIssuesHtml(r) : ""}
         ${paidHtml(r)}
         ${fieldsHtml(r)}
         ${payment}
@@ -1473,8 +1505,6 @@ document.addEventListener("click", async (e) => {
       return r && act(() => api(`/api/receipts/${r.id}/fields`, { method: "POST", body: { purchased_on: target.dataset.day } }));
     case "m-checked":
       return r && act(() => api(`/api/receipts/${r.id}/fields`, { method: "POST", body: { checked: true } }));
-    case "m-tidy":
-      return r && act(() => api(`/api/receipts/${r.id}/tidy`, { method: "POST", body: { on: target.dataset.on === "1" } }));
     case "m-to-statement": return r && goToStatement(r);
     case "m-ignore": {
       if (!r) return;

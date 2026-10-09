@@ -461,8 +461,6 @@ legend { font-size: 12px; font-weight: 600; margin-bottom: 4px; padding: 0; }
 .m-nodoc { margin: auto; color: var(--muted); }
 .m-figure figcaption { margin-top: 8px; font-size: 12px; }
 .m-figure figcaption a { color: var(--accent); text-decoration: none; }
-.m-figure .m-tidy { color: var(--muted); }
-.m-figure .m-tidy .link { font-size: inherit; }
 
 .m-inspector { flex: 1 1 340px; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
 .m-issue, .m-wait { border-radius: 10px; padding: 14px 16px; background: var(--warn-bg); }
@@ -470,6 +468,13 @@ legend { font-size: 12px; font-weight: 600; margin-bottom: 4px; padding: 0; }
 .m-issue .t, .m-wait .t { font-weight: 600; font-size: 14px; }
 .m-issue .b, .m-wait .b { margin-top: 2px; }
 .m-flags { margin: 8px 0 0; padding-left: 18px; color: var(--warn); }
+.m-issue.small { padding: 10px 14px; }
+.m-issue.small .b + .b { margin-top: 4px; }
+/* a warning under the field it's about (Files) */
+.m-hints { display: flex; flex-direction: column; gap: 3px; margin-top: -4px; font-size: 12px; color: var(--warn); }
+.m-hints > div { display: flex; align-items: flex-start; gap: 6px; }
+.m-hints svg { flex: 0 0 auto; width: 12px; height: 12px; margin-top: 2px; }
+.m-kv .edit-input.warn { border-color: color-mix(in srgb, var(--warn) 55%, var(--line)); }
 .m-iss-ctl { margin-top: 10px; }
 .m-opts { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
 .m-opt { display: flex; align-items: center; gap: 10px; padding: 8px 10px 8px 12px; border-radius: 8px;
