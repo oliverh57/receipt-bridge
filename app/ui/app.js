@@ -25,8 +25,8 @@ function setPref(key, value) {
 
 const state = {
   view: "pending",
-  month: new Date().toISOString().slice(0, 7),   // Statement month, YYYY-MM
-  stView: pref("stViewMode", "all") === "month" ? "month" : "all",   // Bank Feed: every month (the default), or one
+  // Bank Feed's period: "all" (the default), a month "YYYY-MM", or "start..end" (an accounting year)
+  stPeriod: /^(all|\d{4}-\d{2}|\d{4}-\d{2}-\d{2}\.\.\d{4}-\d{2}-\d{2})$/.test(pref("stPeriod", "")) ? pref("stPeriod", "") : "all",
   stLimit: Number(pref("stLimit", "100")) || 0,  // …a page of how many (0: all)
   stPage: 0,                                     // …which page, newest first
   statement: null,
@@ -191,12 +191,12 @@ async function refresh(force = false) {
   if (!snap.setup?.done && !setup.open && !setup.dismissed) setup.open = true;
 
   if (state.view === "statement") {
-    const all = state.stView === "all";
-    const key = `statement:${all ? `all:${state.stLimit}:${state.stPage}` : state.month}:${snap.version}`;
+    const paged = !isMonthPeriod(state.stPeriod);          // a month is shown whole
+    const key = `statement:${state.stPeriod}:${paged ? `${state.stLimit}:${state.stPage}` : ""}:${snap.version}`;
     if (force || key !== state.receiptsKey) {
       // the payments, and the unlinked files that could be their receipts
-      const query = all ? `month=all&limit=${state.stLimit}&offset=${state.stPage * state.stLimit}`
-        : `month=${encodeURIComponent(state.month)}`;
+      const query = `month=${encodeURIComponent(state.stPeriod)}`
+        + (paged ? `&limit=${state.stLimit}&offset=${state.stPage * state.stLimit}` : "");
       try { state.statement = await api(`/api/statement?${query}`); }
       catch (err) { state.statement = { error: err.message, rows: [], summary: {} }; }
       state.receipts = await api("/api/receipts?status=pending");

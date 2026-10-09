@@ -543,6 +543,31 @@ def test_the_statement_can_show_every_month_newest_first() -> None:
         assert [r["date"] for r in month["rows"]] == sorted(r["date"] for r in month["rows"]), "a month: oldest first, as before"
 
 
+def test_bank_feed_periods_are_months_and_accounting_years() -> None:
+    """FreeAgent's menu: the months with payments, and the accounting years
+    from the first year's end, newest first; a year shows its payments."""
+    from app.service import _periods
+
+    days = ["2024-05-02", "2025-03-30", "2025-04-02", "2026-02-10"]
+    p = _periods(days, "2024-03-31")
+    assert p["months"][-1] == {"period": "2024-05", "label": "May 2024"}
+    # from the year with the first payment up to this one, newest first
+    assert [y["label"] for y in p["years"]][-2:] == ["Accounting Year 2025/26", "Accounting Year 2024/25"]
+    assert p["years"][-2]["period"] == "2025-04-01..2026-03-31"
+    start, end = p["years"][0]["period"].split("..")
+    assert start <= __import__("datetime").date.today().isoformat() <= end, "the newest is this year"
+    assert _periods(days, "")["years"] == [], "no year end yet: months only"
+    leap = _periods(["2024-02-29"], "2024-02-29")["years"]                     # a 29 February year end
+    assert leap[-1]["period"] == "2023-03-01..2024-02-29" and leap[-2]["period"] == "2024-03-01..2025-02-28"
+    service, _flagged, tmp = make()
+    with tmp:
+        connected(service, Path(tmp.name))
+        every = service.statement(None, "all")
+        first = min(r["date"] for r in every["rows"])
+        year = service.statement(None, f"{first}..{first}", limit=50)
+        assert year["rows"] and all(r["date"] == first for r in year["rows"])
+
+
 def test_a_linked_photo_on_the_statement_says_it_is_a_photo() -> None:
     """The panel showed a linked photo in a frame at full size: it didn't
     know it was a photo, so it couldn't scale it as Files does."""

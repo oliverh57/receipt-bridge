@@ -798,6 +798,8 @@ class ReceiptService:
                 "projects": projects,
                 "user_url": user.get("url"),
                 "subdomain": company.get("subdomain", ""),
+                # the first accounting year's last day: Bank Feed's "Accounting Year 2025/26"
+                "year_end": company.get("first_accounting_year_end") or "",
                 "vat": vat_settings(company),
                 "environment": client.credentials.environment,
                 "bank_accounts": [
@@ -1926,7 +1928,8 @@ class ReceiptService:
         """Every payment in a month of the cached statement, and whether it
         has a receipt: filed, in Match, missing, or no receipt needed.
         `month="all"`: every month, newest first, a page of `limit` of them
-        from `offset` (all when None)."""
+        from `offset` (all when None). `month="YYYY-MM-DD..YYYY-MM-DD"`: the
+        same, between those days (an accounting year)."""
         chosen = self._freeagent_accounts()
         accounts = {a["url"]: a for a in self._freeagent_reference().get("bank_accounts", [])}
         account = account or (chosen[0] if chosen else None)
@@ -1935,9 +1938,12 @@ class ReceiptService:
         month = month or datetime.now().strftime("%Y-%m")
         # Outgoing payments only: money in (a client paying an invoice) never
         # needs a receipt, and listing it buried the payments that do.
-        every = month == "all"
-        transactions = [dict(t) for t in self.db.bank_transactions([account])
-                        if (every or t["dated_on"].startswith(month)) and float(t["amount"]) < 0]
+        outgoing = [dict(t) for t in self.db.bank_transactions([account]) if float(t["amount"]) < 0]
+        span = month.split("..") if ".." in month else None
+        every = month == "all" or span is not None
+        transactions = [t for t in outgoing
+                        if (span and span[0] <= t["dated_on"][:10] <= span[1])
+                        or (not span and (month == "all" or t["dated_on"].startswith(month)))]
         total_payments = len(transactions)
         if every:
             transactions.sort(key=lambda t: (t["dated_on"], t["url"]), reverse=True)
@@ -2015,6 +2021,8 @@ class ReceiptService:
             "limit": limit if every else None,
             "offset": offset if every and limit else 0,
             "total_payments": total_payments,       # all of them, however many are shown
+            # Bank Feed's period menu: every month with payments, and every accounting year
+            "periods": _periods([t["dated_on"][:10] for t in outgoing], self._freeagent_reference().get("year_end")),
             "last_sync": self.db.get_state("freeagent:last_sync"),
             "rows": rows,
             "summary": {**counts, "payments": payments, "with_receipt": counts["filed"] + counts["in_match"],
@@ -3454,6 +3462,42 @@ def _supplier_key_for_names(name: str) -> str:
     "Boots Ltd", "BOOTS" and "Boot" all come to "boot"."""
     key = re.sub(r"[^a-z0-9]+", "", _LEGAL_WORDS.sub(" ", name.lower().replace("&", " ")))
     return key[:-1] if len(key) > 3 and key.endswith("s") else key or name.lower()
+
+
+def _periods(days: list[str], year_end: str | None) -> dict[str, list[dict[str, str]]]:
+    """Bank Feed's period menu, as FreeAgent's: the months with payments,
+    newest first, and the accounting years (from the first year's end) they
+    fall in, as {label, period} ("YYYY-MM", or "start..end")."""
+    today = datetime.now().date().isoformat()
+    months = sorted({d[:7] for d in days} | {today[:7]}, reverse=True)
+    out = {"months": [{"period": m, "label": datetime.strptime(m, "%Y-%m").strftime("%B %Y")} for m in months],
+           "years": []}
+    try:
+        first_end = date.fromisoformat(str(year_end)[:10])
+    except ValueError:
+        return out
+    if not days:
+        return out
+
+    def year_ending(year: int) -> date:
+        try:
+            return first_end.replace(year=year)
+        except ValueError:                       # 29 February in a short year
+            return first_end.replace(year=year, day=28)
+
+    earliest, latest = min(days + [today]), max(days + [today])
+    end = year_ending(first_end.year)
+    while end.isoformat() < earliest:
+        end = year_ending(end.year + 1)
+    while True:
+        start = year_ending(end.year - 1) + timedelta(days=1)
+        if start.isoformat() > latest:
+            break
+        label = str(start.year) if start.year == end.year else f"{start.year}/{str(end.year)[2:]}"
+        out["years"].append({"period": f"{start.isoformat()}..{end.isoformat()}", "label": f"Accounting Year {label}"})
+        end = year_ending(end.year + 1)
+    out["years"].reverse()                       # newest first
+    return out
 
 
 # Pictures an email can carry as its receipt (never SVG: it can hold script).

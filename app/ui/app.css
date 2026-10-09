@@ -561,6 +561,7 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
 /* Statement */
 .st-month { display: flex; align-items: center; gap: 6px; }
 .st-month span { min-width: 120px; text-align: center; font-weight: 600; }
+.st-period { width: auto; min-width: 180px; max-width: none; }
 .st-limit { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
 .st-limit select { width: auto; min-width: 116px; max-width: none; }
 .st-more { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 4px 0; }

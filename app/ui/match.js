@@ -927,17 +927,24 @@ function chooseFeedHtml(fa) {
 
 const ST_LIMITS = [50, 100, 250, 0];      // a page of how many; 0: all of them
 
-/** Bank Feed's header: every month (pages at the foot), or one month
- * (‹ October 2026 ›). */
+function isMonthPeriod(period) { return /^\d{4}-\d{2}$/.test(period || ""); }
+
+/** Bank Feed's header: the period, as FreeAgent's menu (All time periods,
+ * by month, by accounting year); a month also has ‹ › beside it. */
 function stViewHtml(st) {
-  const all = st.month === "all";
-  const mode = (v, label) => `<button type="button" class="${(v === "all") === all ? "on" : ""}" data-action="st-view" data-mode="${v}"
-      aria-pressed="${(v === "all") === all}">${label}</button>`;
-  const pick = all ? ""
-    : `<div class="st-month"><button class="btn small" data-action="st-month" data-delta="-1" aria-label="Previous month">‹</button>
-        <span>${esc(monthLabel(st.month))}</span>
-        <button class="btn small" data-action="st-month" data-delta="1" aria-label="Next month">›</button></div>`;
-  return `<div class="seg2" role="group" aria-label="Show">${mode("month", "Month")}${mode("all", "All")}</div>${pick}`;
+  const p = st.periods || { months: [], years: [] };
+  const now = state.stPeriod;
+  const option = ({ period, label }) => `<option value="${esc(period)}" ${period === now ? "selected" : ""}>${esc(label)}</option>`;
+  const known = [...p.months, ...p.years].some((x) => x.period === now);
+  const extra = now !== "all" && !known
+    ? option({ period: now, label: isMonthPeriod(now) ? monthLabel(now) : now.replace("..", " to ") }) : "";
+  const menu = `<select class="setting-select st-period" data-action="st-period" aria-label="Period">
+      <option value="all" ${now === "all" ? "selected" : ""}>All time periods</option>${extra}
+      ${p.months.length ? `<optgroup label="By month">${p.months.map(option).join("")}</optgroup>` : ""}
+      ${p.years.length ? `<optgroup label="By accounting year">${p.years.map(option).join("")}</optgroup>` : ""}</select>`;
+  const step = (delta, label, text) => isMonthPeriod(now)
+    ? `<button class="btn small" data-action="st-month" data-delta="${delta}" aria-label="${label}">${text}</button>` : "";
+  return `<div class="st-month">${step(-1, "Previous month", "‹")}${menu}${step(1, "Next month", "›")}</div>`;
 }
 
 /** The page numbers to show: all when few, else the first, the last and
@@ -952,7 +959,7 @@ function pageNumbers(page, pages) {
 /** Under every month's payments: Page 1 2 3 …, and how many a page. */
 function stMoreHtml(st) {
   const total = st.total_payments || 0, size = st.limit || 0;
-  if (st.month !== "all" || total <= ST_LIMITS[0]) return "";       // fits on the smallest page
+  if (isMonthPeriod(st.month) || total <= ST_LIMITS[0]) return "";   // a month, or fits on the smallest page
   const page = size ? Math.floor((st.offset || 0) / size) : 0, pages = size ? Math.ceil(total / size) : 1;
   const numbers = pages > 1 ? `<span class="muted">Page</span>
     <button class="btn small" data-action="st-page" data-page="${page - 1}" ${page <= 0 ? "disabled" : ""} aria-label="Newer">‹</button>
@@ -986,7 +993,8 @@ function renderStatement() {
   const s = st.summary || {};
   const rows = stRows();
   const filter = state.stFilter;
-  const allView = st.month === "all";
+  const allView = !isMonthPeriod(st.month);
+  const periodWord = st.month === "all" ? "" : st.month.includes("..") ? " for this year" : " for this month";
   if (m.stPending) {                       // came from Files: open that file's payment
     const t = (st.rows || []).find((x) => x.receipt?.id === m.stPending);
     if (t) m.stSel = t.url;
@@ -1022,7 +1030,7 @@ function renderStatement() {
       <section class="st-summary">
         <div class="main">
           <div class="big">${todo ? `<b>${todo}</b> payment${todo === 1 ? "" : "s"} still need${todo === 1 ? "s" : ""} a receipt`
-            : payments ? `<b>All done</b>${allView ? "" : " for this month"}` : `<b>No payments</b>${allView ? "" : " this month"}`}</div>
+            : payments ? `<b>All done</b>${periodWord}` : `<b>No payments</b>${periodWord}`}</div>
           <div class="muted st-done">${done} of ${payments} done</div>
           ${bar}
         </div>
@@ -1035,7 +1043,7 @@ function renderStatement() {
         ${pill("done", "Done", done, "seg-done")}</div>
       <div class="st-table-box"><table class="st-table">
         <thead><tr><th scope="col">Date</th><th scope="col">On the statement</th><th scope="col" class="r">Amount</th><th scope="col">Receipt</th></tr></thead>
-        <tbody>${rows.map(statementRow).join("") || `<tr><td colspan="4" class="m-none">Nothing to show${allView ? "" : ` for ${esc(monthLabel(st.month))}`}.</td></tr>`}</tbody>
+        <tbody>${rows.map(statementRow).join("") || `<tr><td colspan="4" class="m-none">Nothing to show${periodWord}.</td></tr>`}</tbody>
       </table></div>
       ${stMoreHtml(st)}
     </div></div>
@@ -1528,7 +1536,7 @@ document.addEventListener("drop", (e) => {
 
 function goToStatement(r) {
   const month = (r.payment?.date || r.options?.[0]?.date || r.date || "").slice(0, 7);
-  if (month) { state.month = month; state.stView = "month"; state.statement = null; }   // its month, whatever the view
+  if (month) { state.stPeriod = month; state.statement = null; }   // its month, whatever the period
   m.stSel = r.options?.[0]?.url || null;
   m.stPending = r.payment ? r.id : null;             // select its row once the statement is loaded
   m.reveal = true;
@@ -1539,7 +1547,7 @@ function goToStatement(r) {
  * pick a payment and "Use for this payment". */
 function goToOtherPayment(r) {
   const month = (r.date || "").slice(0, 7);
-  if (month) { state.month = month; state.stView = "month"; state.statement = null; }
+  if (month) { state.stPeriod = month; state.statement = null; }
   state.stFilter = "all";
   m.stSel = null; m.stPending = null; m.stOther = false;
   m.linkFile = r.id;
@@ -1749,21 +1757,16 @@ document.addEventListener("click", async (e) => {
         toast(`${r ? r.supplier : "That file"} suggested for this payment. Check it, then Approve.`);
       });
     case "st-filter": state.stFilter = target.dataset.filter; return render();
-    case "st-view":
-      state.stView = target.dataset.mode === "all" ? "all" : "month";
-      setPref("stViewMode", state.stView);
-      state.stPage = 0;
-      state.statement = null; m.stSel = null;
-      return refresh(true);
     case "st-page":
       state.stPage = Math.max(0, Number(target.dataset.page) || 0);
       state.statement = null; m.stSel = null;
       $("#content").querySelector(".st-wrap")?.scrollTo(0, 0);
       return refresh(true);
     case "st-month": {
-      const d = new Date(state.month + "-15T12:00:00");
+      const d = new Date(state.stPeriod + "-15T12:00:00");
       d.setMonth(d.getMonth() + Number(target.dataset.delta));
-      state.month = d.toISOString().slice(0, 7);
+      state.stPeriod = d.toISOString().slice(0, 7);
+      setPref("stPeriod", state.stPeriod);
       state.statement = null; m.stSel = null;
       return refresh(true);
     }
@@ -1862,6 +1865,15 @@ document.addEventListener("change", (e) => {
   if (a === "rb-factor") {
     const v = Number(String(e.target.value).replace(/[£%\s]/g, "").replace(",", "."));
     saveRebill(e.target, { factor: Number.isFinite(v) && v > 0 ? v : null });
+    return;
+  }
+  if (a === "st-period") {
+    state.stPeriod = e.target.value;
+    setPref("stPeriod", state.stPeriod);
+    state.stPage = 0;
+    state.statement = null; m.stSel = null;
+    e.target.blur();
+    refresh(true);
     return;
   }
   if (a === "st-limit") {
