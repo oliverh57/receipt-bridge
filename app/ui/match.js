@@ -1252,17 +1252,19 @@ document.addEventListener("mouseover", (e) => {
   const box = row.getBoundingClientRect();
   const width = Math.min(360, Math.max(200, box.left - 24));
   peek.style.width = `${width}px`;
+  peek.style.setProperty("--peek-scale", String((width - 14) / 680));   // an email page fits the width
   peek.style.left = `${Math.max(8, box.left - width - 12)}px`;
   peek.style.top = `${Math.max(8, Math.min(box.top - 40, window.innerHeight - 520))}px`;
   peek.hidden = false;
 });
 document.addEventListener("scroll", () => { peek.hidden = true; }, true);
 
-/** The hover preview of an email: who, what, and the email (sandboxed). */
+/** The hover preview of an email: who, what, and the email (sandboxed),
+ * laid out at a normal email width and scaled down to fit, like a page. */
 function peekMailHtml(mail) {
   return `<div class="st-peek-mail"><b>${esc(mail.subject || "(no subject)")}</b>
     <span class="muted">${esc(mail.from_name)} · ${esc(shortDate(mail.date))}</span></div>
-    ${emailFrame(mail).replace('class="doc e-frame"', 'class="st-peek-frame"')}`;
+    <div class="st-peek-page">${emailFrame(mail).replace('class="doc e-frame"', 'class="st-peek-frame"')}</div>`;
 }
 
 const VAT_RATES = [["20.0", "20% (standard)"], ["5.0", "5% (reduced)"], ["0.0", "0% (zero-rated or none)"]];
@@ -1383,9 +1385,7 @@ function panelHtml(t) {
   }
   // missing (or choosing another file)
   const s = t.suggestion;
-  const peekMail = s?.kind === "email" && s.message_id
-    ? `data-peek-mail="${esc(s.message_id)}" data-peek-account="${esc(s.account || "")}"` : "";
-  const hint = s && t.status === "missing" ? `<div class="m-issue" ${peekMail}><div class="t">${s.kind === "email" ? "An email may be the receipt" : "An ignored file may be the receipt"}</div>
+  const hint = s && t.status === "missing" ? `<div class="m-issue"><div class="t">${s.kind === "email" ? "An email may be the receipt" : "An ignored file may be the receipt"}</div>
       <div class="b">${esc(s.label)}</div>
       <div class="m-iss-ctl"><button class="btn small primary" data-action="st-use" data-url="${esc(t.url)}">${s.kind === "email" ? "Use that email" : "Use that file"}</button></div></div>` : "";
   const approvedNote = t.approved && t.status !== "filed"
