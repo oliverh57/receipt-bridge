@@ -598,6 +598,8 @@ def test_reset_app_goes_back_to_a_fresh_install_but_keeps_original_photos() -> N
         rules.mkdir()
         (rules / "trainline.yaml").write_text("# Trainline booking confirmations.\nid: trainline\n")
         (rules / "uber.yaml").write_text(HEADER + "id: uber\n")
+        (rules / "yesim.yaml").write_text("# Yesim, shipped by an older version\nid: yesim\n")
+        (rules / "_example.yaml").write_text("# a template\nid: example\n")
         service = ReceiptService(Config(raw={
             "data_dir": str(base / "data"), "export_dir": str(base / "exports"), "watchers_dir": str(rules),
             "photo_inbox": str(base / "inbox"), "gmail": {"credentials_file": str(base / "credentials.json")},
@@ -621,7 +623,7 @@ def test_reset_app_goes_back_to_a_fresh_install_but_keeps_original_photos() -> N
         assert not service.snapshot()["setup"]["done"] and service.accounts.list() == []
         assert not (base / "credentials.json").exists() and not (base / "freeagent_credentials.json").exists()
         assert not (data / "pdfs").exists() and not (data / "accounts").exists()
-        assert sorted(p.name for p in rules.iterdir()) == ["trainline.yaml"], "only rules made in the app go"
+        assert sorted(p.name for p in rules.iterdir()) == ["_example.yaml", "trainline.yaml"], "only what ships stays"
         for keep in ("photos/2026/receipt.jpg", "bin/receipt-reader", "app.log"):
             assert (data / keep).exists(), keep
         assert service.snapshot()["outcome"]["message"] == "Receipt Bridge is reset."
