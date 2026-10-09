@@ -50,6 +50,9 @@ class Match:
     exact: bool = True                      # the payment is exactly the receipt total
     options: list[dict[str, Any]] = field(default_factory=list)   # choose / near misses
     better: dict[str, Any] | None = None    # a payment you chose doesn't fit, and this free one does
+    # not matched exactly, and its exact, named payment already has a receipt in
+    # FreeAgent: probably this one, filed before (a copy, or filed before a Reset)
+    in_freeagent: dict[str, Any] | None = None
 
 
 @dataclass
@@ -207,6 +210,18 @@ def match_receipts(receipts: list[dict[str, Any]], transactions: list[dict[str, 
         free = [t for t in rec.candidates if t["url"] not in claimed]
         if free:
             match.better = min(free, key=lambda t: (not _named(t, rec.token), abs(_days(t, rec.when))))
+
+    for rec in business:
+        match = results.get(rec.id)
+        if match is None or match.better or (match.transaction is not None and match.exact and not match.pinned):
+            continue
+        before = UNDATED_DAYS_BEFORE if rec.undated else DAYS_BEFORE
+        done = [t for t in transactions
+                if t.get("explanation_attachments") and _named(t, rec.token)
+                and (rec.account is None or t.get("bank_account") == rec.account)
+                and _pence(-float(t["amount"])) == rec.pence and -before <= _days(t, rec.when) <= DAYS_AFTER]
+        if done:
+            match.in_freeagent = min(done, key=lambda t: abs(_days(t, rec.when)))
     return results
 
 

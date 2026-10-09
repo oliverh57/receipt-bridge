@@ -190,13 +190,12 @@ def test_a_payment_or_expense_can_be_rebilled_to_a_client() -> None:
         assert p.kind == "expense" and (p.body["project"], p.body["rebill_factor"]) == (PROJECT, "15.00"), p.problems
 
 
-def test_a_set_price_isnt_shared_out_between_vat_rates() -> None:
+def test_a_mixed_rate_receipt_can_be_rebilled_at_a_set_price() -> None:
+    """One entry now, so a set price has one place to go."""
     db, rid, tmp = env(total=7.05, vat=0.52, extra_json={"vat_lines": [["20", "0.52", "3.10"]]})
     with tmp:
         p = plan(db, rid, transaction=dict(TX, amount=-7.05), rebill={"project": PROJECT, "type": "price", "factor": 20})
-        assert any("set price" in x for x in p.problems)
-        p = plan(db, rid, transaction=dict(TX, amount=-7.05), rebill={"project": PROJECT, "type": "cost"})
-        assert not p.problems and all(b["project"] == PROJECT for b in p.parts)
+        assert not p.problems and len(p.parts) == 1 and p.body["project"] == PROJECT
 
 
 def test_unfile_deletes_only_what_was_created() -> None:
@@ -219,41 +218,33 @@ def test_vat_is_only_ever_what_was_printed() -> None:
     db, rid, tmp = env(total=7.05, vat=1.175)      # 20% of 7.05 incl.
     with tmp:
         assert vat_rate(db.get_receipt(rid), __import__("decimal").Decimal("7.05"), True) == ("20.0", None)
-    db, rid, tmp = env(total=7.05, vat=0.52)       # two rates, but no per-rate lines read
+    db, rid, tmp = env(total=7.05, vat=0.52)       # two rates: the VAT as printed
+    with tmp:
+        assert vat_rate(db.get_receipt(rid), __import__("decimal").Decimal("7.05"), True) == ("manual:0.52", None)
+    db, rid, tmp = env(total=7.05, vat=2.00)       # more than 20%: misread
     with tmp:
         rate, problem = vat_rate(db.get_receipt(rid), __import__("decimal").Decimal("7.05"), True)
-        assert rate is None and "by hand" in problem
+        assert rate is None and "more than 20%" in problem
     db, rid, tmp = env(total=7.05, vat=1.175)
     with tmp:
         assert vat_rate(db.get_receipt(rid), __import__("decimal").Decimal("7.05"), False) == (None, None)
 
 
-def test_a_mixed_rate_receipt_is_split_one_explanation_per_rate() -> None:
-    """Sandwi-style: £3.10 at 20% (VAT £0.52 printed) and the rest zero-rated."""
-    db, rid, tmp = env(total=7.05, vat=0.52, extra_json={"vat_lines": [["20", "0.52", "3.10"]]})
-    tx = dict(TX, amount=-7.05)
+def test_a_mixed_rate_receipt_is_one_explanation_with_the_printed_vat() -> None:
+    """Talk360: a £4.99 non-taxable top-up and a £0.50 fee with £0.08 VAT.
+    Never split: one explanation, VAT "Amount…" £0.08 as printed."""
+    db, rid, tmp = env(total=5.49, vat=0.08, extra_json={"vat_lines": [["20", "0.08", "0.50"]]})
+    tx = dict(TX, amount=-5.49)
     with tmp:
         p = plan(db, rid, transaction=tx)
         assert not p.problems, p.problems
-        assert [(b["gross_value"], b["sales_tax_rate"]) for b in p.parts] == [("-3.10", "20.0"), ("-3.95", "0.0")]
-        client = FakeClient(unexplained=-7.05)
-        client.get_url = lambda url: {"bank_transaction": {"url": url, "amount": "-7.05", "unexplained_amount": "-7.05"}}
-        created = iter(["https://fa.test/e/1", "https://fa.test/e/2"])
-        client.create_explanation = lambda body: (client._write("create_explanation", body), {"url": next(created)})[1]
+        assert len(p.parts) == 1 and p.body["gross_value"] == "-5.49"
+        assert p.body["sales_tax_status"] == "TAXABLE" and p.body["manual_sales_tax_amount"] == "0.08"
+        assert "sales_tax_rate" not in p.body
+        client = FakeClient(unexplained=-5.49)
+        client.get_url = lambda url: {"bank_transaction": {"url": url, "amount": "-5.49", "unexplained_amount": "-5.49"}}
         file_receipt(client, db, rid, p)
-        assert [c[0] for c in client.calls] == ["create_explanation", "create_explanation", "attach"]
-        state = json.loads(db.get_receipt(rid)["freeagent_json"])
-        assert state["urls"] == ["https://fa.test/e/1", "https://fa.test/e/2"]
-        undo = FakeClient()
-        unfile(undo, db, rid)
-        assert [c[1] for c in undo.calls] == state["urls"], "undo removes every part"
-
-
-def test_a_split_that_would_not_match_the_printed_vat_stops() -> None:
-    # £3.12 at 20% is £0.52, but £3.00 at 20% is £0.50: the receipt says £0.52
-    db, rid, tmp = env(total=7.05, vat=0.52, extra_json={"vat_lines": [["20", "0.52", "3.00"]]})
-    with tmp:
-        assert any("penny" in p for p in plan(db, rid, transaction=dict(TX, amount=-7.05)).problems)
+        assert [c[0] for c in client.calls].count("create_explanation") == 1
 
 
 def test_reverse_charge_goes_at_zero_with_the_ec_status() -> None:
@@ -266,22 +257,14 @@ def test_reverse_charge_goes_at_zero_with_the_ec_status() -> None:
         assert "ec_status" not in plan(db, rid).body, "only when the supplier is set to reverse charge"
 
 
-def test_a_mixed_rate_expense_becomes_one_expense_per_rate() -> None:
+def test_a_mixed_rate_expense_is_one_expense_with_the_printed_vat() -> None:
     db, rid, tmp = env(paid_by="personal", total=7.05, vat=0.52,
                        extra_json={"vat_lines": [["20", "0.52", "3.10"]]})
     with tmp:
         p = plan(db, rid, transaction=None)
         assert not p.problems, p.problems
-        assert [(b["gross_value"], b["sales_tax_rate"]) for b in p.parts] == [("-3.10", "20.0"), ("-3.95", "0.0")]
-        client = FakeClient()
-        made = iter(["https://fa.test/x/1", "https://fa.test/x/2"])
-        client.create_expense = lambda body: (client._write("create_expense", body), {"url": next(made)})[1]
-        file_receipt(client, db, rid, p)
-        bodies = [c[1] for c in client.calls]
-        assert "attachment" in bodies[0] and "attachment" not in bodies[1], "receipt attached once"
-        undo = FakeClient()
-        unfile(undo, db, rid)
-        assert [c[1] for c in undo.calls] == ["https://fa.test/x/1", "https://fa.test/x/2"]
+        assert len(p.parts) == 1 and p.body["gross_value"] == "-7.05"
+        assert p.body["manual_sales_tax_amount"] == "0.52"
 
 
 def test_an_interrupted_expense_is_found_by_its_reference() -> None:
@@ -449,19 +432,15 @@ def test_editing_a_claim_changes_the_same_expense_in_place() -> None:
         assert undo.calls == [("delete", "https://fa.test/v2/expenses/3")]
 
 
-def test_a_claim_whose_vat_split_changed_is_not_edited_in_place() -> None:
+def test_a_claims_vat_corrected_to_two_rates_is_edited_in_place() -> None:
+    """Still one expense: the VAT changes on the same entry."""
     db, rid, tmp = env(paid_by="personal", total=7.05)
     with tmp:
         file_receipt(FakeClient(), db, rid, plan(db, rid, transaction=None))
         db.update_receipt(rid, {"vat": 0.52, "extra_json": {"vat_lines": [["20", "0.52", "3.10"]]}})
         client = FakeClient()
-        try:
-            update_claim(client, db, rid, plan(db, rid, transaction=None))
-        except FilingError as exc:
-            assert "VAT split" in str(exc)
-        else:
-            raise AssertionError("expected the change to be refused")
-        assert client.calls == []
+        update_claim(client, db, rid, plan(db, rid, transaction=None))
+        assert len(client.calls) == 1 and client.calls[0][2]["manual_sales_tax_amount"] == "0.52"
 
 
 if __name__ == "__main__":

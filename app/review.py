@@ -253,6 +253,10 @@ def review(row: Any, match: Match | None, ctx: Context, *, overdue: bool) -> dic
         "checks": checks,
         "payment": payment,
         "options": options,
+        # its exact payment already has a receipt in FreeAgent: probably this one, filed before
+        "in_freeagent": None if not match or match.in_freeagent is None else {
+            "date": match.in_freeagent["dated_on"], "amount": float(match.in_freeagent["amount"]),
+            "description": (match.in_freeagent.get("description") or "").split("//")[0]},
         "waiting_until": (receipt_day + timedelta(days=ctx.waiting_days)).isoformat()
         if waiting and receipt_day else None,
         "will_file": {"type": kind, "category": ctx.category_name or None, "vat": vat_text,
@@ -279,14 +283,14 @@ def _vat_text(row: Any, ctx: Context, match: Match | None) -> str:
         return "?"
     parts, problem = vat_parts(row, Decimal(str(row["total"])), True)
     if problem:
-        return "Mixed rates: file by hand"
+        return "Check the VAT"
     texts = []
     for gross, rate in parts:
         if rate in (EXEMPT, OUT_OF_SCOPE):
             texts.append("Exempt" if rate == EXEMPT else "Out of scope")
             continue
         if rate and rate.startswith(MANUAL):
-            texts.append(f"£{rate[len(MANUAL):]}")
+            texts.append(f"£{rate[len(MANUAL):]} (amount)")      # FreeAgent's "Amount…"
             continue
         r = Decimal(rate or "0")
         if r == 0:

@@ -161,6 +161,27 @@ def test_a_payment_that_cant_take_a_receipt_says_why() -> None:
     assert "several explanations" in why_not_open({**base, "unexplained_amount": 0})
 
 
+def test_a_split_payment_keeps_its_receipt_and_a_copy_is_spotted() -> None:
+    """Filed before a Reset as two explanations, receipt on the first: the
+    payment has its receipt, and the same file added again says so."""
+    import tempfile
+
+    from app.db import Database
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db = Database(Path(tmp) / "t.db")
+        db.save_bank_transactions([{"url": "tx/t", "bank_account": "a", "dated_on": "2026-10-08", "amount": "-5.49",
+                                    "unexplained_amount": "0.0", "description": "Talk360 // CARD_PURCHASE",
+                                    "bank_transaction_explanations": [{"url": "e/1", "attachment": {"url": "x"}},
+                                                                      {"url": "e/2"}]}])
+        t = dict(db.bank_transactions(["a"])[0])
+    assert t["explanation_attachments"] == 1 and "already has its receipt" in why_not_open(t)
+    copy = rc(1, "2026-10-07", 5.49, "Talk360 Group B.V.")
+    assert match_receipts([copy], [t], GBP)[1].in_freeagent["url"] == "tx/t"
+    other = rc(2, "2026-10-07", 5.49, "Someone Else")
+    assert match_receipts([other], [t], GBP)[2].in_freeagent is None, "only when the statement names it"
+
+
 def test_a_pinned_payment_wins_even_when_the_amount_differs() -> None:
     bill = dict(rc(1, "2026-03-05", 7.50, "Cafe North"), pinned="tx/6")      # £9.00 paid: a tip
     result = match_receipts([bill], FEED, GBP)[1]
