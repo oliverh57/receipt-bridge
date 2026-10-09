@@ -2470,6 +2470,8 @@ class ReceiptService:
             return None
         if not found or not found.get("message_id"):
             return None
+        if self.db.get_state(f"email_ignored:{found['message_id']}"):
+            return None                                  # you said it isn't a receipt (Emails → Ignore)
         return {"kind": "email", **found,
                 "label": f"Found {_a_or_an(found['supplier'])} {found['supplier']} email for "
                          f"{_money_text(found['amount'], found.get('currency', 'GBP'))} on {_day_text(found['day'])}."}
@@ -2654,9 +2656,22 @@ class ReceiptService:
             if not receipts_only or not next_token or len(rows) >= EMAIL_PAGE // 2 or pages >= EMAIL_RECEIPT_PAGES:
                 break
         known = self.emails_in_files([r["id"] for r in rows])
+        ignored = self.ignored_emails()
         for row in rows:
             row["in_files"] = known.get(row["id"])
+            row["ignored"] = row["id"] in ignored          # "Ignore": flagged as a receipt, but it isn't one
         return {"account": chosen.email, "emails": rows, "next": next_token}
+
+    def ignored_emails(self) -> set[str]:
+        return {key.split(":", 1)[1] for key in self.db.list_state("email_ignored:")}
+
+    def ignore_emails(self, message_ids: list[str], ignored: bool = True) -> None:
+        for message_id in message_ids:
+            if ignored:
+                self.db.set_state(f"email_ignored:{message_id}", _now())
+            else:
+                self.db.delete_state(f"email_ignored:{message_id}")
+        self._bump()
 
     def supplier_names(self, limit: int = 500) -> list[str]:
         """Suppliers you've had before, most used first, for the supplier box

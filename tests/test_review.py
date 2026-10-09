@@ -340,6 +340,20 @@ def test_an_email_added_for_a_payment_is_approved_straight_away() -> None:
                                                                                        "factor": None}
 
 
+def test_an_ignored_email_is_remembered_and_not_suggested_for_a_payment() -> None:
+    """Emails → right-click → Ignore: kept, undone by Don't ignore, and a
+    payment's "An email may be the receipt" doesn't offer it."""
+    service, _rid, tmp = make()
+    with tmp:
+        service.db.set_state("email_hint:tx/1", json.dumps({"message_id": "m1", "supplier": "Hotel", "amount": 9.0,
+                                                             "day": "2026-09-01"}))
+        assert service.email_suggestion("tx/1")["message_id"] == "m1"
+        service.ignore_emails(["m1"])
+        assert service.ignored_emails() == {"m1"} and service.email_suggestion("tx/1") is None
+        service.ignore_emails(["m1"], ignored=False)
+        assert service.ignored_emails() == set() and service.email_suggestion("tx/1") is not None
+
+
 def test_a_payment_approved_in_freeagent_is_done() -> None:
     """Approved there (not a guess awaiting review): done in the Statement,
     with or without a receipt. A guess waiting for review still needs one."""
