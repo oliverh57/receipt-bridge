@@ -72,6 +72,11 @@ New versions arrive inside the app (**Update now**).
    **Bank** or **Expense** and **Add to Files**. The attached PDF, or else
    the email itself as a PDF, becomes the receipt.
 
+**Settings → About** (also the app menu's *About Receipt Bridge*) shows the
+version, whether the licence file is installed, where your data is kept, the
+end user licence agreement (`docs/EULA.md`) and the licence of every
+open-source package this copy runs on, read from what's installed.
+
 **Export for FreeAgent** still writes a dated folder of PDFs plus
 `manifest.csv`, for an accountant or a manual upload.
 

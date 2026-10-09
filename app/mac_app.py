@@ -493,7 +493,7 @@ class AppDelegate(NSObject):
         self.login_item.setState_(1 if login_item.is_enabled() else 0)
 
         self._submenu(main, APP_NAME, [
-            self._item(f"About {APP_NAME}", "orderFrontStandardAboutPanel:"),
+            self._item(f"About {APP_NAME}", "showAbout:", "", self),
             None,
             self._item("Settings…", "showSettings:", ",", self),
             self.login_item,
@@ -540,6 +540,10 @@ class AppDelegate(NSObject):
 
     def checkNow_(self, sender):
         self._safely("check now", lambda: self.service and self.service.scan())
+
+    def showAbout_(self, sender):
+        # Settings → About: version, licence, EULA, open-source software
+        self._safely("about", lambda: (self._show(), self._js("window.rbShowAbout && rbShowAbout()")))
 
     def showSettings_(self, sender):
         self._safely("settings", lambda: (self._show(), self._js("window.rbShowSettings && rbShowSettings()")))
