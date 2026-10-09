@@ -1824,9 +1824,11 @@ class ReceiptService:
 
     # ---- Statement (PLAN.md §11): one month of a bank account ---------------
 
-    def statement(self, account: str | None, month: str | None) -> dict[str, Any]:
+    def statement(self, account: str | None, month: str | None, limit: int | None = None) -> dict[str, Any]:
         """Every payment in a month of the cached statement, and whether it
-        has a receipt: filed, in Match, missing, or no receipt needed."""
+        has a receipt: filed, in Match, missing, or no receipt needed.
+        `month="all"`: every month, newest first, the latest `limit` of them
+        (all when None)."""
         chosen = self._freeagent_accounts()
         accounts = {a["url"]: a for a in self._freeagent_reference().get("bank_accounts", [])}
         account = account or (chosen[0] if chosen else None)
@@ -1835,8 +1837,15 @@ class ReceiptService:
         month = month or datetime.now().strftime("%Y-%m")
         # Outgoing payments only: money in (a client paying an invoice) never
         # needs a receipt, and listing it buried the payments that do.
+        every = month == "all"
         transactions = [dict(t) for t in self.db.bank_transactions([account])
-                        if t["dated_on"].startswith(month) and float(t["amount"]) < 0]
+                        if (every or t["dated_on"].startswith(month)) and float(t["amount"]) < 0]
+        total_payments = len(transactions)
+        if every:
+            transactions.sort(key=lambda t: (t["dated_on"], t["url"]), reverse=True)
+            transactions = transactions[:limit] if limit else transactions
+        else:
+            transactions.sort(key=lambda t: (t["dated_on"], t["url"]))
 
         pending = self.db.list_receipts(PENDING)
         matches = self._matches(pending)
@@ -1853,7 +1862,7 @@ class ReceiptService:
 
         rows, counts = [], {"filed": 0, "in_match": 0, "missing": 0, "not_needed": 0, "approved": 0}
         out_total = 0.0
-        for t in sorted(transactions, key=lambda t: (t["dated_on"], t["url"])):
+        for t in transactions:
             amount = float(t["amount"])
             out_total += -amount
             marked = self.db.get_state(f"no_receipt:{t['url']}")
@@ -1903,6 +1912,8 @@ class ReceiptService:
             "account": account,
             "account_name": accounts.get(account, {}).get("name", ""),
             "month": month,
+            "limit": limit if every else None,
+            "total_payments": total_payments,       # all of them, however many are shown
             "last_sync": self.db.get_state("freeagent:last_sync"),
             "rows": rows,
             "summary": {**counts, "payments": payments, "with_receipt": counts["filed"] + counts["in_match"],

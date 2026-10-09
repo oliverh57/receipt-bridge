@@ -396,6 +396,21 @@ def test_the_statement_shows_which_payments_have_receipts() -> None:
         assert {r["url"]: r["status"] for r in service.statement(None, "2026-03")["rows"]}["tx/3"] == "missing"
 
 
+def test_the_statement_can_show_every_month_newest_first() -> None:
+    service, _flagged, tmp = make()
+    with tmp:
+        connected(service, Path(tmp.name))
+        month = service.statement(None, "2026-03")
+        every = service.statement(None, "all")
+        dates = [r["date"] for r in every["rows"]]
+        assert dates == sorted(dates, reverse=True), "newest first"
+        assert len(every["rows"]) == every["total_payments"] >= len(month["rows"]) == 3
+        latest = service.statement(None, "all", limit=2)
+        assert [r["url"] for r in latest["rows"]] == [r["url"] for r in every["rows"]][:2]
+        assert latest["limit"] == 2 and latest["total_payments"] == every["total_payments"]
+        assert [r["date"] for r in month["rows"]] == sorted(r["date"] for r in month["rows"]), "a month: oldest first, as before"
+
+
 def test_a_linked_photo_on_the_statement_says_it_is_a_photo() -> None:
     """The panel showed a linked photo in a frame at full size: it didn't
     know it was a photo, so it couldn't scale it as Files does."""
