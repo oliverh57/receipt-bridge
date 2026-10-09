@@ -276,8 +276,8 @@ function hintText(field, list) {
   return lines.join(" ");
 }
 
-/** A field's warnings, under it. Typing in the field hides them (match.js
- * input handler); leaving it tells the app it's been checked. */
+/** A field's warnings, under it. Clicking into the field hides them (the
+ * focusin handler below); leaving it tells the app it's been checked. */
 function hintRow(list, field) {
   return list?.length ? `<span data-hints="${field}"></span><div class="m-hints" data-hints="${field}"><div>${ICON.check}<span>${esc(hintText(field, list))}</span></div></div>` : "";
 }
@@ -1663,8 +1663,8 @@ document.addEventListener("click", async (e) => {
   }
 });
 
-/** Editing a field in Files settles its warning: gone as you type. */
-document.addEventListener("input", (e) => {
+/** Clicking into a field in Files settles its warning: you've looked at it. */
+document.addEventListener("focusin", (e) => {
   const el = e.target;
   if (el.dataset?.action !== "set-field" || !el.closest(".m-inspector")) return;
   el.dataset.edited = "1";
