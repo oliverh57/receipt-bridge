@@ -34,7 +34,8 @@ RECEIPT_TERMS = ('{receipt invoice "order confirmation" "your order" "booking co
 # A subject that says what it is: "Your receipt from Apple", "Invoice INV-0042",
 # "Order confirmation #123", "Your Uber trip".
 SUBJECT_STRONG = re.compile(
-    r"\breceipts?\b|\binvoice\b|\border\s+(?:confirm|#|no\b|number|\d)|"
+    # not part of a hyphenated name: "[you/receipt-bridge] Secrets exposed"
+    r"\breceipts?\b(?!-)|\binvoice\b(?!-)|\border\s+(?:confirm|#|no\b|number|\d)|"
     r"\b(?:payment|purchase|booking|reservation|order)\s+(?:confirm|received|successful|complete)|"
     r"\bconfirm(?:ation|ed)?\b.{0,20}\b(?:order|booking|payment|purchase|reservation)\b|"
     r"thank(?:s| you) for (?:your )?(?:order|purchase|payment|booking|shopping)|"
@@ -58,7 +59,8 @@ NOT_RECEIPT = re.compile(
     r"\bstatement\b|newsletter|your bill is ready|direct debit|payment (?:request|reminder)|"
     r"invoice (?:due|overdue)|\brefund|declined|\bfailed\b|"
     r"\d+\s*% off|\bsale\b|\bdeals?\b|\boffers?\b|discount|webinar|last chance|don't miss|"
-    r"\bpassword\b|verify your|sign[- ]in|security alert|\bcode\b",
+    r"\bpassword\b|verify your|sign[- ]in|security alert|\bcode\b|"
+    r"\bsecrets?\b|\bexposed\b|vulnerabilit|push protection",
     re.IGNORECASE,
 )
 # Gmail's own tabs: Promotions and Social are almost never receipts.

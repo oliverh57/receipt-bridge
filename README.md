@@ -66,11 +66,12 @@ New versions arrive inside the app (**Update now**).
 6. **Emails** is for one-off email receipts no supplier rule collects: a
    hotel, a ticket, a shop used once. Until Gmail is connected it shows the
    Gmail sign-in. Then it lists your mail, newest first, with the emails that
-   look like receipts marked in green (**Likely receipts** shows only those);
-   search takes Gmail's own syntax (`from:`, `after:`, `has:attachment`).
-   Pick one to read it beside a form with the supplier, date, total and VAT
-   read from it, choose **Bank** or **Expense**, and **Add to Files** (⏎).
-   The attached PDF, or else the email itself as a PDF, becomes the receipt.
+   look like receipts marked in green (**Likely receipts** shows only those).
+   The search above the list takes Gmail's own syntax (`from:`, `after:`,
+   `has:attachment`). Pick one to read it, then **Convert to receipt** (⏎):
+   a dialog shows the supplier, date, total and VAT read from it; choose
+   **Bank** or **Expense** and **Add to Files**. The attached PDF, or else
+   the email itself as a PDF, becomes the receipt.
 
 **Export for FreeAgent** still writes a dated folder of PDFs plus
 `manifest.csv`, for an accountant or a manual upload.

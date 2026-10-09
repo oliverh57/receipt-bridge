@@ -1242,6 +1242,7 @@ function move(delta) {
 
 function setView(view) {
   if (view === state.view) return;
+  if (state.view === "emails") closeEmailDialog();
   state.view = view;
   state.receiptsKey = "";
   state.selectedId = null;
