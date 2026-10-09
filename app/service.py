@@ -3252,6 +3252,9 @@ class ReceiptService:
             enabled, problems = load_watchers_safe(self.config.watchers_dir)
             return real(enabled), problems or [str(exc)]
 
+    def supplier_built_in(self, watcher_id: str) -> bool:
+        return any(_built_in(w) for w in self.all_suppliers()[0] if w.id == watcher_id)
+
     def rescan_supplier(self, watcher_id: str) -> None:
         """Look through a rule's whole window again, from the date chosen
         when each account was connected. Scans otherwise resume where the
@@ -3305,10 +3308,17 @@ class ReceiptService:
                 "gets_supplier_document": _has_better_source(w),
                 "file": w.path.name if w.path else "",
                 "enabled": w.enabled,
+                "built_in": _built_in(w),
             }
             for w in watchers
         ]
         return result + [{"problem": p} for p in problems]
+
+
+def _built_in(watcher: Any) -> bool:
+    """Its receipt comes through code in the app (a fetcher, like
+    Trainline's): the rule can be switched off and edited, not deleted."""
+    return any(isinstance(step, dict) and step.get("fetcher") for step in watcher.pdf)
 
 
 def _has_better_source(watcher: Any) -> bool:
