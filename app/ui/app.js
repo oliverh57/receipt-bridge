@@ -872,8 +872,7 @@ function inboxCard(p) {
  * keys. Dropping it anywhere in the window works too (match.js). */
 function licenceDrop() {
   return `<div class="licence-drop">
-      <div><b>Drop your licence file here</b></div>
-      <div class="sub">The <code>.rbkey</code> file you were given with Receipt Bridge.</div>
+      <div><b>Drop your <code>.rbkey</code> licence file here</b></div>
       <button class="btn small" data-action="licence-choose">Choose file…</button>
     </div>`;
 }
@@ -1238,8 +1237,7 @@ function setupLicenceHtml(s) {
   const body = google && freeagent
     ? `<div class="setup-done"><span class="pill ok">Installed</span></div>`
     : `${licenceDrop()}${google || freeagent ? `<div class="setup-note warn">This file only has the ${google ? "Google" : "FreeAgent"} key. Ask for one with both.</div>` : ""}`;
-  return `<h3>Add your licence file</h3>
-    <p>It lets Receipt Bridge connect to FreeAgent and Gmail.</p>${body}`;
+  return `<h3>Add your licence file</h3>${body}`;
 }
 
 /** Instead of the licence drop again: back to step 1. */
