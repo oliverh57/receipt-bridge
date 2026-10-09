@@ -26,8 +26,9 @@ function setPref(key, value) {
 const state = {
   view: "pending",
   month: new Date().toISOString().slice(0, 7),   // Statement month, YYYY-MM
-  stView: pref("stView", "month") === "all" ? "all" : "month",   // Bank Feed: a month, or every month
-  stLimit: Number(pref("stLimit", "100")) || 0,  // …and then the latest how many (0: all)
+  stView: pref("stViewMode", "all") === "month" ? "month" : "all",   // Bank Feed: every month (the default), or one
+  stLimit: Number(pref("stLimit", "100")) || 0,  // …a page of how many (0: all)
+  stPage: 0,                                     // …which page, newest first
   statement: null,
   filedToday: [],
   snap: null,
@@ -191,10 +192,11 @@ async function refresh(force = false) {
 
   if (state.view === "statement") {
     const all = state.stView === "all";
-    const key = `statement:${all ? `all:${state.stLimit}` : state.month}:${snap.version}`;
+    const key = `statement:${all ? `all:${state.stLimit}:${state.stPage}` : state.month}:${snap.version}`;
     if (force || key !== state.receiptsKey) {
       // the payments, and the unlinked files that could be their receipts
-      const query = all ? `month=all&limit=${state.stLimit}` : `month=${encodeURIComponent(state.month)}`;
+      const query = all ? `month=all&limit=${state.stLimit}&offset=${state.stPage * state.stLimit}`
+        : `month=${encodeURIComponent(state.month)}`;
       try { state.statement = await api(`/api/statement?${query}`); }
       catch (err) { state.statement = { error: err.message, rows: [], summary: {} }; }
       state.receipts = await api("/api/receipts?status=pending");
@@ -1946,7 +1948,7 @@ function drawWizardDoc() {
   const pane = document.querySelector(".wiz-beside .e-dpreview");
   if (!pane || !wiz.mail) return;
   const usePdf = wiz.analysis ? !!wiz.choices.use_attachment : true;
-  const html = previewHtml(wiz.mail, usePdf);
+  const html = previewHtml(wiz.mail, usePdf ? null : "email");
   if (wiz.drawnDoc !== html) { pane.innerHTML = html; wiz.drawnDoc = html; }
 }
 

@@ -96,6 +96,7 @@ class EmailAdd(BaseModel):
     vat_choice: str = "auto"
     paid_by: str = "business"
     payment_url: str = ""          # from Bank Feed's "Use that email": paired with this payment
+    document: str = ""             # the receipt: "" (its PDF, else the email), "email" or "att:N"
 
 
 class SupplierSearch(BaseModel):
@@ -378,19 +379,20 @@ def create_app(service: ReceiptService) -> FastAPI:
             raise gmail_failed(exc) from exc
 
     @app.get("/api/emails/{message_id}/pdf")
-    def email_pdf(message_id: str, account: str = "") -> Response:
-        """The email's attached PDF, for the preview in "Convert to receipt"
+    def email_pdf(message_id: str, account: str = "", index: int | None = None) -> Response:
+        """The email's attached PDF (or, with `index`, that attachment if
+        it's a PDF or a picture), for the preview in "Convert to receipt"
         (an <iframe>, so the token comes as ?t=)."""
         gmail_id(message_id)
         try:
-            found = service.email_pdf(account, message_id)
+            found = service.email_pdf(account, message_id, index)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         except Exception as exc:
             raise gmail_failed(exc) from exc
         if found is None:
-            raise HTTPException(404, "This email has no PDF attached")
-        return Response(found[1], media_type="application/pdf", headers={"Content-Disposition": "inline"})
+            raise HTTPException(404, "This email has no PDF attached" if index is None else "That attachment can't be a receipt")
+        return Response(found[1], media_type=found[2], headers={"Content-Disposition": "inline"})
 
     @app.post("/api/emails/{message_id}/add")
     def email_add(message_id: str, body: EmailAdd) -> dict[str, Any]:
@@ -483,14 +485,14 @@ def create_app(service: ReceiptService) -> FastAPI:
         return {"ok": True}
 
     @app.get("/api/statement")
-    def statement(account: str = "", month: str = "", limit: int = 0) -> dict[str, Any]:
-        """A month (YYYY-MM), or month=all: every month, newest first, the
-        latest `limit` payments (0: all of them)."""
+    def statement(account: str = "", month: str = "", limit: int = 0, offset: int = 0) -> dict[str, Any]:
+        """A month (YYYY-MM), or month=all: every month, newest first, a page
+        of `limit` payments from `offset` (limit 0: all of them)."""
         if month and month != "all" and not re.fullmatch(r"\d{4}-\d{2}", month):
             raise HTTPException(400, "month must be YYYY-MM or all")
-        if limit < 0:
-            raise HTTPException(400, "limit can't be negative")
-        return service.statement(account or None, month or None, limit or None)
+        if limit < 0 or offset < 0:
+            raise HTTPException(400, "limit and offset can't be negative")
+        return service.statement(account or None, month or None, limit or None, offset)
 
     @app.post("/api/statement/payment")
     def statement_payment(body: dict[str, Any]) -> dict[str, Any]:

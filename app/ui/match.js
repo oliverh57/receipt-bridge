@@ -925,7 +925,7 @@ function chooseFeedHtml(fa) {
     </section></div>`;
 }
 
-const ST_LIMITS = [50, 100, 250, 0];      // 0: all of them
+const ST_LIMITS = [50, 100, 250, 0];      // a page of how many; 0: all of them
 
 /** Bank Feed's header: a month (‹ October 2026 ›), or every month with
  * how many of the latest to show. */
@@ -934,21 +934,24 @@ function stViewHtml(st) {
   const mode = (v, label) => `<button type="button" class="${(v === "all") === all ? "on" : ""}" data-action="st-view" data-mode="${v}"
       aria-pressed="${(v === "all") === all}">${label}</button>`;
   const pick = all
-    ? `<label class="st-limit">Show <select class="setting-select" data-action="st-limit" aria-label="How many payments">${ST_LIMITS.map((n) =>
-        `<option value="${n}" ${state.stLimit === n ? "selected" : ""}>${n ? `Latest ${n}` : "All"}</option>`).join("")}</select></label>`
+    ? `<label class="st-limit">Show <select class="setting-select" data-action="st-limit" aria-label="Payments per page">${ST_LIMITS.map((n) =>
+        `<option value="${n}" ${state.stLimit === n ? "selected" : ""}>${n ? `${n} a page` : "All"}</option>`).join("")}</select></label>`
     : `<div class="st-month"><button class="btn small" data-action="st-month" data-delta="-1" aria-label="Previous month">‹</button>
         <span>${esc(monthLabel(st.month))}</span>
         <button class="btn small" data-action="st-month" data-delta="1" aria-label="Next month">›</button></div>`;
   return `<div class="seg2" role="group" aria-label="Show">${mode("month", "Month")}${mode("all", "All")}</div>${pick}`;
 }
 
-/** Under every month's payments, when not all are shown: how many, and more. */
+/** Under every month's payments, a page at a time: newer, which page, older. */
 function stMoreHtml(st) {
-  const shown = (st.rows || []).length, total = st.total_payments || 0;
-  if (st.month !== "all" || !st.limit || shown >= total) return "";
-  const next = ST_LIMITS.find((n) => n > st.limit) ?? 0;
-  return `<div class="st-more muted">Latest ${shown} of ${total} payments.
-    <button class="link" data-action="st-limit-more" data-limit="${next}">${next ? `Show ${next}` : "Show all"}</button></div>`;
+  const total = st.total_payments || 0, size = st.limit || 0;
+  if (st.month !== "all" || !size || total <= size) return "";
+  const page = Math.floor((st.offset || 0) / size), pages = Math.ceil(total / size);
+  const from = page * size + 1, to = Math.min(total, (page + 1) * size);
+  return `<div class="st-more st-pager">
+    <button class="btn small" data-action="st-page" data-delta="-1" ${page <= 0 ? "disabled" : ""}>‹ Newer</button>
+    <span class="muted">Page ${page + 1} of ${pages} · ${from}–${to} of ${total}</span>
+    <button class="btn small" data-action="st-page" data-delta="1" ${page >= pages - 1 ? "disabled" : ""}>Older ›</button></div>`;
 }
 
 function renderStatement() {
@@ -1714,9 +1717,15 @@ document.addEventListener("click", async (e) => {
     case "st-filter": state.stFilter = target.dataset.filter; return render();
     case "st-view":
     case "st-limit-more":
-      if (action === "st-view") { state.stView = target.dataset.mode === "all" ? "all" : "month"; setPref("stView", state.stView); }
+      if (action === "st-view") { state.stView = target.dataset.mode === "all" ? "all" : "month"; setPref("stViewMode", state.stView); }
       else { state.stLimit = Number(target.dataset.limit) || 0; setPref("stLimit", state.stLimit); }
+      state.stPage = 0;
       state.statement = null; m.stSel = null;
+      return refresh(true);
+    case "st-page":
+      state.stPage = Math.max(0, state.stPage + Number(target.dataset.delta));
+      state.statement = null; m.stSel = null;
+      $("#content").querySelector(".st-wrap")?.scrollTo(0, 0);
       return refresh(true);
     case "st-month": {
       const d = new Date(state.month + "-15T12:00:00");
@@ -1825,6 +1834,7 @@ document.addEventListener("change", (e) => {
   if (a === "st-limit") {
     state.stLimit = Number(e.target.value) || 0;
     setPref("stLimit", state.stLimit);
+    state.stPage = 0;
     state.statement = null; m.stSel = null;
     e.target.blur();
     refresh(true);

@@ -282,6 +282,32 @@ def test_an_email_for_a_payment_must_be_for_one_that_can_take_it() -> None:
             assert "isn't in the statement" in str(exc)
 
 
+def test_the_receipt_can_be_any_pdf_or_picture_the_email_carries() -> None:
+    """An insurer attaches its policy as a PDF: the receipt is what you pick,
+    the policy, a photo, or the email itself. Never an SVG (it can hold script)."""
+    from app.service import _email_fields, _receipt_attachment
+
+    pdf = {"filename": "policy.pdf", "content_type": "application/pdf", "data": b"%PDF-1.4 policy"}
+    photo = {"filename": "image0.jpeg", "content_type": "image/jpeg", "data": b"\xff\xd8 jpeg"}
+    svg = {"filename": "logo.svg", "content_type": "image/svg+xml", "data": b"<svg/>"}
+    message = SimpleNamespace(message_id="m1", attachments=[pdf, photo, svg],
+                              pdf_attachments=lambda: [pdf])
+    assert _receipt_attachment(message, "att:0")[1] == ".pdf" and _receipt_attachment(message, "att:1")[1] == ".jpeg"
+    assert _receipt_attachment(message, "att:2") is None and _receipt_attachment(message, "att:9") is None
+    service, _rid, tmp = make()
+    with tmp:
+        path, source = service._email_document(message, {"supplier": "X", "amount": 1, "day": ""}, "att:1")
+        assert path.suffix == ".jpeg" and path.read_bytes() == photo["data"] and source == "attachment"
+        path, _ = service._email_document(message, {"supplier": "X", "amount": 1, "day": ""}, "")
+        assert path.read_bytes() == pdf["data"], "no choice: its PDF, as before"
+    assert _email_fields({"document": "att:1"})["document"] == "att:1"
+    try:
+        _email_fields({"document": "../etc"})
+        raise AssertionError("a made-up choice was accepted")
+    except ValueError:
+        pass
+
+
 def test_a_payment_approved_in_freeagent_is_done() -> None:
     """Approved there (not a guess awaiting review): done in the Statement,
     with or without a receipt. A guess waiting for review still needs one."""
@@ -488,6 +514,8 @@ def test_the_statement_can_show_every_month_newest_first() -> None:
         latest = service.statement(None, "all", limit=2)
         assert [r["url"] for r in latest["rows"]] == [r["url"] for r in every["rows"]][:2]
         assert latest["limit"] == 2 and latest["total_payments"] == every["total_payments"]
+        page2 = service.statement(None, "all", limit=2, offset=2)               # Older ›
+        assert [r["url"] for r in page2["rows"]] == [r["url"] for r in every["rows"]][2:4] and page2["offset"] == 2
         assert [r["date"] for r in month["rows"]] == sorted(r["date"] for r in month["rows"]), "a month: oldest first, as before"
 
 

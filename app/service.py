@@ -1921,11 +1921,12 @@ class ReceiptService:
 
     # ---- Statement (PLAN.md §11): one month of a bank account ---------------
 
-    def statement(self, account: str | None, month: str | None, limit: int | None = None) -> dict[str, Any]:
+    def statement(self, account: str | None, month: str | None, limit: int | None = None,
+                  offset: int = 0) -> dict[str, Any]:
         """Every payment in a month of the cached statement, and whether it
         has a receipt: filed, in Match, missing, or no receipt needed.
-        `month="all"`: every month, newest first, the latest `limit` of them
-        (all when None)."""
+        `month="all"`: every month, newest first, a page of `limit` of them
+        from `offset` (all when None)."""
         chosen = self._freeagent_accounts()
         accounts = {a["url"]: a for a in self._freeagent_reference().get("bank_accounts", [])}
         account = account or (chosen[0] if chosen else None)
@@ -1940,7 +1941,7 @@ class ReceiptService:
         total_payments = len(transactions)
         if every:
             transactions.sort(key=lambda t: (t["dated_on"], t["url"]), reverse=True)
-            transactions = transactions[:limit] if limit else transactions
+            transactions = transactions[offset:offset + limit] if limit else transactions
         else:
             transactions.sort(key=lambda t: (t["dated_on"], t["url"]))
 
@@ -2012,6 +2013,7 @@ class ReceiptService:
             "account_name": accounts.get(account, {}).get("name", ""),
             "month": month,
             "limit": limit if every else None,
+            "offset": offset if every and limit else 0,
             "total_payments": total_payments,       # all of them, however many are shown
             "last_sync": self.db.get_state("freeagent:last_sync"),
             "rows": rows,
@@ -2573,16 +2575,26 @@ class ReceiptService:
         else:
             self._finish("use-email", False, "That email is already a receipt.")
 
-    def _email_document(self, message: Any, hint: dict[str, Any]) -> tuple[Path, str]:
-        """The email's own PDF if it has one, else the email printed."""
+    def _email_document(self, message: Any, hint: dict[str, Any], document: str = "") -> tuple[Path, str]:
+        """What becomes the receipt. `document`: "email" (the email printed),
+        "att:N" (that attachment, a PDF or a picture), or "" for the email's
+        own PDF if it has one, else the email printed."""
         from .browser import BrowserPool
         from .pdf import render_email_to_pdf
         from .pipeline import _safe_stem
 
         out = self.config.pdf_dir / f"{_safe_stem(message.message_id)}.pdf"
         out.parent.mkdir(parents=True, exist_ok=True)
+        if document.startswith("att:"):
+            found = _receipt_attachment(message, document)
+            if found is None:
+                raise ValueError("That attachment can't be a receipt (a PDF or a picture only).")
+            attachment, suffix = found
+            out = out.with_suffix(suffix)
+            out.write_bytes(attachment["data"])
+            return out, "attachment"
         attached = [a for a in message.pdf_attachments() if a.get("data")]
-        if attached:
+        if attached and document != "email":
             out.write_bytes(attached[0]["data"])
             return out, "attachment"
         import html as html_lib
@@ -2698,7 +2710,10 @@ class ReceiptService:
         message = self._cached_email(chosen, client, message_id)
         display, address = parseaddr(message.sender or "")
         attachments = [{"filename": a.get("filename") or "attachment", "content_type": a.get("content_type", ""),
-                        "size": a.get("size", 0)} for a in message.attachments]
+                        "size": a.get("size", 0),
+                        # can be the receipt: "Receipt" in Convert to receipt offers it
+                        "receipt": _receipt_attachment(message, f"att:{i}") is not None}
+                       for i, a in enumerate(message.attachments)]
         return {
             "id": message_id,
             "thread_id": message.thread_id,
@@ -2715,14 +2730,22 @@ class ReceiptService:
             "in_files": self.emails_in_files([message_id]).get(message_id),
         }
 
-    def email_pdf(self, account: str, message_id: str) -> tuple[str, bytes] | None:
-        """The PDF an email carries, which becomes the receipt: (filename,
-        bytes), or None. Shown beside "Convert to receipt"; the email is in
-        memory already, from being opened."""
+    def email_pdf(self, account: str, message_id: str, index: int | None = None) -> tuple[str, bytes, str] | None:
+        """The attachment that would become the receipt: (filename, bytes,
+        media type), or None. `index`: that attachment (a PDF or a picture);
+        else the first PDF. Shown beside "Convert to receipt"; the email is
+        in memory already, from being opened."""
         chosen, client = self._mail_client(account)
         message = self._cached_email(chosen, client, message_id)
+        if index is not None:
+            found = _receipt_attachment(message, f"att:{index}")
+            if found is None:
+                return None
+            a, suffix = found
+            kind = "application/pdf" if suffix == ".pdf" else RECEIPT_PICTURES[suffix]
+            return a.get("filename") or f"receipt{suffix}", a["data"], kind
         attached = [a for a in message.pdf_attachments() if a.get("data")]
-        return (attached[0].get("filename") or "receipt.pdf", attached[0]["data"]) if attached else None
+        return (attached[0].get("filename") or "receipt.pdf", attached[0]["data"], "application/pdf") if attached else None
 
     def add_email(self, account: str, message_id: str, fields: dict[str, Any]) -> bool:
         """"Add to Files" on an email: queued, as printing it takes a browser.
@@ -2753,7 +2776,7 @@ class ReceiptService:
             chosen, client = self._mail_client(account)
             message = self._cached_email(chosen, client, message_id)
             path, source = self._email_document(message, {"supplier": supplier, "amount": fields["total"],
-                                                          "day": fields["date"]})
+                                                          "day": fields["date"]}, fields.get("document") or "")
         except Exception as exc:
             log.exception("add email")
             self._finish("email-add", False, f"Couldn't add that email: {exc}")
@@ -2774,6 +2797,8 @@ class ReceiptService:
                            **({"vat_amount": fields["vat"]} if fields["vat_choice"] == "amount" else {}),
                            **({"found_for_payment": fields["payment_url"]} if fields.get("payment_url") else {})},
         }
+        if path.suffix != ".pdf":                                 # a picture chosen as the receipt
+            data["filename"] = data["filename"][:-4] + path.suffix
         if fields.get("payment_url"):
             data["transaction_url"] = fields["payment_url"]       # "Use that email": paired with its payment
         known = self.emails_in_files([message_id]).get(message_id)
@@ -3425,6 +3450,32 @@ def _supplier_key_for_names(name: str) -> str:
     return key[:-1] if len(key) > 3 and key.endswith("s") else key or name.lower()
 
 
+# Pictures an email can carry as its receipt (never SVG: it can hold script).
+RECEIPT_PICTURES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+                    ".webp": "image/webp", ".heic": "image/heic", ".heif": "image/heif"}
+
+
+def _receipt_attachment(message: Any, document: str) -> tuple[dict[str, Any], str] | None:
+    """"att:N": that attachment and its file suffix, if it's a PDF or a
+    picture with something in it; else None."""
+    try:
+        attachment = message.attachments[int(document.split(":", 1)[1])]
+    except (ValueError, IndexError):
+        return None
+    if not attachment.get("data"):
+        return None
+    kind = str(attachment.get("content_type") or "").lower()
+    suffix = Path(str(attachment.get("filename") or "")).suffix.lower()
+    if kind == "application/pdf" or suffix == ".pdf":
+        return attachment, ".pdf"
+    if suffix in RECEIPT_PICTURES:
+        return attachment, suffix
+    for known, media in RECEIPT_PICTURES.items():
+        if kind == media:
+            return attachment, known
+    return None
+
+
 def _email_fields(fields: dict[str, Any]) -> dict[str, Any]:
     """The Emails view's form, checked: a mistake is a ValueError in words."""
     supplier = " ".join(str(fields.get("supplier") or "").split())[:80]
@@ -3467,8 +3518,12 @@ def _email_fields(fields: dict[str, Any]) -> dict[str, Any]:
     paid_by = fields.get("paid_by") or "business"
     if paid_by not in ("business", "personal"):
         raise ValueError("Paid by should be business or personal.")
+    # what becomes the receipt: "" (its PDF, else the email), "email", or "att:N"
+    document = str(fields.get("document") or "")
+    if document and document != "email" and not re.fullmatch(r"att:\d{1,3}", document):
+        raise ValueError("Choose the receipt from the list.")
     return {"supplier": supplier, "date": day, "total": total, "vat": vat, "vat_choice": vat_choice,
-            "currency": currency, "paid_by": paid_by}
+            "currency": currency, "paid_by": paid_by, "document": document}
 
 
 def _money_text(value: Any, currency: str | None) -> str:
