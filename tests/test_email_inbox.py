@@ -218,6 +218,19 @@ def test_an_email_is_added_to_files_as_an_expense_with_what_you_typed() -> None:
             assert "already" in str(exc)
 
 
+def test_the_vat_rate_chosen_is_how_it_will_be_filed() -> None:
+    service, _, tmp = make()
+    with tmp:
+        service.add_email(ME, "hotel1", {"supplier": "Hotel", "total": "180", "vat": "30", "vat_choice": "20.0"})
+        run_queued(service, "email-add:hotel1")
+        service.add_email(ME, "shop01", {"supplier": "Shop", "total": "23.99", "vat": "2.00", "vat_choice": "amount"})
+        run_queued(service, "email-add:shop01")
+        rows = {r["supplier"]: r for r in service.receipts("pending")}
+        assert rows["Hotel"]["vat_choice"] == "20.0" and rows["Hotel"]["vat"] is None
+        assert rows["Shop"]["vat_choice"] == "amount" and rows["Shop"]["vat_amount"] == 2.0
+        assert rows["Shop"]["vat"] == 2.0
+
+
 def test_an_email_you_ignored_comes_back_when_you_add_it() -> None:
     service, _, tmp = make()
     with tmp:
@@ -248,6 +261,8 @@ def test_the_form_is_checked_before_anything_is_queued() -> None:
             ({"total": "10", "vat": "12"}, "less than the total"),
             ({"currency": "pounds"}, "three letters"),
             ({"paid_by": "someone"}, "business or personal"),
+            ({"vat_choice": "17.5"}, "VAT rate from the list"),
+            ({"total": "120", "vat": "25", "vat_choice": "amount"}, "more than 20% VAT"),
         ]:
             try:
                 service.add_email(ME, "hotel1", fields)

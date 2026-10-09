@@ -135,7 +135,8 @@ async function openEmail(id) {
     em.mails[id] = mail;
     const d = mail.draft;
     em.forms[id] ||= { supplier: d.supplier || "", date: d.date || "", total: d.total == null ? "" : d.total.toFixed(2),
-      currency: d.currency || "GBP", vat: d.vat == null ? "" : d.vat.toFixed(2), paid_by: "business" };
+      currency: d.currency || "GBP", vat: d.vat == null ? "" : d.vat.toFixed(2), vat_choice: vatRateOf(d.vat, d.total),
+      paid_by: "business" };
     const kept = Object.keys(em.mails);
     for (const old of kept.slice(0, Math.max(0, kept.length - MAILS_KEPT))) if (old !== em.sel) delete em.mails[old];
   } catch (err) {
@@ -143,6 +144,23 @@ async function openEmail(id) {
   }
   if (em.opening === id) em.opening = null;
   render();
+}
+
+/** The VAT menu choice an email's VAT works out to: 20% or 5% of the total,
+ * else the amount as typed; with no VAT read, Auto (as printed: none). */
+function vatRateOf(vat, total) {
+  if (vat == null) return "auto";
+  for (const rate of [20, 5]) if (total && Math.abs(vat - total * rate / (100 + rate)) <= 0.02) return `${rate}.0`;
+  return "amount";
+}
+
+/** What the chosen VAT comes to, beside the menu. */
+function vatNote(f, d) {
+  const total = Number(String(f.total).replace(/[£,\s]/g, ""));
+  const rate = { "20.0": 20, "5.0": 5, "0.0": 0 }[f.vat_choice];
+  if (rate != null) return Number.isFinite(total) && total > 0 ? money(total * rate / (100 + rate), f.currency) : "";
+  if (f.vat_choice === "auto") return d.vat != null ? `${money(d.vat, f.currency)} as printed` : "None shown";
+  return "";
 }
 
 function pick(id) {
@@ -185,7 +203,7 @@ async function submitDialog() {
   try {
     await api(`/api/emails/${encodeURIComponent(id)}/add`, { method: "POST",
       body: { account: mail.account, supplier: f.supplier, date: f.date, total: f.total, currency: f.currency,
-              vat: f.vat, paid_by: f.paid_by } });
+              vat: f.vat, vat_choice: f.vat_choice, paid_by: f.paid_by } });
   } catch (err) {
     em.dialogError = err.message;
     return render();
@@ -377,7 +395,7 @@ function dialogHtml(mail) {
   const bank = accountName();
   const known = mail.in_files;
   const before = known && ["ignored", "failed", "deleted"].includes(known.status)
-    ? `<div class="m-note">You ignored this email before. Converting it brings it back to Files.</div>` : "";
+    ? `<div class="m-note e-dnote">This email is in Archived. Adding it moves it back to Files.</div>` : "";
   return `<div class="m-overlay e-overlay"><section class="m-dialog wide e-dialog m-keep" role="dialog" aria-modal="true" aria-labelledby="e-dialog-title">
       <h2 id="e-dialog-title">Convert to receipt</h2>
       <p class="sub">${esc(mail.subject || "(no subject)")} · ${esc(mail.from_name)}. ${found}</p>
@@ -385,7 +403,11 @@ function dialogHtml(mail) {
         <span class="k">Supplier</span>${input("supplier", "text", 'placeholder="Who is it from?" autocomplete="off"')}
         <span class="k">Date</span>${input("date", "date")}
         <span class="k">Total</span><span class="pair">${input("total", "text", 'inputmode="decimal" placeholder="0.00" autocomplete="off"')}${currency}</span>
-        <span class="k">VAT</span>${input("vat", "text", 'inputmode="decimal" placeholder="None shown" autocomplete="off"')}
+        <span class="k">VAT</span><span class="pair"><select class="e-vat" data-action="e-vat-choice" aria-label="VAT">${VAT_MENU.map(([v, l]) =>
+          `<option value="${v}" ${f.vat_choice === v ? "selected" : ""}>${l}</option>`).join("")}</select>${f.vat_choice === "amount"
+          ? input("vat", "text", 'inputmode="decimal" placeholder="0.00" autocomplete="off" aria-label="VAT amount"')
+          : `<span class="e-vat-note muted">${esc(vatNote(f, d))}</span>`}</span>
+        <span class="k">Receipt</span><span class="e-doc-name">${d.pdf ? `${PAPERCLIP} ${esc(d.pdf)}` : "This email, saved as a PDF"}</span>
       </div>
       ${others.length ? `<div class="e-others"><span class="muted">Other amounts:</span>${others.map((a) =>
         `<button type="button" class="e-other" data-action="e-amount" data-amount="${a.amount.toFixed(2)}" data-currency="${esc(a.currency)}"
@@ -395,8 +417,6 @@ function dialogHtml(mail) {
         ${pw("business", bankBadge(bank), "", bank, "Business account · linked in Bank Feed")}
         ${pw("personal", ICON.cash, "personal", "Expense", "Paid personally · claimed back")}
       </div>
-      <div class="m-note e-dnote">${d.pdf ? `The attached ${esc(d.pdf)} is kept as the receipt.` : "The email is saved as a PDF and kept as the receipt."}
-        It goes into Files, where you can change anything.</div>
       ${before}
       ${em.dialogError ? `<div class="m-note warn">${esc(em.dialogError)}</div>` : ""}
       <div class="m-dialog-foot">
@@ -522,6 +542,8 @@ document.addEventListener("input", (e) => {
   const a = e.target.dataset.action;
   if (a === "e-field" && em.forms[em.dialog]) {
     em.forms[em.dialog][e.target.dataset.field] = e.target.value;
+    const note = document.querySelector(".e-dialog .e-vat-note");
+    if (note) note.textContent = vatNote(em.forms[em.dialog], em.mails[em.dialog].draft);
   } else if (a === "e-search") {
     em.q = e.target.value;
     clearTimeout(em.searchTimer);
@@ -536,6 +558,10 @@ document.addEventListener("change", (e) => {
   if (a === "e-currency" && em.forms[em.dialog]) {
     em.forms[em.dialog].currency = e.target.value;
     render();
+  } else if (a === "e-vat-choice" && em.forms[em.dialog]) {
+    em.forms[em.dialog].vat_choice = e.target.value;
+    render();
+    if (e.target.value === "amount") document.querySelector('.e-dialog input[data-field="vat"]')?.focus();
   } else if (a === "e-account") {
     em.account = e.target.value;
     em.sel = null;

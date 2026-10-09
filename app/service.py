@@ -2618,7 +2618,8 @@ class ReceiptService:
             # typed, or from the sender's name: made safe, as exports are written by it
             "filename": build_filename("{day} {supplier}{money}", {"day": day, "supplier": supplier, "money": money}),
             "paid_by": fields["paid_by"], "status": PENDING,
-            "extra_json": {"added_from": "emails", "supplier_source": "sender"},
+            "extra_json": {"added_from": "emails", "supplier_source": "sender", "vat_choice": fields["vat_choice"],
+                           **({"vat_amount": fields["vat"]} if fields["vat_choice"] == "amount" else {})},
         }
         known = self.emails_in_files([message_id]).get(message_id)
         if known and known["status"] in (IGNORED, FAILED, DELETED):
@@ -3242,16 +3243,27 @@ def _email_fields(fields: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(f"The {name} can't be negative.")
         return number
 
+    from .filer import AMOUNT, AUTO, VAT_CHOICES
+
     total, vat = amount("total", "total"), amount("vat", "VAT")
     if vat is not None and total is not None and vat >= total:
         raise ValueError("The VAT should be less than the total.")
+    # FreeAgent's VAT menu, as in Files: Auto (as printed), Amount…, 20%, 5%,
+    # 0%, Exempt or Out of Scope. The figure only matters for Auto and Amount.
+    vat_choice = str(fields.get("vat_choice") or AUTO)
+    if vat_choice not in VAT_CHOICES:
+        raise ValueError("Choose a VAT rate from the list.")
+    if vat_choice not in (AUTO, AMOUNT):
+        vat = None
+    elif vat_choice == AMOUNT and vat and total and vat > round(total * 20 / 120, 2) + 0.01:
+        raise ValueError(f"£{vat:.2f} is more than 20% VAT on £{total:.2f}.")
     currency = str(fields.get("currency") or "GBP").strip().upper()
     if not re.fullmatch(r"[A-Z]{3}", currency):
         raise ValueError("The currency should be three letters, like GBP.")
     paid_by = fields.get("paid_by") or "business"
     if paid_by not in ("business", "personal"):
         raise ValueError("Paid by should be business or personal.")
-    return {"supplier": supplier, "date": day, "total": total, "vat": vat,
+    return {"supplier": supplier, "date": day, "total": total, "vat": vat, "vat_choice": vat_choice,
             "currency": currency, "paid_by": paid_by}
 
 
