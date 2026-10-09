@@ -49,6 +49,7 @@ class Match:
     pinned: bool = False
     exact: bool = True                      # the payment is exactly the receipt total
     options: list[dict[str, Any]] = field(default_factory=list)   # choose / near misses
+    better: dict[str, Any] | None = None    # a payment you chose doesn't fit, and this free one does
 
 
 @dataclass
@@ -174,6 +175,18 @@ def match_receipts(receipts: list[dict[str, Any]], transactions: list[dict[str, 
         reason = "" if len(rec.candidates) == 1 else f"nearest of {len(rec.candidates)} identical payments"
         results[rec.id] = Match("matched", chosen, len(rec.candidates), reason,
                                 _named(chosen, rec.token), _days(chosen, rec.when))
+
+    # A payment you chose that isn't the amount, or is days off, while an
+    # exact one (its name on the statement first) is still free: say so.
+    for rec in business:
+        match = results.get(rec.id)
+        if match is None or not match.pinned:
+            continue
+        if match.exact and -DAYS_BEFORE <= (match.days or 0) <= DAYS_AFTER:
+            continue
+        free = [t for t in rec.candidates if t["url"] not in claimed]
+        if free:
+            match.better = min(free, key=lambda t: (not _named(t, rec.token), abs(_days(t, rec.when))))
     return results
 
 

@@ -134,6 +134,20 @@ def test_a_receipt_without_its_own_date_asks_which_payment() -> None:
     assert result.status == "choose" and [t["url"] for t in result.options] == ["tx/1", "tx/2", "tx/3", "tx/4"]
 
 
+def test_a_wrongly_chosen_payment_points_to_the_exact_one() -> None:
+    """Talk360 £5.49 chosen for a £4.85 Sainsbury's payment five days earlier,
+    while its own £5.49 payment sits there: the choice stands, and the
+    exact one is offered."""
+    feed = [tx(1, "2026-10-02", -4.85, "SAINSBURY'S"), tx(2, "2026-10-08", -5.49, "TALK360")]
+    talk = dict(rc(1, "2026-10-07", 5.49, "Talk360 Group B.V."), pinned="tx/1")
+    result = match_receipts([talk], feed, GBP)[1]
+    assert result.pinned and result.transaction["url"] == "tx/1" and result.better["url"] == "tx/2"
+    fair = dict(rc(1, "2026-03-05", 7.50, "Cafe North"), pinned="tx/6")      # a tip: nothing exact
+    assert match_receipts([fair], FEED, GBP)[1].better is None
+    taken = [talk, rc(2, "2026-10-07", 5.49, "Talk360")]                      # the exact one is another's
+    assert match_receipts(taken, feed, GBP)[1].better is None
+
+
 def test_a_pinned_payment_wins_even_when_the_amount_differs() -> None:
     bill = dict(rc(1, "2026-03-05", 7.50, "Cafe North"), pinned="tx/6")      # £9.00 paid: a tip
     result = match_receipts([bill], FEED, GBP)[1]

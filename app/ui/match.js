@@ -34,6 +34,7 @@ const m = {
   stOther: false,                    // Statement: showing other files for a suggested payment
   stPick: null,                      // Statement: { url, sel } while picking from all files not yet linked
   stPending: null,                   // Statement: receipt whose payment to open once loaded
+  linkFile: null,                    // Statement: receipt id being linked from Files ("Link to other payment")
   curOpen: null,                     // receipt id whose currency list is open
   asel: null,                        // Archived: selected receipt id
   multi: [],                         // Files: ids picked with shift- or ⌘-click (2 or more = bulk)
@@ -449,9 +450,17 @@ function savePayment(url, changes) {
 }
 
 function chipsHtml(p) {
-  const warn = (c) => c.startsWith("+£") || (p.far && /day/.test(c));
+  const warn = (c) => c.startsWith("+£") || c.startsWith("−£") || (p.far && /day/.test(c));
   return [...(p.chips || []).map((c) => `<span class="m-chip ${warn(c) ? "warn" : "good"}">${warn(c) ? "" : ICON.tick}${esc(c)}</span>`),
     ...(p.pinned ? [`<span class="m-chip">You chose this</span>`] : [])].join("");
+}
+
+/** You chose a payment that doesn't fit, and an exact one is free: offer it. */
+function betterHtml(r) {
+  const b = r.payment?.better;
+  if (!b) return "";
+  return `<div class="m-note warn">${esc(b.description)} on ${esc(shortDate(b.date))} is exactly ${esc(money(-b.amount, "GBP"))}.
+    <button class="link" data-action="m-use-better" data-id="${r.id}" data-url="${esc(b.url)}">Use that payment</button></div>`;
 }
 
 function lastFilingHtml(r) {
@@ -648,8 +657,10 @@ function fileDetailHtml(r) {
         <div class="who"><div class="desc">${esc(p.description)}</div><div class="sub">${esc(accountName())} · ${esc(longDate(p.date))}</div></div>
         <span class="amt">${esc(money(p.amount, "GBP"))}</span></div>
       <div class="m-chips">${chipsHtml(p)}</div>
+      ${betterHtml(r)}
       ${willFileHtml(r)}
-      ${fileBlocker(r) ? `<div class="m-note warn st-why">${esc(fileBlocker(r))} before linking.</div>` : ""}</div>
+      ${fileBlocker(r) ? `<div class="m-note warn st-why">${esc(fileBlocker(r))} before linking.</div>` : ""}
+      <div class="m-card-foot"><button class="btn small" data-action="m-link-other" data-id="${r.id}">Link to other payment</button></div></div>
       ${learnHtml(r)}`;
   } else if (r.stage === "link") {
     payment = `<div class="m-wait"><div class="t">${r.match?.status === "choose" ? "Which day was this?" : `No payment of exactly ${esc(amountOf(r))}`}</div>
@@ -983,6 +994,7 @@ function renderStatement() {
       ${stViewHtml(st)}
     </header>
     <div class="st-body">
+      ${linkBarHtml()}
       <section class="st-summary">
         <div class="main">
           <div class="big">${todo ? `<b>${todo}</b> payment${todo === 1 ? "" : "s"} still need${todo === 1 ? "s" : ""} a receipt`
@@ -1074,7 +1086,9 @@ function candidatesFor(t) {
       return { r, option, diff, gap: Math.abs(day(r.date) - paid) / 864e5 };
     })
     // close in amount (a tip, a rounding) and in time, or the engine's own option
-    .filter((c) => c.option || ((c.r.total == null || c.diff <= Math.max(1, want * 0.3)) && (!c.r.date || c.gap <= 45)))
+    // a card payment never comes days before the purchase: a file dated after it isn't it
+    .filter((c) => c.option || ((c.r.total == null || c.diff <= Math.max(1, want * 0.3)) && (!c.r.date || c.gap <= 45)
+      && (undated(c.r) || day(c.r.date) - paid <= 2 * 864e5)))
     .sort((a, b) => (b.option ? 1 : 0) - (a.option ? 1 : 0) || a.diff - b.diff || a.gap - b.gap)
     .slice(0, 8);
 }
@@ -1290,12 +1304,14 @@ function panelHtml(t) {
       : blocked ? `<button class="btn" disabled>${esc(blocked)}</button>`
       : `<button class="btn primary" data-action="st-approve" data-url="${esc(t.url)}" data-id="${r.id}">${explained && t.approved ? "Attach receipt" : "Approve"} ${kbd("⏎", true)}</button>`;
     return `${head}<div class="st-pbody">
+      ${linkHereHtml(t)}
       ${t.approved ? `<div class="m-wait"><div class="t">Approved in FreeAgent</div><div class="b">This file may be its receipt. Attach it if so.</div></div>` : ""}
       ${r.stage === "check" ? issuesHtml(r, "Worth a look") : ""}
       <div class="m-card m-filecard"><div class="m-card-head"><span>Suggested file</span><button class="link" data-action="st-open" data-id="${r.id}">Open in Files</button></div>
         <div class="m-pay"><div class="who"><div class="desc plain">${esc(r.supplier)}</div><div class="sub">${esc(r.date ? longDate(r.date) : "No date")}</div></div>
           <span class="amt">${esc(amountOf(r))}</span></div>
         ${r.payment ? `<div class="m-chips">${chipsHtml(r.payment)}</div>` : ""}
+        ${betterHtml(r)}
         ${willFileHtml(r)}
         ${docFigure(r)}
         <div class="m-card-foot"><button class="btn small" data-action="st-remove-file" data-id="${r.id}" data-url="${esc(t.url)}">Remove file</button></div></div>
@@ -1311,6 +1327,7 @@ function panelHtml(t) {
   const approvedNote = t.approved && t.status !== "filed"
     ? `<div class="m-wait"><div class="t">Approved in FreeAgent</div><div class="b">Nothing to do. You can still attach a receipt below.</div></div>` : "";
   return `${head}<div class="st-pbody">
+    ${linkHereHtml(t)}
     ${approvedNote}
     ${hint}
     ${paymentCardHtml(t)}
@@ -1462,6 +1479,33 @@ function goToStatement(r) {
   return setView("statement");
 }
 
+/** "Link to other payment": Bank Feed at the file's month, carrying the file;
+ * pick a payment and "Use for this payment". */
+function goToOtherPayment(r) {
+  const month = (r.date || "").slice(0, 7);
+  if (month) { state.month = month; state.stView = "month"; state.statement = null; }
+  state.stFilter = "all";
+  m.stSel = null; m.stPending = null; m.stOther = false;
+  m.linkFile = r.id;
+  return setView("statement");
+}
+
+/** In Bank Feed while linking a file from Files: which file, and Cancel. */
+function linkBarHtml() {
+  const r = m.linkFile != null ? findReceipt(m.linkFile) : null;
+  if (!r) return "";
+  return `<div class="m-note st-linkbar">Pick the payment for <b>${esc(r.supplier || "this file")} ${esc(amountOf(r))}</b>${
+    r.date ? ` (${esc(shortDate(r.date))})` : ""}. <button class="link" data-action="st-link-cancel">Cancel</button></div>`;
+}
+
+/** At the top of a payment's panel while linking: use the file for it. */
+function linkHereHtml(t) {
+  const r = m.linkFile != null ? findReceipt(m.linkFile) : null;
+  if (!r || t.receipt?.id === r.id) return "";
+  return `<div class="m-issue small"><div class="t">Use ${esc(r.supplier || "this file")} ${esc(amountOf(r))} for this payment?</div>
+    <div class="m-iss-ctl"><button class="btn small primary" data-action="st-link-use" data-id="${r.id}" data-url="${esc(t.url)}">Use for this payment</button></div></div>`;
+}
+
 document.addEventListener("click", async (e) => {
   const target = e.target.closest("[data-action]");
   const action = target?.dataset.action || "";
@@ -1533,6 +1577,19 @@ document.addEventListener("click", async (e) => {
     case "m-checked":
       return r && act(() => api(`/api/receipts/${r.id}/fields`, { method: "POST", body: { checked: true } }));
     case "m-to-statement": return r && goToStatement(r);
+    case "m-link-other": return r && goToOtherPayment(r);
+    case "m-use-better":
+      return act(async () => {
+        await api(`/api/receipts/${id}/payment`, { method: "POST", body: { url: target.dataset.url } });
+        toast("Moved to that payment.");
+      });
+    case "st-link-cancel": m.linkFile = null; return render();
+    case "st-link-use":
+      m.linkFile = null;
+      return act(async () => {
+        await api(`/api/receipts/${id}/payment`, { method: "POST", body: { url: target.dataset.url } });
+        toast(`${r ? r.supplier : "That file"} is on this payment now. Check it, then Approve.`);
+      });
     case "m-ignore": {
       if (!r) return;
       const next = nextIn(fileRows(fileGroups()), r.id);
