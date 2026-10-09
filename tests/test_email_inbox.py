@@ -180,6 +180,17 @@ def test_the_list_comes_a_page_at_a_time_with_receipts_marked() -> None:
         assert [r["id"] for r in more["emails"]] == ["shop01"] and more["next"] == ""
 
 
+def test_likely_receipts_shows_only_what_the_app_judges_a_receipt() -> None:
+    service, client, tmp = make()
+    with tmp:
+        page = service.list_emails(receipts_only=True)
+        # Gmail's word search returned all three; lunch isn't a receipt. The
+        # thinned first page read on into the next.
+        assert [r["id"] for r in page["emails"]] == ["hotel1", "shop01"] and page["next"] == ""
+        assert len(client.queries) == 2 and "{receipt" in client.queries[0][0]
+        assert [r["id"] for r in service.list_emails()["emails"]] == ["hotel1", "lunch1"], "All mail is all mail"
+
+
 def test_an_email_is_added_to_files_as_an_expense_with_what_you_typed() -> None:
     service, client, tmp = make()
     with tmp:
