@@ -183,6 +183,17 @@ class Watcher:
 
         return True
 
+    def matches_headers(self, sender: str, subject: str, snippet: str = "") -> bool:
+        """`matches` for a line of the Emails list, which has only the
+        sender, subject and Gmail's snippet: the body checks are left to the
+        scan (the list asks again once it has run), and what rules an email
+        out is looked for in the snippet."""
+        heads = {k: v for k, v in self.match.items() if k not in ("body_contains", "body_regex")}
+        if not any(heads.get(k) for k in ("from_contains", "subject_contains", "subject_regex")):
+            return False                  # nothing to recognise it by without the body
+        return Watcher(id=self.id, name=self.name, vendor=self.vendor, gmail_query=self.gmail_query,
+                       match=heads).matches(Email(message_id="", sender=sender, subject=subject, plain=snippet))
+
     # ---- extraction -----------------------------------------------------
 
     def extract(self, message: Email, strict: bool = True) -> dict[str, Any]:

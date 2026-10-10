@@ -365,6 +365,15 @@ def create_app(service: ReceiptService) -> FastAPI:
     def emails_known(body: EmailIds) -> dict[str, Any]:
         return service.emails_in_files(body.ids)
 
+    @app.post("/api/emails/rules")
+    def emails_rules(body: dict[str, Any]) -> dict[str, Any]:
+        """Which of these lines a supplier rule will still collect, after a
+        scan: {id: {id, name} | None}. Local: no Gmail."""
+        rows = body.get("rows")
+        if not isinstance(rows, list) or len(rows) > 500 or not all(isinstance(r, dict) for r in rows):
+            raise HTTPException(400, "rows: a list of email lines")
+        return service.email_rules(str(body.get("account") or ""), rows)
+
     @app.post("/api/emails/ignore")
     def emails_ignore(body: dict[str, Any]) -> dict[str, Any]:
         """Right-click → Ignore: an email flagged as a receipt that isn't one

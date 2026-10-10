@@ -218,6 +218,35 @@ def test_likely_receipts_shows_only_what_the_app_judges_a_receipt() -> None:
         assert [r["id"] for r in service.list_emails()["emails"]] == ["hotel1", "lunch1"], "All mail is all mail"
 
 
+def test_an_email_a_supplier_rule_will_collect_is_marked_until_its_scan_has_been() -> None:
+    service, _, tmp = make()
+    with tmp:
+        rules = Path(tmp.name) / "watchers"
+        rules.mkdir()
+        service.config.raw["watchers_dir"] = str(rules)
+        (rules / "shop.yaml").write_text(
+            "id: shop\nname: Shop\ngmail_query: from:shop.test\n"
+            "match:\n  from_contains: shop.test\n  body_contains: Order number\n"      # the body: left to the scan
+            "  exclude_if_contains: [refunded]\n", encoding="utf-8")
+        (rules / "_example.yaml").write_text("id: example\ngmail_query: x\nmatch:\n  from_contains: example-hotel\n",
+                                             encoding="utf-8")
+        service.db.set_state(f"scan_from:{ME}", "2026-09-01")
+        rule = {r["id"]: r["rule"] for r in service.list_emails()["emails"]} | \
+            {r["id"]: r["rule"] for r in service.list_emails(page_token="page2")["emails"]}
+        assert rule == {"hotel1": None, "lunch1": None, "shop01": {"id": "shop", "name": "Shop"}}, rule
+
+        line = {"id": "shop01", "date": "2026-09-27T10:00:00+00:00", "from_name": "Shop",
+                "from_address": "orders@shop.test", "subject": "Order confirmation", "snippet": "Order total £23.99"}
+        assert service.email_rules(ME, [{**line, "snippet": "Your order was refunded"}]) == {"shop01": None}
+        service.db.set_state(f"scan_from:{ME}", "2026-09-28")
+        assert service.email_rules(ME, [line]) == {"shop01": None}, "before the rule's scan reaches"
+        service.db.set_state(f"scan_from:{ME}", "2026-09-01")
+        service.db.set_state(f"last_scan:{ME}:shop", "2026-09-27")
+        assert service.email_rules(ME, [line])["shop01"], "scanned that day: it may still come"
+        service.db.set_state(f"last_scan:{ME}:shop", "2026-09-28")
+        assert service.email_rules(ME, [line]) == {"shop01": None}, "scanned since and not taken: yours to check"
+
+
 def test_an_email_is_added_to_files_as_an_expense_with_what_you_typed() -> None:
     service, client, tmp = make()
     with tmp:

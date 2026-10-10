@@ -823,6 +823,7 @@ img.doc, .doc img, .m-doc img { -webkit-user-drag: none; user-select: none; }
 .e-pills { gap: 4px; flex-wrap: nowrap; }
 .e-pills .st-pill { padding: 3px 7px; font-size: 11.5px; gap: 5px; white-space: nowrap; }
 .st-pill i.e-dot-ignored { background: var(--muted); }
+.e-pills .st-pill.on i { box-shadow: 0 0 0 1.5px var(--bg); }
 .st-pill { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: 15px;
   border: 1px solid var(--line); background: var(--bg); color: var(--ink); font: inherit; font-size: 13px; cursor: pointer; }
 .st-pill:hover { background: var(--hover); }
@@ -939,19 +940,24 @@ img.doc, .doc img, .m-doc img { -webkit-user-drag: none; user-select: none; }
 .e-row .e-subj { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .e-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px; }
 .e-badge { font-size: 10px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; border-radius: 4px; padding: 1px 6px; }
-.e-badge.likely { color: var(--good); background: var(--good-bg); }
+/* one status an email, in its pill's colour: to check (amber), recurring
+   (blue), added (green), ignored (grey) */
+.e-badge.todo { color: var(--warn); background: var(--warn-bg); }
 .e-badge.maybe { color: var(--muted); background: var(--hover); }
-.e-badge.done { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.e-badge.auto { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.e-badge.added { color: var(--good); background: var(--good-bg); }
+.e-badge.ignored { color: var(--muted); background: var(--hover); }
 .e-amt { margin-left: auto; font-weight: 600; font-variant-numeric: tabular-nums; }
 .e-clip { display: inline-flex; color: var(--muted); }
-/* likely receipts stand out: a green bar and a tint; maybes get a grey bar */
-.e-row.e-likely { background: color-mix(in srgb, var(--good-bg) 65%, transparent); }
-.e-row.e-likely:hover { background: var(--good-bg); }
-.e-row.e-likely::before, .e-row.e-maybe::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; border-radius: 2px; }
-.e-row.e-likely::before { background: var(--good); }
-.e-row.e-maybe::before { background: var(--faint); }
-.e-row.e-known:not(.selected) { opacity: 0.7; }
-.e-row.selected, .e-row.e-likely.selected { background: var(--selected); }
+/* a bar down the left in the same colour; done with (added, ignored): faded */
+.e-row[class*="e-st-"]::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; border-radius: 2px; }
+.e-row.e-st-todo::before { background: #e8a33a; }
+.e-row.e-st-maybe::before { background: var(--faint); }
+.e-row.e-st-auto::before { background: var(--accent); }
+.e-row.e-st-added::before { background: var(--good); }
+.e-row.e-st-ignored::before { background: var(--faint); }
+.e-row.e-st-added:not(.selected), .e-row.e-st-ignored:not(.selected) { opacity: 0.7; }
+.e-row.selected { background: var(--selected); }
 .e-more, .e-retry { display: flex; justify-content: center; padding: 12px 0 4px; }
 .m-none .spinner { display: inline-block; vertical-align: -2px; margin-right: 6px; }
 .m-empty .spinner { width: 18px; height: 18px; }

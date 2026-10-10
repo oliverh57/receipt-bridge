@@ -28,6 +28,8 @@ const state = {
   // Bank Feed's period: "all" (the default), a month "YYYY-MM", or "start..end" (an accounting year)
   stPeriod: /^(all|\d{4}-\d{2}|\d{4}-\d{2}-\d{2}\.\.\d{4}-\d{2}-\d{2})$/.test(pref("stPeriod", "")) ? pref("stPeriod", "") : "all",
   stLimit: Number(pref("stLimit", "100")) || 0,  // …a page of how many (0: all)
+  // Expenses' period, as Bank Feed's (chosen separately)
+  xPeriod: /^(all|\d{4}-\d{2}|\d{4}-\d{2}-\d{2}\.\.\d{4}-\d{2}-\d{2})$/.test(pref("xPeriod", "")) ? pref("xPeriod", "") : "all",
   stPage: 0,                                     // …which page, newest first
   statement: null,
   filedToday: [],

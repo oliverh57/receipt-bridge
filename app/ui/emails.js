@@ -26,7 +26,7 @@ const em = {
   account: "",            // the mailbox chosen in the list ("" = the first)
   q: "",                  // the search, as Gmail search syntax
   receiptsOnly: true,     // "Likely receipts" (the default) instead of "All mail"
-  pill: "all",            // the bar over the list: all | todo (receipts to check) | added | ignored
+  pill: "todo",           // the bar over the list: todo (receipts to check) | auto | added | ignored | all
   key: "",                // what the list was loaded for (account, search, filter)
   list: null,             // {account, emails[], next}
   loading: false,
@@ -122,6 +122,13 @@ async function emailsKnown() {
     const known = await api("/api/emails/known", { method: "POST", body: { ids } });
     for (const x of em.list?.emails || []) x.in_files = known[x.id] || null;
     for (const [id, mail] of Object.entries(em.mails)) mail.in_files = known[id] || null;
+    // a scan may have been past the ones marked Recurring: still to come, or not
+    const waiting = (em.list?.emails || []).filter((x) => x.rule && !x.in_files);
+    if (waiting.length) {
+      const rules = await api("/api/emails/rules", { method: "POST", body: { account: em.list.account,
+        rows: waiting.map(({ id, date, from_name, from_address, subject, snippet }) => ({ id, date, from_name, from_address, subject, snippet })) } });
+      for (const x of waiting) x.rule = rules[x.id] || null;
+    }
   } catch {}
 }
 
@@ -249,11 +256,11 @@ function emailsHead() {
   const s = state.snap;
   const working = s.accounts.filter((a) => !["expired", "signed_out"].includes(a.state));
   const current = em.account || em.list?.account || working[0]?.email || "";
-  const likely = (em.list?.emails || []).filter((x) => x.receipt === "likely").length;
+  const todo = (em.list?.emails || []).filter((x) => emailState(x) === "todo").length;
   const sub = em.loading ? (em.q.trim() ? "Searching…" : "Loading your email…")
     : em.error ? "Couldn't load your email"
-    : em.list ? (likely ? `${likely} likely receipt${likely === 1 ? "" : "s"} below. Pick an email to convert it to a receipt.`
-      : "Pick an email to convert it to a receipt or an expense.")
+    : em.list ? (todo ? `${todo} to check. Convert each to a receipt, or right-click to ignore it.`
+      : "Nothing to check. Pick any email to convert it to a receipt or an expense.")
     : "";
   const accounts = working.length > 1 ? `<select class="setting-select e-account" data-action="e-account" aria-label="Mailbox">${working.map((a) =>
       `<option value="${esc(a.email)}" ${a.email === current ? "selected" : ""}>${esc(a.email)}</option>`).join("")}</select>` : "";
@@ -264,16 +271,36 @@ function emailsHead() {
     </header>`;
 }
 
-/** Where an email stands: added to Files, ignored, a receipt still to
- * check, or just mail. */
+/** Where an email stands: added to Files, ignored (or deleted from
+ * Files), one a supplier rule will collect on its next check, a receipt
+ * still to check, or just mail. */
 function emailState(x) {
   const known = x.in_files?.status;
   if (["pending", "exported", "filed"].includes(known)) return "added";
   if (x.ignored || ["ignored", "failed", "deleted"].includes(known)) return "ignored";
+  if (x.rule) return "auto";
   return x.receipt ? "todo" : "mail";
 }
 
-const E_PILLS = [["all", "All", ""], ["todo", "To check", "seg-miss"], ["added", "Added", "seg-done"], ["ignored", "Ignored", "e-dot-ignored"]];
+/** The pills: each email is under one, and under All. */
+const E_PILLS = [["todo", "To check", "seg-miss"], ["auto", "Recurring", "seg-sugg"], ["added", "Added", "seg-done"],
+  ["ignored", "Ignored", "e-dot-ignored"], ["all", "All", ""]];
+
+function inPill(x, pill) { return pill === "all" || emailState(x) === pill; }
+
+/** The emails under the pill chosen, as listed. */
+function shownEmails() { return (em.list?.emails || []).filter((x) => inPill(x, em.pill)); }
+
+/** An email's one status in the list: [state class, label, title]. */
+function emailStatus(x) {
+  const st = emailState(x);
+  const known = x.in_files?.status;
+  if (st === "added") return ["added", known === "pending" ? "In Files" : "Saved to FreeAgent", ""];
+  if (st === "ignored") return ["ignored", known === "deleted" ? "Deleted" : "Ignored", ""];
+  if (st === "auto") return ["auto", `Recurring: ${x.rule.name}`, `Your ${x.rule.name} rule collects this on its next check.`];
+  if (st === "todo") return x.receipt === "likely" ? ["todo", "To check", ""] : ["maybe", "Might be a receipt", ""];
+  return ["", "", ""];
+}
 
 /** Above the list: the search, All mail / Likely receipts, and the bar to
  * sort through them (as in Bank Feed): all, to check, added, ignored. */
@@ -281,8 +308,10 @@ function emailsTools() {
   const filter = (on, label, value) => `<button type="button" class="${on ? "on" : ""}" data-action="e-filter" data-receipts="${value}"
       aria-pressed="${on}">${label}</button>`;
   const rows = em.list?.emails || [];
-  const count = (k) => (k === "all" ? rows.length : rows.filter((x) => emailState(x) === k).length);
-  const pills = rows.length ? `<div class="st-pills e-pills" role="group" aria-label="Show">${E_PILLS.map(([k, label, dot]) =>
+  const count = (k) => rows.filter((x) => inPill(x, k)).length;
+  // Recurring only appears while there's something in it
+  const pills = rows.length ? `<div class="st-pills e-pills" role="group" aria-label="Show">${E_PILLS.filter(([k]) =>
+      k !== "auto" || count(k) || em.pill === k).map(([k, label, dot]) =>
       `<button class="st-pill ${em.pill === k ? "on" : ""}" data-action="e-pill" data-pill="${k}" aria-pressed="${em.pill === k}">${
         dot ? `<i class="${dot}"></i>` : ""}<span>${label}</span><b>${count(k)}</b></button>`).join("")}</div>` : "";
   return `<label class="m-search e-search">${ICON.search}<input type="search" placeholder="Search mail: supplier, amount, from:…" aria-label="Search mail"
@@ -298,10 +327,10 @@ function emailsList() {
   }
   if (!em.list) return `<div class="m-none"><span class="spinner" aria-hidden="true"></span> ${em.q.trim() ? "Searching…" : "Loading…"}</div>`;
   const all = em.list.emails;
-  const rows = em.pill === "all" ? all : all.filter((x) => emailState(x) === em.pill);
+  const rows = shownEmails();
   if (all.length && !rows.length) {
-    return `<div class="m-none">${{ todo: "Nothing left to check here.", added: "None of these are in Files yet.",
-      ignored: "Nothing ignored here." }[em.pill] || "Nothing here."}
+    return `<div class="m-none">${{ todo: "Nothing left to check here.", auto: "No supplier rule is waiting to collect any of these.",
+      added: "None of these are in Files yet.", ignored: "Nothing ignored here." }[em.pill] || "Nothing here."}
       <div class="e-retry"><button class="btn small" data-action="e-pill" data-pill="all">Show all</button></div></div>`;
   }
   if (!rows.length) {
@@ -313,20 +342,16 @@ function emailsList() {
   return rows.map(emailRow).join("") + more;
 }
 
-const IN_FILES = { pending: "In Files", exported: "Saved", filed: "Saved", ignored: "Ignored", failed: "Ignored" };
-
 function emailRow(x) {
   const on = x.id === em.sel;
-  const known = (x.in_files && IN_FILES[x.in_files.status]) || (x.ignored ? "Ignored" : "");
-  const flag = emailState(x) === "ignored" ? "" : x.receipt;     // ignored: no longer marked as a receipt
+  const [st, label, title] = emailStatus(x);
   const badges = [
-    flag === "likely" ? `<span class="e-badge likely">Receipt</span>` : flag === "maybe" ? `<span class="e-badge maybe">Receipt?</span>` : "",
-    known ? `<span class="e-badge done">${esc(known)}</span>` : "",
+    label ? `<span class="e-badge ${st}" ${title ? `title="${esc(title)}"` : ""}>${esc(label)}</span>` : "",
     x.has_attachment ? `<span class="e-clip">${PAPERCLIP}</span>` : "",
     x.amount ? `<span class="e-amt">${esc(money(x.amount.amount, x.amount.currency))}</span>` : "",
   ].join("");
-  const why = x.why?.length ? `Looks like a receipt: ${x.why.join(", ").toLowerCase()}.` : "";
-  return `<button type="button" class="m-row e-row ${flag ? `e-${flag}` : ""} ${x.unread ? "unread" : ""} ${known ? "e-known" : ""} ${on ? "selected" : ""}"
+  const why = title || (["todo", "maybe"].includes(st) && x.why?.length ? `Looks like a receipt: ${x.why.join(", ").toLowerCase()}.` : "");
+  return `<button type="button" class="m-row e-row ${st ? `e-st-${st}` : ""} ${x.unread ? "unread" : ""} ${on ? "selected" : ""}"
       data-action="e-pick" data-id="${esc(x.id)}" aria-pressed="${on}" ${why ? `title="${esc(why)}"` : ""}>
       <span class="txt">
         <span class="top"><span class="v">${esc(x.from_name || x.from_address || "Unknown sender")}</span><span class="e-date">${esc(mailDate(x.date))}</span></span>
@@ -342,7 +367,7 @@ function emailRow(x) {
 function emailDetail() {
   if (!em.sel) {
     return { empty: `<div class="m-empty">${ICON.search}<div class="big">Pick an email</div>
-      <div>Emails that look like receipts are marked <span class="e-badge likely">Receipt</span>.<br>Convert any email to a receipt or an expense.</div></div>` };
+      <div>Receipts still to deal with are marked <span class="e-badge todo">To check</span>.<br>Convert any email to a receipt or an expense.</div></div>` };
   }
   const mail = em.mails[em.sel];
   if (!mail) {
@@ -352,8 +377,8 @@ function emailDetail() {
       : `<div class="m-empty"><span class="spinner" aria-hidden="true"></span><div>Opening…</div></div>` };
   }
   const row = findEmail(mail.id);
-  const looks = row?.receipt === "likely" ? `<span class="chip good">Looks like a receipt</span>`
-    : row?.receipt === "maybe" ? `<span class="chip quiet">Might be a receipt</span>` : "";
+  const looks = row?.receipt === "likely" && emailState(row) === "todo" ? `<span class="chip warn">To check</span>`
+    : row?.receipt === "maybe" && emailState(row) === "todo" ? `<span class="chip quiet">Might be a receipt</span>` : "";
   const d = mail.draft;
   const head = `<div class="m-dhead"><h1 class="e-h1">${esc(mail.subject || "(no subject)")}</h1>${looks}<span class="grow"></span>
       <span class="amt">${d.total != null ? esc(money(d.total, d.currency)) : ""}</span></div>
@@ -381,6 +406,13 @@ function emailNote(mail) {
   const outcome = state.snap.outcome;
   if (!adding(mail.id) && em.lastAdd === mail.id && outcome?.kind === "email-add" && !outcome.ok) {
     return `<div class="m-note warn e-note">${esc(outcome.message)}</div>`;
+  }
+  const row = findEmail(mail.id);
+  if (row && emailState(row) === "auto") {
+    return `<div class="m-note e-note">Your ${esc(row.rule.name)} rule collects this by itself on its next check. Nothing to do here.</div>`;
+  }
+  if (row?.in_files?.status === "deleted") {
+    return `<div class="m-note e-note">This was in Files and was deleted. Convert it again if you need it.</div>`;
   }
   return "";
 }
@@ -690,12 +722,12 @@ document.addEventListener("keydown", (e) => {
   if (t.matches?.('input[data-action="e-search"]')) {
     if (e.key === "Enter") { e.preventDefault(); clearTimeout(em.searchTimer); em.q = t.value; emailsLoad(); }
     else if (e.key === "Escape" && t.value) { e.preventDefault(); em.q = ""; t.value = ""; emailsLoad(); }
-    else if (e.key === "ArrowDown") { e.preventDefault(); t.blur(); pick(em.list?.emails[0]?.id || null); }
+    else if (e.key === "ArrowDown") { e.preventDefault(); t.blur(); pick(shownEmails()[0]?.id || null); }
     return;
   }
   if (t.matches?.("input, select, textarea")) return;
   if (e.key === "Enter" && t.closest?.("button, a") && !t.closest(".e-row")) return;   // a focused button does its own thing
-  const rows = em.list?.emails || [];
+  const rows = shownEmails();
   const i = rows.findIndex((x) => x.id === em.sel);
   if (e.key === "ArrowDown" || e.key === "j" || e.key === "ArrowUp" || e.key === "k") {
     if (!rows.length) return;

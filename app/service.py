@@ -875,6 +875,7 @@ class ReceiptService:
             "error": self._freeagent_error,
             "problem": self._freeagent_problem if self._freeagent_error else "",
             "vat": reference.get("vat"),
+            "year_end": reference.get("year_end") or "",     # Expenses' "Accounting Year" periods
             "bank_accounts": [{**a, "chosen": a["url"] in chosen}
                               for a in reference.get("bank_accounts", [])
                               if a.get("status") != "hidden"],
@@ -2661,10 +2662,31 @@ class ReceiptService:
                 break
         known = self.emails_in_files([r["id"] for r in rows])
         ignored = self.ignored_emails()
+        rules = self._email_rules(chosen.email)
         for row in rows:
             row["in_files"] = known.get(row["id"])
             row["ignored"] = row["id"] in ignored          # "Ignore": flagged as a receipt, but it isn't one
+            row["rule"] = _rule_for_email(row, rules)
         return {"account": chosen.email, "emails": rows, "next": next_token}
+
+    def email_rules(self, account: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
+        """The Emails list asking again, after a scan, which of its lines a
+        rule will still collect."""
+        rules = self._email_rules(account)
+        return {str(r.get("id")): _rule_for_email(r, rules) for r in rows}
+
+    def _email_rules(self, account: str) -> list[tuple[Any, str, str]]:
+        """The supplier rules that collect email by themselves, each with the
+        first day its scan reaches (the date chosen when the account was
+        connected, else the rule's first look back from today) and the day
+        it last scanned."""
+        from .pipeline import _parse_iso
+
+        watchers, _ = load_watchers_safe(self.config.watchers_dir)
+        scan_from = _parse_iso(self.db.get_state(f"scan_from:{account}"))
+        return [(w, (scan_from or date.today() - timedelta(days=w.lookback_days or self.config.initial_lookback_days))
+                 .isoformat(), str(self.db.get_state(f"last_scan:{account}:{w.id}") or "")[:10])
+                for w in watchers if not (w.path and w.path.name.startswith("_"))]      # "_name.yaml": a template
 
     def ignored_emails(self) -> set[str]:
         return {key.split(":", 1)[1] for key in self.db.list_state("email_ignored:")}
@@ -3492,6 +3514,21 @@ def _supplier_key_for_names(name: str) -> str:
     "Boots Ltd", "BOOTS" and "Boot" all come to "boot"."""
     key = re.sub(r"[^a-z0-9]+", "", _LEGAL_WORDS.sub(" ", name.lower().replace("&", " ")))
     return key[:-1] if len(key) > 3 and key.endswith("s") else key or name.lower()
+
+
+def _rule_for_email(row: dict[str, Any], rules: list[tuple[Any, str, str]]) -> dict[str, str] | None:
+    """The supplier rule that will collect this line of the Emails list by
+    itself, as {id, name}: it matches, it's new enough for the rule's scan to
+    reach, and that scan hasn't been past it yet (once it has, the email is
+    in Files, or the rule didn't take it and it's yours to check). None
+    otherwise."""
+    day = str(row.get("date") or "")[:10]
+    sender = f"{row.get('from_name', '')} <{row.get('from_address', '')}>"
+    for watcher, start, scanned in rules:
+        if day and start <= day and not (scanned and scanned > day) \
+                and watcher.matches_headers(sender, row.get("subject", ""), row.get("snippet", "")):
+            return {"id": watcher.id, "name": watcher.name}
+    return None
 
 
 def _periods(days: list[str], year_end: str | None) -> dict[str, list[dict[str, str]]]:

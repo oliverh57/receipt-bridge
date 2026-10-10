@@ -737,10 +737,10 @@ function renderArchived() {
   drawSplit(head, list, detail, sel, "", searchHtml("Supplier or amount"));   // the search above the list, as in Files
 }
 
-// ---- Expenses: the claims already saved to FreeAgent, a month at a time ---------------
+// ---- Expenses: the claims already saved to FreeAgent, by period as in Bank Feed ------
 // Nothing to do here: expenses are checked and claimed in Files.
 
-function claimMonth(r) { return (r.date || r.photo_taken || new Date().toISOString()).slice(0, 7); }
+function claimDay(r) { return (r.date || r.photo_taken || new Date().toISOString()).slice(0, 10); }
 
 function claimStatus(r) {
   if (r.status === "filed") return "saved";
@@ -752,17 +752,59 @@ function allClaims() {
   return (state.filedToday || []).filter(matches);
 }
 
-/** The month shown: the one chosen, else the latest with a claim. */
-function xMonth() {
-  if (state.xMonth) return state.xMonth;
-  const months = allClaims().map(claimMonth).sort();
-  return months.length ? months[months.length - 1] : new Date().toISOString().slice(0, 7);
+/** The claims in the period chosen: a month in date order, longer periods
+ * newest first (as Bank Feed). */
+function xRows() {
+  const period = state.xPeriod;
+  const rows = allClaims().filter((r) => inPeriod(claimDay(r), period))
+    .sort((a, b) => (a.date || "9999").localeCompare(b.date || "9999") || a.id - b.id);
+  return isMonthPeriod(period) ? rows : rows.reverse();
 }
 
-function xRows() {
-  const month = xMonth();
-  return allClaims().filter((r) => claimMonth(r) === month)
-    .sort((a, b) => (a.date || "9999").localeCompare(b.date || "9999") || a.id - b.id);
+/** Expenses' period menu, as Bank Feed's: the months with claims (and this
+ * one), newest first, and the accounting years they fall in. (The server's
+ * _periods builds Bank Feed's the same way.) */
+function claimPeriods() {
+  const days = (state.filedToday || []).map(claimDay);
+  const today = new Date().toISOString().slice(0, 10);
+  const months = [...new Set([...days.map((d) => d.slice(0, 7)), today.slice(0, 7)])].sort().reverse();
+  const out = { months: months.map((p) => ({ period: p, label: monthLabel(p) })), years: [] };
+  const yearEnd = (state.snap.freeagent || {}).year_end || "";
+  if (!/^\d{4}-\d{2}-\d{2}/.test(yearEnd) || !days.length) return out;
+  const [, mm, dd] = yearEnd.slice(0, 10).split("-").map(Number);
+  const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const ending = (year) => {                       // 29 February in a short year: the 28th
+    const d = new Date(year, mm - 1, dd, 12);
+    return d.getMonth() === mm - 1 ? d : new Date(year, mm - 1, 28, 12);
+  };
+  const all = [...days, today].sort();
+  let end = ending(Number(yearEnd.slice(0, 4)));
+  while (iso(end) < all[0]) end = ending(end.getFullYear() + 1);
+  for (;;) {
+    const start = ending(end.getFullYear() - 1);
+    start.setDate(start.getDate() + 1);
+    if (iso(start) > all[all.length - 1]) break;
+    const label = start.getFullYear() === end.getFullYear() ? String(start.getFullYear())
+      : `${start.getFullYear()}/${String(end.getFullYear()).slice(2)}`;
+    out.years.unshift({ period: `${iso(start)}..${iso(end)}`, label: `Accounting Year ${label}` });
+    end = ending(end.getFullYear() + 1);
+  }
+  return out;
+}
+
+/** A day ("YYYY-MM-DD") in a period: "all", a month, or "start..end". */
+function inPeriod(day, period) {
+  if (period === "all") return true;
+  if (isMonthPeriod(period)) return day.slice(0, 7) === period;
+  const [start, end] = period.split("..");
+  return day >= start && day <= end;
+}
+
+/** A period in words, after "in": "October 2026", "Accounting Year 2026/27". */
+function periodLabel(period, periods) {
+  if (period === "all") return "all time periods";
+  if (isMonthPeriod(period)) return monthLabel(period);
+  return (periods.years.find((y) => y.period === period) || {}).label || period.replace("..", " to ");
 }
 
 function gbpOf(r) {
@@ -775,7 +817,9 @@ function renderExpenses() {
   const top = content.querySelector(".st-wrap")?.scrollTop || 0;
   const panelTop = content.querySelector(".st-panel")?.scrollTop || 0;
   const oldDoc = content.querySelector(".m-doc .doc:not(.e-frame)");
-  const month = xMonth();
+  const period = state.xPeriod;
+  const periods = claimPeriods();
+  const when = periodLabel(period, periods);
   const rows = xRows();
   if (!rows.some((r) => r.id === m.xsel)) m.xsel = null;
   const sel = rows.find((r) => r.id === m.xsel) || null;
@@ -787,20 +831,18 @@ function renderExpenses() {
       <div class="m-title"><span>Expenses</span>
         <span class="sub">Claims saved to FreeAgent. Add new ones in Files.</span></div>
       ${searchHtml("Supplier or amount")}
-      <div class="st-month">
-        <button class="btn small" data-action="x-month" data-delta="-1" aria-label="Previous month">‹</button>
-        <span>${esc(monthLabel(month))}</span>
-        <button class="btn small" data-action="x-month" data-delta="1" aria-label="Next month">›</button></div>
+      ${periodMenuHtml(periods, period, "x")}
     </header>
     <div class="st-body">
       <section class="st-summary">
-        <div class="main"><div class="big">${rows.length ? `Claimed in ${esc(monthLabel(month))}` : `Nothing claimed in ${esc(monthLabel(month))}`}</div></div>
+        <div class="main"><div class="big">${period === "all" ? (rows.length ? "Claimed" : "Nothing claimed yet")
+          : rows.length ? `Claimed in ${esc(when)}` : `Nothing claimed in ${esc(when)}`}</div></div>
         <div class="money"><span class="muted">Total</span><b>${esc(money(claimed, "GBP"))}${unpriced ? `<span class="muted small"> + ${unpriced} not in pounds</span>` : ""}</b></div>
       </section>
       <div class="st-table-box"><table class="st-table">
         <thead><tr><th scope="col">Date</th><th scope="col">Supplier</th><th scope="col" class="r">Amount</th><th scope="col">Category</th></tr></thead>
         <tbody>${rows.map(claimRow).join("") || `<tr><td colspan="4" class="m-none">${m.query ? `No claims match “${esc(m.query)}”.`
-          : `No expenses claimed in ${esc(monthLabel(month))}.`}</td></tr>`}</tbody>
+          : period === "all" ? "No expenses claimed yet." : `No expenses claimed in ${esc(when)}.`}</td></tr>`}</tbody>
       </table></div>
     </div></div>
     ${sel ? `<aside class="st-panel m-keep" aria-label="Selected expense">${claimPanelHtml(sel)}</aside>` : ""}</div></div>`;
@@ -932,18 +974,22 @@ function isMonthPeriod(period) { return /^\d{4}-\d{2}$/.test(period || ""); }
 /** Bank Feed's header: the period, as FreeAgent's menu (All time periods,
  * by month, by accounting year); a month also has ‹ › beside it. */
 function stViewHtml(st) {
-  const p = st.periods || { months: [], years: [] };
-  const now = state.stPeriod;
+  return periodMenuHtml(st.periods || { months: [], years: [] }, state.stPeriod, "st");
+}
+
+/** The period menu, in Bank Feed and Expenses: `prefix`-period on change,
+ * `prefix`-month on ‹ ›. */
+function periodMenuHtml(p, now, prefix) {
   const option = ({ period, label }) => `<option value="${esc(period)}" ${period === now ? "selected" : ""}>${esc(label)}</option>`;
   const known = [...p.months, ...p.years].some((x) => x.period === now);
   const extra = now !== "all" && !known
     ? option({ period: now, label: isMonthPeriod(now) ? monthLabel(now) : now.replace("..", " to ") }) : "";
-  const menu = `<select class="setting-select st-period" data-action="st-period" aria-label="Period">
+  const menu = `<select class="setting-select st-period" data-action="${prefix}-period" aria-label="Period">
       <option value="all" ${now === "all" ? "selected" : ""}>All time periods</option>${extra}
       ${p.months.length ? `<optgroup label="By month">${p.months.map(option).join("")}</optgroup>` : ""}
       ${p.years.length ? `<optgroup label="By accounting year">${p.years.map(option).join("")}</optgroup>` : ""}</select>`;
   const step = (delta, label, text) => isMonthPeriod(now)
-    ? `<button class="btn small" data-action="st-month" data-delta="${delta}" aria-label="${label}">${text}</button>` : "";
+    ? `<button class="btn small" data-action="${prefix}-month" data-delta="${delta}" aria-label="${label}">${text}</button>` : "";
   return `<div class="st-month">${step(-1, "Previous month", "‹")}${menu}${step(1, "Next month", "›")}</div>`;
 }
 
@@ -1013,6 +1059,9 @@ function renderStatement() {
     ? `<div class="st-bar" role="img" aria-label="${done} done, ${suggested} with a suggested file, ${missing} missing a receipt">
         <span class="seg-done" style="flex:${done}"></span><span class="seg-sugg" style="flex:${suggested}"></span><span class="seg-miss" style="flex:${missing}"></span></div>`
     : "";
+  // what's still to approve: the payments not done, of those shown
+  const unapproved = (st.rows || []).filter((t) => stKind(t) !== "done").reduce((sum, t) => sum - Number(t.amount || 0), 0);
+  const paged = allView && (st.rows || []).length < (st.total_payments || 0);
   const ready = (st.rows || []).map(suggestedFile).filter((r) => r && !fileBlocker(r) && r.group === "ready");
   const busy = state.snap.queued.some((q) => q.startsWith("file:"));
   const linkAll = fa.connected && ready.length
@@ -1034,7 +1083,7 @@ function renderStatement() {
           <div class="muted st-done">${done} of ${payments} done</div>
           ${bar}
         </div>
-        <div class="money"><span class="muted">${allView ? `Out, these ${(st.rows || []).length}` : "Out this month"}</span><b>${esc(money(s.out || 0, "GBP"))}</b></div>
+        <div class="money"><span class="muted">Unapproved transaction total${paged ? ", this page" : ""}</span><b>${esc(money(unapproved, "GBP"))}</b></div>
       </section>
       <div class="st-pills" role="group" aria-label="Show">
         ${pill("all", "All", (st.rows || []).length)}
@@ -1689,9 +1738,10 @@ document.addEventListener("click", async (e) => {
       return act(() => api(`/api/receipts/${id}/update-claim`, { method: "POST" }));
     case "x-close": m.xsel = null; m.xedit = null; return render();
     case "x-month": {
-      const d = new Date(xMonth() + "-15T12:00:00");
+      const d = new Date(state.xPeriod + "-15T12:00:00");
       d.setMonth(d.getMonth() + Number(target.dataset.delta));
-      state.xMonth = d.toISOString().slice(0, 7); m.xsel = null;
+      state.xPeriod = d.toISOString().slice(0, 7); m.xsel = null;
+      setPref("xPeriod", state.xPeriod);
       return render();
     }
     case "m-unfile":
@@ -1883,6 +1933,14 @@ document.addEventListener("change", (e) => {
   if (a === "rb-factor") {
     const v = Number(String(e.target.value).replace(/[£%\s]/g, "").replace(",", "."));
     saveRebill(e.target, { factor: Number.isFinite(v) && v > 0 ? v : null });
+    return;
+  }
+  if (a === "x-period") {
+    state.xPeriod = e.target.value;
+    setPref("xPeriod", state.xPeriod);
+    m.xsel = null;
+    e.target.blur();
+    render();
     return;
   }
   if (a === "st-period") {
