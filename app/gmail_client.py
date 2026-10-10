@@ -1,8 +1,11 @@
-"""Read-only Gmail access.
+"""Gmail access: reading, and labelling the emails whose receipts are filed.
 
-Scope is `gmail.readonly` and nothing else: this app can search and read, and
-is structurally incapable of sending, deleting or labelling anything in the
-mailbox. The refresh token is cached locally so sign-in happens once.
+Reading needs `gmail.readonly`. Labelling needs `gmail.modify`, the narrowest
+scope Google offers that can label a message; the only writes this module
+makes are creating the app's own labels and adding or removing them on a
+message. Accounts connected before labelling keep reading with the scope they
+granted, and are labelled once reconnected. The refresh token is cached
+locally so sign-in happens once.
 """
 
 from __future__ import annotations
@@ -19,6 +22,9 @@ from .email_message import Email
 log = logging.getLogger(__name__)
 
 READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
+MODIFY_SCOPE = "https://www.googleapis.com/auth/gmail.modify"
+# Any of these lets the app label a message.
+LABEL_SCOPES = (MODIFY_SCOPE, "https://mail.google.com/")
 
 # Seconds before any single Gmail API call gives up.
 REQUEST_TIMEOUT = 20
@@ -52,6 +58,7 @@ class GmailClient:
         self.token_file = Path(token_file)
         self.scopes = scopes or [READONLY_SCOPE]
         self._service = None
+        self._labels: dict[str, str] | None = None    # lower-case name → id
         self._sign_in_port: int | None = None
         self._cancelled = False
 
@@ -95,9 +102,11 @@ class GmailClient:
 
         creds = None
         if self.token_file.exists():
-            creds = Credentials.from_authorized_user_file(
-                str(self.token_file), self.scopes
-            )
+            # The scopes the token was granted, not the ones a sign-in would
+            # ask for now: refreshing with a scope that was never granted
+            # fails, which would sign out every account connected before
+            # labelling until it was reconnected.
+            creds = Credentials.from_authorized_user_file(str(self.token_file))
 
         if creds and creds.valid:
             return creds
@@ -206,6 +215,61 @@ class GmailClient:
             self.service().users().getProfile(userId="me").execute()
         )
         return str(profile.get("emailAddress", ""))
+
+    # ---- labelling ------------------------------------------------------
+
+    def _label_map(self) -> dict[str, str]:
+        """Every label in the mailbox, lower-case name → id. Gmail compares
+        label names ignoring case, so this does too."""
+        if self._labels is None:
+            response = self.service().users().labels().list(userId="me").execute()
+            self._labels = {
+                label["name"].lower(): label["id"] for label in response.get("labels", [])
+            }
+        return self._labels
+
+    def label_id(self, name: str) -> str:
+        """The id of the user label `name`, made if it isn't there yet.
+
+        A nested name ("Receipt Bridge/Filed as Expense") has its parent made
+        first, so Gmail shows it inside a "Receipt Bridge" folder.
+        """
+        parent = name.rpartition("/")[0]
+        if parent:
+            self.label_id(parent)
+        labels = self._label_map()
+        if name.lower() in labels:
+            return labels[name.lower()]
+        created = (
+            self.service()
+            .users()
+            .labels()
+            .create(
+                userId="me",
+                body={
+                    "name": name,
+                    "labelListVisibility": "labelShow",
+                    "messageListVisibility": "show",
+                },
+            )
+            .execute()
+        )
+        labels[name.lower()] = created["id"]
+        return created["id"]
+
+    def relabel(self, message_id: str, add: list[str] = (), remove: list[str] = ()) -> None:
+        """Add and take off labels (by name) on one message. Taking off a
+        label that was never made does nothing, and makes nothing."""
+        add_ids = [self.label_id(name) for name in add]
+        labels = self._label_map()
+        remove_ids = [labels[name.lower()] for name in remove if name.lower() in labels]
+        if not add_ids and not remove_ids:
+            return
+        self.service().users().messages().modify(
+            userId="me",
+            id=message_id,
+            body={"addLabelIds": add_ids, "removeLabelIds": remove_ids},
+        ).execute()
 
     # ---- reading --------------------------------------------------------
 

@@ -102,6 +102,168 @@ def test_reports_read_only_scope() -> None:
         )
 
 
+
+def test_only_a_modify_grant_can_label() -> None:
+    """Accounts connected before labelling are read-only and are left
+    unlabelled until reconnected."""
+    with tempfile.TemporaryDirectory() as tmp:
+        store = AccountStore(_config(Path(tmp)))
+        _write_token(store, "old@example.com")
+        _write_token(store, "new@example.com", scopes=[READONLY, MODIFY])
+
+        by_email = {a.email: a for a in store.list()}
+        assert not by_email["old@example.com"].can_label
+        assert by_email["new@example.com"].can_label
+
+
+def test_sign_in_asks_to_label_unless_turned_off() -> None:
+    """An older config.yaml lists read-only alone; sign-in still asks for
+    labelling, unless `label_filed` is off."""
+    from app.config import Config
+
+    old = Config(raw={"gmail": {"scopes": [READONLY]}})
+    assert old.scopes == [READONLY, MODIFY]
+    off = Config(raw={"gmail": {"scopes": [READONLY], "label_filed": False}})
+    assert off.scopes == [READONLY]
+
+
+class _Call:
+    def __init__(self, result):
+        self.result = result
+
+    def execute(self):
+        return self.result
+
+
+class _FakeGmail:
+    """Just the labels and messages.modify parts of the Gmail API."""
+
+    def __init__(self, labels):
+        self.labels_in_mailbox = [{"id": f"L{n}", "name": name} for n, name in enumerate(labels)]
+        self.lists = 0
+        self.modified = []
+
+    def users(self):
+        return self
+
+    def labels(self):
+        return self
+
+    def messages(self):
+        return self
+
+    def list(self, userId):
+        self.lists += 1
+        return _Call({"labels": list(self.labels_in_mailbox)})
+
+    def create(self, userId, body):
+        label = {"id": f"L{len(self.labels_in_mailbox)}", "name": body["name"]}
+        self.labels_in_mailbox.append(label)
+        return _Call(label)
+
+    def modify(self, userId, id, body):
+        self.modified.append((id, body))
+        return _Call({})
+
+
+def _client_with(gmail):
+    from app.gmail_client import GmailClient
+
+    client = GmailClient(Path("/nonexistent/credentials.json"), Path("/nonexistent/token.json"))
+    client._service = gmail
+    return client
+
+
+def test_a_label_is_made_inside_its_parent_once() -> None:
+    gmail = _FakeGmail(["INBOX"])
+    client = _client_with(gmail)
+    client.relabel("m1", add=["Receipt Bridge/Filed as Expense"])
+    client.relabel("m2", add=["receipt bridge/filed as expense"])   # Gmail ignores case
+
+    names = [label["name"] for label in gmail.labels_in_mailbox]
+    assert names == ["INBOX", "Receipt Bridge", "Receipt Bridge/Filed as Expense"]
+    assert gmail.lists == 1, "the mailbox's labels are listed once per client"
+    assert gmail.modified == [("m1", {"addLabelIds": ["L2"], "removeLabelIds": []}),
+                              ("m2", {"addLabelIds": ["L2"], "removeLabelIds": []})]
+
+
+def test_taking_off_a_label_never_made_does_nothing() -> None:
+    gmail = _FakeGmail(["INBOX"])
+    _client_with(gmail).relabel("m1", remove=["Receipt Bridge/Filed as Expense"])
+    assert gmail.modified == []
+    assert len(gmail.labels_in_mailbox) == 1
+
+
+def _labelling_service(tmp: Path, scopes):
+    """Enough of ReceiptService for _label_emails, with one fake mailbox."""
+    from app.config import Config
+
+    db = Database(tmp / "receipts.sqlite3")
+    store = AccountStore(_config(tmp))
+    _write_token(store, "me@example.com", scopes=scopes)
+    gmail = _FakeGmail([])
+    notes = []
+    service = SimpleNamespace(config=Config(raw={}), accounts=store, db=db, _note=notes.append)
+
+    def client(self, credentials_file, scopes):
+        return _client_with(gmail)
+
+    from app.accounts import Account
+    original = Account.client
+    Account.client = client
+    return service, db, gmail, notes, lambda: setattr(Account, "client", original)
+
+
+def test_a_filed_email_is_labelled_by_how_it_was_filed() -> None:
+    from app.db import FILED, PENDING
+    from app.service import BANK_LABEL, EXPENSE_LABEL, ReceiptService
+
+    with tempfile.TemporaryDirectory() as tmp:
+        service, db, gmail, notes, restore = _labelling_service(Path(tmp), [READONLY, MODIFY])
+        try:
+            base = {"watcher_id": "email", "vendor": "Shop", "filename": "r.pdf",
+                    "total": 5.0, "currency": "GBP", "account": "me@example.com"}
+            expense = db.insert_receipt({**base, "gmail_message_id": "m1"})
+            bank = db.insert_receipt({**base, "gmail_message_id": "m2"})
+            photo = db.insert_receipt({**base, "source": "photo", "source_id": "sha256:x"})
+            db.update_receipt(expense, {"status": FILED, "freeagent_json": '{"kind": "expense"}'})
+            db.update_receipt(bank, {"status": FILED, "freeagent_json": '{"kind": "explanation"}'})
+
+            ReceiptService._label_emails(service, [expense, bank, photo])
+            ids = {label["name"]: label["id"] for label in gmail.labels_in_mailbox}
+            assert gmail.modified == [
+                ("m1", {"addLabelIds": [ids[EXPENSE_LABEL]], "removeLabelIds": []}),
+                ("m2", {"addLabelIds": [ids[BANK_LABEL]], "removeLabelIds": [ids[EXPENSE_LABEL]]}),
+            ]
+
+            # Undo: back in To file, so the label comes off
+            gmail.modified.clear()
+            db.update_receipt(expense, {"status": PENDING})
+            ReceiptService._label_emails(service, [expense])
+            assert gmail.modified == [
+                ("m1", {"addLabelIds": [], "removeLabelIds": [ids[EXPENSE_LABEL], ids[BANK_LABEL]]}),
+            ]
+            assert notes == []
+        finally:
+            restore()
+
+
+def test_a_read_only_mailbox_is_not_labelled() -> None:
+    from app.db import FILED
+    from app.service import ReceiptService
+
+    with tempfile.TemporaryDirectory() as tmp:
+        service, db, gmail, notes, restore = _labelling_service(Path(tmp), [READONLY])
+        try:
+            receipt = db.insert_receipt({"watcher_id": "email", "vendor": "Shop", "filename": "r.pdf",
+                                         "gmail_message_id": "m1", "account": "me@example.com"})
+            db.update_receipt(receipt, {"status": FILED, "freeagent_json": '{"kind": "expense"}'})
+            ReceiptService._label_emails(service, [receipt])
+            assert gmail.modified == [] and gmail.lists == 0
+        finally:
+            restore()
+
+
 def test_flags_a_token_with_no_refresh_token() -> None:
     """Without one the account silently stops working within the hour."""
     with tempfile.TemporaryDirectory() as tmp:

@@ -30,7 +30,7 @@ on one background worker; poll `/api/state` and watch `version`,
 | `outcome` | last finished job: `{kind, ok, message, at, found}` |
 | `counts` | `{pending, exported, ignored, failed, needs, missing, files}` (`files` = everything in Files, i.e. not saved to FreeAgent yet, expenses included; `missing` = payments this month without a receipt, first chosen account) |
 | `totals.pending` | `{currency: sum}` |
-| `accounts[]` | Gmail: `{email, state, detail, checked_at, read_only, receipts, last_scan_at}` |
+| `accounts[]` | Gmail: `{email, state, detail, checked_at, read_only, can_label, receipts, last_scan_at}` |
 | `freeagent` | see below |
 | `photo_inbox` | `{path, exists, has_subfolders, is_default, archive, archive_is_default, waiting_bytes, too_big}` |
 | `auto_scan`, `theme`, `export_dir`, `has_credentials`, `connecting`, `notifications`, `last_log` | as before |

@@ -145,8 +145,11 @@ with `Bank` and `Expense` inside: iCloud Drive, or any folder you pick),
 optionally **Connect Gmail**, then scan a QR code to add the iPhone
 Shortcut (its link is `SHORTCUT_URL` in `app/setup_guide.py`).
 **Set up later** brings it back next launch; **Settings → General → Setup
-guide** opens it any time. Gmail access is read-only: the app cannot send,
-delete or change mail.
+guide** opens it any time. The app reads Gmail to find receipts, and once a
+receipt is filed it labels the email **Receipt Bridge/Filed as Expense** or
+**Receipt Bridge/Filed as bank transaction** (Undo takes the label off). It
+never sends or deletes mail. Set `gmail.label_filed: false` in `config.yaml`
+to keep Gmail read-only.
 
 The app runs this folder's code, so after changing code just quit and reopen.
 Re-run the installer only if you move the folder. To start the app when

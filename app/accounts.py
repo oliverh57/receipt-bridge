@@ -9,8 +9,9 @@ belongs to. Each is a long-lived key to a mailbox, so they are written
 owner-only, and signing out revokes the grant with Google rather than merely
 deleting the local copy.
 
-Every account is read-only (`gmail.readonly`). Nothing here can send, delete
-or label anything.
+Accounts are signed in with `gmail.readonly` to read and `gmail.modify` to
+label the emails whose receipts are filed. One connected before labelling
+keeps working read-only until it is reconnected.
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .gmail_client import READONLY_SCOPE, GmailAuthError, GmailClient
+from .gmail_client import LABEL_SCOPES, MODIFY_SCOPE, READONLY_SCOPE, GmailAuthError, GmailClient
 
 log = logging.getLogger(__name__)
 
@@ -62,6 +63,11 @@ class Account:
     def read_only(self) -> bool:
         """True when the grant cannot modify the mailbox."""
         return all(scope.endswith("gmail.readonly") for scope in self.scopes)
+
+    @property
+    def can_label(self) -> bool:
+        """True when filed emails can be labelled in this mailbox."""
+        return any(scope in LABEL_SCOPES for scope in self.scopes)
 
     @property
     def has_refresh_token(self) -> bool:
@@ -250,4 +256,4 @@ def adopt_legacy_scan_state(db, store: AccountStore) -> int:
 
 
 def default_scopes() -> list[str]:
-    return [READONLY_SCOPE]
+    return [READONLY_SCOPE, MODIFY_SCOPE]

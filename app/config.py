@@ -82,9 +82,21 @@ class Config:
 
     @property
     def scopes(self) -> list[str]:
-        return list(
+        """What a Gmail sign-in asks for. Labelling filed emails needs
+        `gmail.modify`, which is added here because a config.yaml from before
+        labelling lists read-only alone, and an update never replaces it."""
+        scopes = list(
             self.gmail.get("scopes", ["https://www.googleapis.com/auth/gmail.readonly"])
         )
+        modify = "https://www.googleapis.com/auth/gmail.modify"
+        if self.label_filed and modify not in scopes:
+            scopes.append(modify)
+        return scopes
+
+    @property
+    def label_filed(self) -> bool:
+        """Label an email in Gmail once its receipt is filed in FreeAgent."""
+        return bool(self.gmail.get("label_filed", True))
 
     @property
     def initial_lookback_days(self) -> int:

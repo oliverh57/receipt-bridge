@@ -86,6 +86,9 @@ CATEGORY_GUESSES = 20
 FREEAGENT_HISTORY_DAYS = 730       # how far back the first read of an account goes (two years)
 BACKUPS_KEPT = 7
 UPDATE_CHECK_INTERVAL = timedelta(days=1)   # GitHub is asked at most this often unprompted
+# The Gmail label a filed receipt's email gets, by how it was filed
+EXPENSE_LABEL = "Receipt Bridge/Filed as Expense"
+BANK_LABEL = "Receipt Bridge/Filed as bank transaction"
 
 
 def _freeagent_failure(exc: Exception) -> tuple[str, str]:
@@ -1382,6 +1385,7 @@ class ReceiptService:
                     self.db.update_receipt(receipt_id, {"freeagent_json": json.dumps(
                         {"state": "problem", "message": str(exc), "at": _now()})})
         if done:
+            self._label_emails([r["id"] for r in results if r["ok"]])
             self.sync_freeagent()                 # the payments just explained
         with self._lock:
             self._file_results = {"at": _now(), "results": results}
@@ -1389,6 +1393,37 @@ class ReceiptService:
         if failed:
             message += f" · {failed} need attention"
         self._finish("file", not failed, message, found=done)
+
+    def _label_emails(self, receipt_ids: list[int]) -> None:
+        """Label each receipt's email in Gmail with how it was filed, or take
+        the label off once it's back in To file. Labelling never stops
+        filing: a mailbox that can't be labelled is skipped, and a failure is
+        only noted."""
+        if not self.config.label_filed:
+            return
+        accounts = self.accounts.list()
+        clients: dict[str, Any] = {}            # one per mailbox, so labels are listed once
+        for receipt_id in receipt_ids:
+            row = self.db.get_receipt(receipt_id)
+            if row is None or not row["gmail_message_id"]:
+                continue                        # a photo
+            # rows from before multi-account have no account: only one mailbox can be theirs
+            account = (self.accounts.get(row["account"]) if row["account"]
+                       else accounts[0] if len(accounts) == 1 else None)
+            if account is None or not account.can_label:
+                continue
+            if account.email not in clients:
+                clients[account.email] = account.client(self.config.credentials_file, self.config.scopes)
+            add = []
+            if row["status"] == FILED:
+                kind = json.loads(row["freeagent_json"] or "{}").get("kind")
+                add = [EXPENSE_LABEL if kind == "expense" else BANK_LABEL]
+            remove = [label for label in (EXPENSE_LABEL, BANK_LABEL) if label not in add]
+            try:
+                clients[account.email].relabel(row["gmail_message_id"], add, remove)
+            except Exception as exc:
+                log.warning("couldn't label the email of receipt %s: %s", receipt_id, exc)
+                self._note(f"{row['vendor'] or 'Receipt'}: couldn't label its email in Gmail ({str(exc)[:120]})")
 
     def unfile_many(self, receipt_ids: list[int]) -> bool:
         """Undo a whole File all ("Undo all 4")."""
@@ -1506,7 +1541,9 @@ class ReceiptService:
             self._finish("file", False, "Connect FreeAgent first")
             return
         try:
-            self._finish("file", True, unfile(client, self.db, receipt_id))
+            line = unfile(client, self.db, receipt_id)
+            self._label_emails([receipt_id])
+            self._finish("file", True, line)
             self.sync_freeagent()
         except (FilingError, FreeAgentError) as exc:
             self._finish("file", False, f"Couldn't unfile: {exc}")
@@ -2235,6 +2272,7 @@ class ReceiptService:
                 except (FilingError, FreeAgentError) as exc:
                     self._finish("file", False, f"Not approved: {exc}")
                     return
+                self._label_emails([receipt_id])
                 self._run_freeagent_sync()
             self._run_file([receipt_id])      # replaces a guess (see _replace_guess)
             return
@@ -3015,6 +3053,7 @@ class ReceiptService:
                     "detail": h.detail,
                     "checked_at": h.checked_at,
                     "read_only": account.read_only,
+                    "can_label": account.can_label,
                     "receipts": self.db.count_for_account(account.email),
                     "last_scan_at": self.db.get_state(f"last_scan_at:{account.email}"),
                 }
@@ -3054,6 +3093,7 @@ class ReceiptService:
             "theme": self.theme,
             "export_dir": str(self.config.export_dir),
             "has_credentials": self.config.credentials_file.exists(),
+            "label_filed": self.config.label_filed,
             # the app keys come in a licence file dropped on the app (app/licence.py)
             "needs_licence": not (self.config.credentials_file.exists()
                                   and self.config.freeagent_credentials_file.exists()),

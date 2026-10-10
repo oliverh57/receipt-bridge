@@ -18,9 +18,15 @@ gmail:
   credentials_file: credentials.json
   # Where the refresh token is cached after the first sign-in.
   token_file: data/token.json
-  # Only ever request read-only access.
+  # Read-only access to find receipts. When label_filed is on, sign-in also
+  # asks for gmail.modify, the narrowest access Google offers that can label
+  # an email.
   scopes:
     - https://www.googleapis.com/auth/gmail.readonly
+  # Once a receipt is filed in FreeAgent, label its email in Gmail
+  # "Receipt Bridge/Filed as Expense" or "Receipt Bridge/Filed as bank
+  # transaction" (taken off again on Undo).
+  label_filed: true
   # How far back a scan looks when there is no previous scan to resume from.
   initial_lookback_days: 90
   # Hard cap on messages pulled per watcher per scan.

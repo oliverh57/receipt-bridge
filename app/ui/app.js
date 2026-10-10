@@ -985,11 +985,13 @@ function gmailCard(s) {
       : a.state === "unknown" ? `<span class="pill unknown">Checking…</span>`
       : `<span class="pill bad">${a.state === "expired" ? "Needs reconnecting" : "Problem"}</span>`;
     const broken = a.state !== "ok" && a.state !== "unknown";
+    // connected before labelling: reading still works, labelling needs a new sign-in
+    const unlabelled = s.label_filed && !a.can_label && !broken;
     return `<div class="card-row">
         <div class="grow"><div class="selectable">${esc(a.email)}</div>
-          <div class="sub">${pill} · ${a.receipts} receipt${a.receipts === 1 ? "" : "s"}${a.read_only ? "" : " · <b>has write access</b>"}</div>
+          <div class="sub">${pill} · ${a.receipts} receipt${a.receipts === 1 ? "" : "s"}${unlabelled ? " · Reconnect to label filed emails" : ""}</div>
           ${a.state === "expired" ? `<div class="sub">Expires weekly? Set your Google Cloud consent screen to <b>In production</b>.</div>` : ""}</div>
-        ${broken ? `<button class="btn small" data-action="connect" ${s.connecting ? "disabled" : ""}>Reconnect</button>` : ""}
+        ${broken || unlabelled ? `<button class="btn small" data-action="connect" ${s.connecting ? "disabled" : ""}>Reconnect</button>` : ""}
         <button class="btn small danger" data-action="disconnect" data-email="${esc(a.email)}">Sign out</button>
       </div>`;
   }).join("");
@@ -1003,7 +1005,8 @@ function gmailCard(s) {
         ${state.gmailAsk && !s.connecting ? gmailAskHtml() : ""}
         ${s.has_credentials ? "" : licenceDrop()}
         ${accountRows || `<div class="card-note">No account connected.</div>`}
-        <div class="card-note">Opens in your browser. Read-only.</div>
+        <div class="card-note">Opens in your browser. Reads your email to find receipts${s.label_filed
+          ? `, and labels an email <b>Receipt Bridge/Filed as Expense</b> or <b>Filed as bank transaction</b> once its receipt is filed` : ""}. Never sends or deletes email.</div>
       </div>`;
 }
 
@@ -1166,7 +1169,7 @@ function aboutHtml() {
     <div class="card">
       <details class="about-doc"><summary>Your data</summary>
         <div class="about-body">Receipts and the database stay on this Mac, in <code class="selectable">${esc(a.data_dir)}</code>.
-          Receipt Bridge only connects to Google (read-only), FreeAgent, suppliers' websites and GitHub (updates).</div></details>
+          Receipt Bridge only connects to Google (to read and label email), FreeAgent, suppliers' websites and GitHub (updates).</div></details>
     </div>
 
     <div class="card">
@@ -1308,7 +1311,7 @@ function setupEmailHtml(s) {
       <button class="btn quiet small" data-action="connect-stop">Cancel</button></div>`;
   else if (state.gmailAsk) body += gmailAskHtml();
   return `<h3>Find receipts in Gmail <span class="optional">Optional</span></h3>
-    <p>Read-only: Receipt Bridge can't send, change or delete email.</p>${body}`;
+    <p>Receipt Bridge reads your email to find receipts, and labels the ones you file. It never sends or deletes email.</p>${body}`;
 }
 
 function setupIphoneHtml(s) {

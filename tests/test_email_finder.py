@@ -81,6 +81,7 @@ class FakeClient:
 class FakeAccount:
     email = "me@example.test"
     read_only = True
+    can_label = False
 
     def __init__(self, client: FakeClient):
         self._client = client
