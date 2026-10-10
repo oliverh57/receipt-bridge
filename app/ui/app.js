@@ -44,6 +44,7 @@ const state = {
   previewId: null,        // receipt whose PDF is currently in the iframe
   settingsTab: "general",    // Settings section: general | freeagent | email | about
   pollTimer: null,
+  labelAskLater: false,   // "Not now" on asking to reconnect Gmail for labels, until the app reopens
 };
 
 // ---- helpers -----------------------------------------------------------
@@ -382,10 +383,13 @@ function renderStatus() {
 function renderBanner() {
   // FreeAgent is what the app is for; email is a separate, optional tool
   // (Settings → Email), so it only speaks up when a connected
-  // account needs reconnecting.
+  // account needs reconnecting, or (since 1.2.12) when one was connected
+  // read-only and needs signing in again to label filed emails.
   const { needs_attention, connecting } = state.snap;
   const fa = state.snap.freeagent || {};
   const el = $("#banner");
+  const unlabelled = state.snap.label_filed && !state.labelAskLater
+    && state.snap.accounts.find((a) => a.state === "ok" && !a.can_label);
   if (fa.has_credentials && !fa.connected) {
     // signed out but with data from before (Disconnect clears it): expired
     const expired = /expired|refused/i.test(fa.error || "") || !!fa.last_sync;
@@ -397,7 +401,14 @@ function renderBanner() {
   } else if (needs_attention.length) {
     const a = needs_attention[0];
     el.innerHTML = `<div class="banner"><div class="text"><b>${esc(a.email)} needs reconnecting.</b> Email receipts aren't being checked.</div>
-      ${connecting ? `<button class="btn small" data-action="connect-stop">Cancel sign-in</button>` : `<button class="btn small" data-action="connect">Reconnect</button>`}</div>`;
+      ${connecting ? `<button class="btn small" data-action="connect-stop">Cancel sign-in</button>` : `<button class="btn small" data-action="reconnect">Reconnect</button>`}</div>`;
+  } else if (unlabelled) {
+    el.innerHTML = `<div class="banner info"><div class="text"><b>Reconnect ${esc(unlabelled.email)} to label filed emails.</b>
+      Receipt Bridge now labels an email in Gmail once its receipt is filed, which needs one more permission from Google.
+      It still never sends or deletes email.</div>
+      ${connecting ? `<button class="btn small" data-action="connect-stop">Cancel sign-in</button>`
+        : `<button class="btn quiet small" data-action="label-later">Not now</button>
+           <button class="btn small" data-action="reconnect">Reconnect</button>`}</div>`;
   } else if (state.snap.update?.can_install) {
     const u = state.snap.update;
     el.innerHTML = `<div class="banner info"><div class="text"><b>Version ${esc(u.latest.replace(/^v/i, ""))} of Receipt Bridge is ${u.restart_needed ? "installed" : "available"}.</b>
@@ -991,7 +1002,7 @@ function gmailCard(s) {
         <div class="grow"><div class="selectable">${esc(a.email)}</div>
           <div class="sub">${pill} · ${a.receipts} receipt${a.receipts === 1 ? "" : "s"}${unlabelled ? " · Reconnect to label filed emails" : ""}</div>
           ${a.state === "expired" ? `<div class="sub">Expires weekly? Set your Google Cloud consent screen to <b>In production</b>.</div>` : ""}</div>
-        ${broken || unlabelled ? `<button class="btn small" data-action="connect" ${s.connecting ? "disabled" : ""}>Reconnect</button>` : ""}
+        ${broken || unlabelled ? `<button class="btn small" data-action="reconnect" ${s.connecting ? "disabled" : ""}>Reconnect</button>` : ""}
         <button class="btn small danger" data-action="disconnect" data-email="${esc(a.email)}">Sign out</button>
       </div>`;
   }).join("");
@@ -1490,6 +1501,16 @@ document.addEventListener("click", (e) => {
         toast("Finish signing in in your browser.", 9000);
       });
     }
+    case "reconnect":
+      // the same mailbox again: no start date, so the one chosen when it was
+      // first connected stays
+      return act(async () => {
+        await api("/api/accounts/connect", { method: "POST", body: {} });
+        toast("Finish signing in in your browser. Choose the same account and allow every permission.", 9000);
+      });
+    case "label-later":
+      state.labelAskLater = true;
+      return renderBanner();
     case "theme":
       state.snap.theme = target.dataset.theme;
       render();
