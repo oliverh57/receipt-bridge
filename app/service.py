@@ -219,6 +219,7 @@ class ReceiptService:
         setup_guide.write_shortcut_settings(self.photo_inbox)
         self.check_accounts()
         self.reread_partly_read_emails()
+        self.fill_totals_from_names()
         self.backfill_layouts()
         self.backfill_tidy()
 
@@ -1549,6 +1550,30 @@ class ReceiptService:
         for receipt_id in ids:
             self.retry(receipt_id, quiet=True)
         return len(ids)
+
+    def fill_totals_from_names(self) -> int:
+        """Photos waiting in Files with no total, whose supplier name carries
+        a price in pounds ("Hackney Central to North Greenwich £2.30"): that
+        price becomes the total, as it would for a new photo. Only the total
+        is filled; nothing typed by hand is changed."""
+        from .photo_inbox import FROM_NAME, price_in_name, total_from_name_flags
+        from .receipt_text import UNCONFIRMED
+
+        filled = 0
+        for row in self.db.list_receipts(PENDING):
+            price = price_in_name(row["vendor"])
+            if row["source"] != "photo" or row["total"] is not None or price is None \
+                    or row["currency"] not in (None, "", "GBP"):
+                continue
+            extra = json.loads(row["extra_json"] or "{}") if row["extra_json"] else {}
+            extra["flags"] = total_from_name_flags(extra.get("flags") or [])
+            extra["total_note"] = FROM_NAME
+            self.db.update_receipt(row["id"], {"total": float(price), "currency": "GBP",
+                                               "total_status": UNCONFIRMED, "extra_json": extra})
+            filled += 1
+        if filled:
+            self._bump()
+        return filled
 
     def _reread_photo(self, receipt_id: int) -> None:
         self._set_activity(busy=True, kind="retry", label="Reading the photo again", started_at=_now())

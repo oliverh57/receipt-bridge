@@ -29,7 +29,8 @@ import logging
 import shutil
 import subprocess
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from decimal import Decimal
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Callable
@@ -37,7 +38,7 @@ from typing import Callable
 from .config import Config
 from .db import FAILED, PENDING, Database
 from .receipt_reader import PhotoReading, ReaderError, choose_copy, read_file, using_copy
-from .receipt_text import CONFIRMED, ReceiptText, same_purchase
+from .receipt_text import CONFIRMED, UNCONFIRMED, ReceiptText, same_purchase
 
 log = logging.getLogger(__name__)
 
@@ -50,6 +51,8 @@ SETTLE_SECONDS = 10
 OLDEST_USEFUL = timedelta(days=548)        # ~18 months (PLAN.md §5.3)
 # Any amount with pence ("3.40", "12,50"): every receipt has at least one.
 _AMOUNT = re.compile(r"\d[.,]\d{2}(?!\d)")
+# "Hackney Central to North Greenwich £2.30": a price in the supplier name
+_POUNDS_IN_NAME = re.compile(r"£\s?(\d{1,5}(?:,\d{3})*\.\d{2})(?!\d)")
 UNKNOWN_SUPPLIER = "Unknown supplier"
 NOT_A_RECEIPT = ("This doesn't look like a receipt: no amounts, date or VAT number were found. "
                  "Ignore it, or type the details in from the photo.")
@@ -162,6 +165,8 @@ def assess(text: ReceiptText, photo_taken: datetime | None, paid_by: str | None,
             flags.append(f"Several totals ({amounts}). A split bill? Enter what you paid.")
         else:
             flags.append("Total couldn't be read. Type it in from the photo.")
+    elif text.total_note == FROM_NAME:
+        flags.extend(total_from_name_flags([])[:1])
     elif text.total_status != CONFIRMED:
         flags.append("Total not confirmed by a payment line. Check it against the photo.")
 
@@ -237,6 +242,36 @@ def _supplier(text: ReceiptText, reading: PhotoReading, db: Database) -> tuple[s
     return UNKNOWN_SUPPLIER, "none"
 
 
+FROM_NAME = "from the supplier name"
+
+
+def _total_from_name(text: ReceiptText, supplier: str) -> ReceiptText:
+    """No total read, but the supplier name carries one price in pounds
+    (the Mac names a ticket "Hackney Central to North Greenwich £2.30"):
+    that is the total, unconfirmed. A total read from the receipt, or a
+    receipt in another currency, is left alone."""
+    price = price_in_name(supplier)
+    if text.total is not None or text.currency not in (None, "GBP") or price is None:
+        return text
+    return replace(text, total=price, currency="GBP", currency_hint="",
+                   total_status=UNCONFIRMED, total_note=FROM_NAME)
+
+
+def price_in_name(name: str | None) -> Decimal | None:
+    """The one price in pounds a supplier name carries, else None (none,
+    or two to choose between)."""
+    prices = {m.replace(",", "") for m in _POUNDS_IN_NAME.findall(name or "")}
+    return Decimal(prices.pop()) if len(prices) == 1 else None
+
+
+def total_from_name_flags(flags: list[str]) -> list[str]:
+    """A staged photo's flags once its total is taken from its name: the
+    total and currency are no longer missing."""
+    kept = [f for f in flags if not f.startswith(("Total couldn't be read", "Several totals", "Dollars. Which currency",
+                                                   "No currency shown"))]
+    return ["Total taken from the £ price in the supplier name. Check it against the photo.", *kept]
+
+
 def _filename(when: date | None, supplier: str, currency: str | None,
               total, suffix: str) -> str:
     parts = [when.isoformat() if when else "undated", supplier]
@@ -253,6 +288,7 @@ def receipt_fields(reading: PhotoReading, *, paid_by: str | None, filename: str,
     text = reading.text
     taken = _photo_date(reading, filename)
     supplier, supplier_source = _supplier(text, reading, db)
+    text = _total_from_name(text, supplier)
     when, flags = assess(text, taken, paid_by, supplier_source)
     receipt_like = looks_like_receipt(text, reading.rows)
     currency = text.currency

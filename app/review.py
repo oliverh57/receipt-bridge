@@ -28,6 +28,7 @@ FLAG_REASONS = (
     ("Several totals", "Split bill?"),
     ("Total couldn't be read", "No total"),
     ("Total not confirmed", "Check the total"),
+    ("Total taken from", "Check the total"),
     ("Which currency", "Which currency?"),
     ("No date found", "No date"),
     ("No date on the receipt", "No date"),

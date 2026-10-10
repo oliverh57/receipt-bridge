@@ -197,6 +197,52 @@ def test_a_photo_that_is_not_a_receipt_gets_no_made_up_name_or_currency() -> Non
         assert len(fields["extra_json"]["flags"]) == 1
 
 
+def test_a_price_in_the_supplier_name_is_the_total_when_none_was_read() -> None:
+    from app.photo_inbox import receipt_fields
+    from app.receipt_reader import PhotoReading
+    from app.receipt_text import UNCONFIRMED, read_rows
+    rows = ["Journey history", "Wed 8 October 2026", "Hackney Central to North Greenwich", "07:42 - 08:15"]
+    config, db, _inbox, tmp = make_env()
+    with tmp:
+        def fields(name: str, given: list[str] = rows) -> dict:
+            return receipt_fields(PhotoReading(text=read_rows(given), rows=given, supplier_guess=name),
+                                  paid_by="business", filename="IMG_1.jpg", db=db)
+        assert read_rows(rows).total is None
+        got = fields("Hackney Central to North Greenwich £2.30")
+        assert (got["total"], got["currency"], got["total_status"]) == (2.30, "GBP", UNCONFIRMED), got
+        assert "Total taken from the £ price in the supplier name. Check it against the photo." in got["extra_json"]["flags"]
+        assert not any("couldn't be read" in f for f in got["extra_json"]["flags"])
+        assert fields("Hackney Central")["total"] is None, "no price in the name"
+        assert fields("Return £2.30 or £4.60")["total"] is None, "two prices: which one?"
+        paid = rows + ["TOTAL £3.10", "VISA £3.10"]
+        assert fields("Hackney Central to North Greenwich £2.30", paid)["total"] == 3.10, "a total read wins"
+
+
+def test_photos_already_in_files_get_the_price_in_their_name_as_their_total() -> None:
+    from app.service import ReceiptService
+    config, db, _inbox, tmp = make_env()
+    with tmp:
+        def photo(vendor: str, **more) -> int:
+            return db.insert_receipt({"watcher_id": "photo", "source": "photo", "vendor": vendor,
+                                      "created_at": "2026-10-08T08:00:00+00:00", "total_status": "missing",
+                                      "extra_json": json.dumps({"flags": ["Total couldn't be read. Type it in from the photo.",
+                                                                          "No currency shown. Which currency?",
+                                                                          "Supplier name guessed by the Mac. Check it."]}),
+                                      **more})
+        ticket = photo("Hackney Central to North Greenwich £2.30")
+        typed = photo("Hackney Central to Dollis Hill £2.50", total=2.6, currency="GBP")
+        plain = photo("Hackney Central")
+        service = ReceiptService(config)
+        assert service.fill_totals_from_names() == 1
+        row = db.get_receipt(ticket)
+        assert (row["total"], row["currency"], row["total_status"]) == (2.3, "GBP", "unconfirmed")
+        assert extra(db, ticket)["flags"] == ["Total taken from the £ price in the supplier name. Check it against the photo.",
+                                              "Supplier name guessed by the Mac. Check it."]
+        assert db.get_receipt(typed)["total"] == 2.6, "a total already there stays"
+        assert db.get_receipt(plain)["total"] is None
+        assert service.fill_totals_from_names() == 0, "once"
+
+
 def test_every_real_receipt_looks_like_one() -> None:
     from app.photo_inbox import looks_like_receipt
     from app.receipt_text import read_rows
