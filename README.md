@@ -42,7 +42,7 @@ New versions arrive inside the app (**Update now**).
    euros*. Below are **Ready to file**, **Waiting for bank** and **Filed
    today**, folded away. The selected receipt shows its photo or PDF, the
    bank payment it pairs with, and what it will be filed as. A category
-   tagged *Guess* was suggested on this Mac; change it if it's wrong.
+   shown in yellow was suggested on this Mac; change it if it's wrong.
    Keys: ↑↓ move, ⏎ file, E expense / business, ⌫ ignore, C change payment.
    Every action has **Undo**.
 3. **Linking.** You approve every link: **Link** in Statement (⏎), or

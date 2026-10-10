@@ -96,7 +96,7 @@ screen shows, worked out in `app/review.py`:
 | `waiting_until` | Waiting for bank: the date it moves to Needs you |
 | `will_file` | `{type, category, vat, attachment}`, e.g. `{"Bank explanation", "Travel", "£0.55 (20%)", "Photo"}`; `vat` may read "£0.52 (20%) + £0 (0%)", "Reverse charge", "£0 (foreign VAT)", "… + £6.89 tip (0%)" |
 | `ai_guess.supplier` | the supplier name was guessed: tag it "Guess" |
-| `ai_guess.category` | `category` is a suggestion made on this Mac (only ever one of the FreeAgent expense categories): tag it "Guess". Choosing a category replaces it; filing with it keeps it for the supplier. Never filed automatically |
+| `ai_guess.category` | `category` is a suggestion made on this Mac (only ever one of the FreeAgent expense categories): show it in yellow, like an unchecked field. Choosing a category replaces it; filing with it keeps it for the supplier. Never filed automatically |
 | `photo_taken` | the day the photo was taken (photos), for "Use photo date" when the receipt shows none (→ `fields` `purchased_on`) |
 | `page_count` | a PDF receipt rendered as page images (`GET /api/receipts/{id}/page/{n}?t=…`, n from 1), so its highlights can be drawn; 0 until the background read has run |
 | `highlights[]` | photos and PDFs (`page` from 0): `{field: supplier|total|date|vat_number, label, page, box: [x, y, w, h]}` as fractions of the upright photo, worked out from the current values (a correction moves its box) |

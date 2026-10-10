@@ -473,7 +473,9 @@ legend { font-size: 12px; font-weight: 600; margin-bottom: 4px; padding: 0; }
 .m-hints { display: flex; flex-direction: column; gap: 3px; margin-top: -4px; font-size: 12px; color: var(--warn); }
 .m-hints > div { display: flex; align-items: flex-start; gap: 6px; }
 .m-hints svg { flex: 0 0 auto; width: 12px; height: 12px; margin-top: 2px; }
-.m-kv .edit-input.warn { border-color: color-mix(in srgb, var(--warn) 55%, var(--line)); }
+.m-kv .edit-input.warn, .m-kv select.warn { border-color: color-mix(in srgb, var(--warn) 55%, var(--line)); }
+.m-kv select.warn { color: var(--warn); }
+.m-kv select.warn option, .m-kv select.warn optgroup { color: var(--ink); }
 .m-iss-ctl { margin-top: 10px; }
 .m-opts { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
 .m-opt { display: flex; align-items: center; gap: 10px; padding: 8px 10px 8px 12px; border-radius: 8px;

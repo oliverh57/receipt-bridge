@@ -383,10 +383,12 @@ function categoryName(url) { return (state.categories || []).find((c) => c.url =
 
 function categoryHtml(r, editable) {
   if (!editable) return esc(r.will_file?.category || "—");
-  return `<span class="pair"><select data-action="set-category" data-id="${r.id}" aria-label="Category">${categoryOptions(r.category)}</select>${
+  // A suggested category is shown like any other unchecked field: in yellow
+  const guess = !r.category_from_freeagent && !(r.freeagent_category && r.payment?.explained) && r.ai_guess?.category;
+  return `<span class="pair"><select data-action="set-category" data-id="${r.id}" aria-label="Category"${
+    guess ? ` class="warn" title="Suggested from the supplier and receipt. Change it if it's wrong."` : ""}>${categoryOptions(r.category)}</select>${
     r.category_from_freeagent ? ""
-    : r.freeagent_category && r.payment?.explained ? `<span class="ai" title="Saving updates FreeAgent's category. Undo restores it.">Overrides FreeAgent</span>`
-    : r.ai_guess?.category ? `<span class="ai" title="Suggested from the supplier and receipt. Change it if it's wrong.">Guess</span>` : ""}</span>`;
+    : r.freeagent_category && r.payment?.explained ? `<span class="ai" title="Saving updates FreeAgent's category. Undo restores it.">Overrides FreeAgent</span>` : ""}</span>`;
 }
 
 function willFileHtml(r, type) {
