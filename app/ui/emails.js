@@ -148,7 +148,11 @@ async function openEmail(id, account = "") {
       currency: d.currency || "GBP", vat: d.vat == null ? "" : d.vat.toFixed(2), vat_choice: vatRateOf(d.vat, d.total),
       paid_by: "business", document: "",
       // for an expense, claimed in FreeAgent straight away: the supplier's last category, if it's still yours
-      category: (state.categories || []).some((c) => c.url === mail.category) ? mail.category : "", project: "" };
+      category: knownCategory(mail.category), project: "",
+      // paid from the business account: the bank payment it's likely for, approved with it
+      found: mail.payment ? { url: mail.payment.url, payment: mail.payment,
+                              category: knownCategory(mail.payment.category) || knownCategory(mail.category),
+                              project: mail.payment.project || "" } : null };
     const kept = Object.keys(em.mails);
     for (const old of kept.slice(0, Math.max(0, kept.length - MAILS_KEPT))) if (old !== em.sel) delete em.mails[old];
   } catch (err) {
@@ -213,20 +217,19 @@ async function submitDialog() {
   const mail = em.mails[id];
   if (!canAdd(mail)) return closeEmailDialog();
   const f = em.forms[id];
+  const paired = pairedFor(mail);
   try {
     await api(`/api/emails/${encodeURIComponent(id)}/add`, { method: "POST",
       body: { account: mail.account, supplier: f.supplier, date: f.date, total: f.total, currency: f.currency,
               vat: f.vat, vat_choice: f.vat_choice, paid_by: f.paid_by,
-              payment_url: em.forPayment?.id === id ? em.forPayment.url : "", document: chosenDocument(mail),
+              payment_url: paired ? paired.url : "", document: chosenDocument(mail),
               ...(f.paid_by === "personal" ? { category: f.category || "", project: f.project || "" } : {}),
-              ...(em.forPayment?.id === id ? { paid_by: "business", category: em.forPayment.category || "",
-                                               project: em.forPayment.project || "" } : {}) } });
+              ...(paired ? { paid_by: "business", category: paired.category || "", project: paired.project || "" } : {}) } });
   } catch (err) {
     em.dialogError = err.message;
     return render();
   }
   em.lastAdd = id;
-  const paired = em.forPayment?.id === id;
   closeEmailDialog();
   toast(paired ? `Approving the payment with the ${esc(f.supplier || "email")} email…`
     : claimsNow(f) ? `Claiming the ${esc(f.supplier || "email")} expense in FreeAgent…`
@@ -479,13 +482,16 @@ function dialogHtml(mail) {
   const known = mail.in_files;
   const before = known && ["ignored", "failed", "deleted"].includes(known.status)
     ? `<div class="m-note e-dnote">This email is in Archived. Adding it moves it back to Files.</div>` : "";
+  // from Bank Feed's "Use that email": for that payment, chosen there
   const paired = em.forPayment?.id === mail.id ? em.forPayment : null;
+  // else the payment it's likely for, found here: shown once the business account is picked
+  const likely = !paired ? pairedFor(mail) : null;
   // for a known payment: the payment, and its FreeAgent details (category, project) set here
   const fa = state.snap.freeagent || {};
-  const payment = paired ? `<div class="e-dlabel" style="margin-top:0">Bank payment</div>
-      <div class="m-pay e-paycard">${bankBadge(accountName())}
-        <div class="who"><div class="desc">${esc(paired.payment.description)}</div><div class="sub">${esc(accountName())} · ${esc(longDate(paired.payment.date))}</div></div>
-        <span class="amt">${esc(money(paired.payment.amount, "GBP"))}</span></div>` : "";
+  const payCard = (p) => `<div class="m-pay e-paycard">${bankBadge(accountName())}
+        <div class="who"><div class="desc">${esc(p.description)}</div><div class="sub">${esc(accountName())} · ${esc(longDate(p.date))}</div></div>
+        <span class="amt">${esc(money(p.amount, "GBP"))}</span></div>`;
+  const payment = paired ? `<div class="e-dlabel" style="margin-top:0">Bank payment</div>${payCard(paired.payment)}` : "";
   const projects = fa.projects || [];
   const faFields = (on) => `
         <span class="k">Category</span><select data-action="e-category" aria-label="Category">${categoryOptions(on.category)}</select>
@@ -514,13 +520,28 @@ function dialogHtml(mail) {
         ${pw("business", bankBadge(bank), "", bank, "Business account · linked in Bank Feed")}
         ${pw("personal", ICON.cash, "personal", "Expense", "Paid personally · claimed back")}
       </div>`}
-      ${claim ? `<div class="m-kv e-claim">${faFields(f)}</div>` : ""}
+      ${claim ? `<div class="e-dlabel">Expense claim</div><div class="m-kv e-claim">${faFields(f)}</div>` : ""}
+      ${likely ? `<div class="e-dlabel e-found">Bank payment <span>Likely the one for this email</span>
+          <button type="button" class="link" data-action="e-unpair">Not this payment</button></div>
+        <div class="e-claim">${payCard(likely.payment)}</div><div class="m-kv e-claim">${faFields(likely)}</div>` : ""}
       ${before}
       ${em.dialogError ? `<div class="m-note warn">${esc(em.dialogError)}</div>` : ""}
       <div class="m-dialog-foot">
         <button class="btn" data-action="e-cancel">Cancel</button>
         ${addButton(mail)}
       </div>`;
+}
+
+/** The category, if it's still one of yours; else "". */
+function knownCategory(url) { return url && (state.categories || []).some((c) => c.url === url) ? url : ""; }
+
+/** The payment this email is approved with: Bank Feed's (from "Use that
+ * email"), else the one found for it, once the business account is picked
+ * and unless you said it isn't. Null when it's added to Files. */
+function pairedFor(mail) {
+  if (em.forPayment?.id === mail.id) return em.forPayment;
+  const f = em.forms[mail.id];
+  return f?.paid_by === "business" && f.found ? f.found : null;
 }
 
 /** An expense can be claimed from the dialog once FreeAgent's categories
@@ -539,7 +560,7 @@ function claimsNow(f) { return f.paid_by === "personal" && canClaim() && !claimB
 /** Why the dialog can't be confirmed yet, or "". */
 function dialogBlocker(mail) {
   const f = em.forms[mail.id];
-  const paired = em.forPayment?.id === mail.id ? em.forPayment : null;
+  const paired = pairedFor(mail);
   if (paired) return paired.category ? "" : "Choose a category";
   return f.paid_by === "personal" && canClaim() ? claimBlocker(f) : "";
 }
@@ -548,7 +569,7 @@ function dialogBlocker(mail) {
 function addButton(mail) {
   const f = em.forms[mail.id];
   const blocker = dialogBlocker(mail);
-  const label = blocker || (em.forPayment?.id === mail.id ? "Approve" : claimsNow(f) ? "Claim expense"
+  const label = blocker || (pairedFor(mail) ? "Approve" : claimsNow(f) ? "Claim expense"
     : f.paid_by === "personal" ? "Add as an expense" : "Add to Files");
   return `<button class="btn primary" data-action="e-add" ${blocker ? "disabled" : ""}>${label} ${kbd("⏎", true)}</button>`;
 }
@@ -753,6 +774,10 @@ document.addEventListener("click", (e) => {
       return render();
     case "e-add":
       return submitDialog();
+    case "e-unpair":                                     // not the payment found: added to Files instead
+      if (!form) return;
+      form.found = null;
+      return render();
     case "e-refetch":
       if (!em.mails[em.dialog]) return;
       delete em.fetched[em.dialog];
@@ -788,8 +813,8 @@ document.addEventListener("change", (e) => {
   if (a === "e-currency" && em.forms[em.dialog]) {
     em.forms[em.dialog].currency = e.target.value;
     render();
-  } else if ((a === "e-category" || a === "e-project") && (em.forPayment || em.forms[em.dialog])) {
-    (em.forPayment || em.forms[em.dialog])[a === "e-category" ? "category" : "project"] = e.target.value;
+  } else if ((a === "e-category" || a === "e-project") && em.mails[em.dialog] && em.forms[em.dialog]) {
+    (pairedFor(em.mails[em.dialog]) || em.forms[em.dialog])[a === "e-category" ? "category" : "project"] = e.target.value;
     render();
   } else if (a === "e-document" && em.forms[em.dialog]) {
     em.forms[em.dialog].document = e.target.value;

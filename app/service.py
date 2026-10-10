@@ -2604,6 +2604,41 @@ class ReceiptService:
         if found:
             self._bump()
 
+    def _payment_for_email(self, message: Any, account: str) -> dict[str, Any] | None:
+        """The bank payment this email is likely the receipt for, as Bank
+        Feed finds an email for a payment, the other way round: a payment
+        with no receipt yet, in the days around the email, whose amount the
+        email shows. A payment Bank Feed already found this email for comes
+        first; then an amount shown as the total, then the nearest date.
+        With its category and project, as Bank Feed would show them."""
+        from . import email_finder
+
+        if message.date is None:
+            return None
+        day = message.date.date()
+        hits = []
+        for t in self._missing_payments():
+            if why_not_open(t):
+                continue                                  # can't take a receipt here
+            paid = date.fromisoformat(t["dated_on"][:10])
+            # the email up to a week before the payment settles, or a couple of days after
+            if not -email_finder.DAYS_BEFORE <= (day - paid).days <= email_finder.DAYS_AFTER:
+                continue
+            hint = self.email_suggestion(t["url"]) or {}
+            found = email_finder.judge(message, float(t["amount"]), account, t["currency"])
+            if found or hint.get("message_id") == message.message_id:
+                hits.append((hint.get("message_id") != message.message_id, not (found and found.as_total),
+                             abs((day - paid).days), t["dated_on"], t))
+        if not hits:
+            return None
+        t = min(hits, key=lambda h: h[:4])[4]
+        settings = self.payment_settings(t["url"])
+        own = self._freeagent_explanation(t) or {}        # what FreeAgent explained it as already
+        rebill = settings.get("rebill") or own.get("rebill") or {}
+        return {"url": t["url"], "description": t.get("description") or "", "date": t["dated_on"],
+                "amount": float(t["amount"]), "category": settings.get("category") or own.get("category"),
+                "project": rebill.get("project")}
+
     def _is_ignored_message(self, message_id: str) -> bool:
         with self.db.connect() as conn:
             row = conn.execute("SELECT status FROM receipts WHERE gmail_message_id = ?", (message_id,)).fetchone()
@@ -2862,6 +2897,8 @@ class ReceiptService:
             "category": (self.db.get_state(f"category_for:{key}")
                          if (key := self._supplier_key(draft.get("supplier"))) else None),
             "in_files": self.emails_in_files([message_id]).get(message_id),
+            # the bank payment it's likely the receipt for: Bank Feed's "Use that email" the other way round
+            "payment": self._payment_for_email(message, chosen.email),
             # the supplier's own receipt, downloadable as a scan would (Trainline's)
             "supplier_receipt": {"name": found[0].name} if (found := self._supplier_fetch(message)) else None,
         }

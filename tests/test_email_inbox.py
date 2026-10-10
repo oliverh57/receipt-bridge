@@ -317,6 +317,47 @@ def test_an_expense_with_its_category_is_claimed_in_freeagent_straight_away() ->
         assert service.emails_in_files(["shop01"])["shop01"]["status"] == "pending"
 
 
+def test_paid_from_the_bank_the_payment_it_is_likely_for_is_found() -> None:
+    """Bank Feed's "Use that email" the other way round: opening an email
+    finds the payment with no receipt yet, near its date, whose amount the
+    email shows, with that payment's FreeAgent category."""
+    import json
+    from datetime import timedelta
+
+    category = "https://fa.test/v2/categories/285"
+    bank = "https://fa.test/v2/bank_accounts/1"
+    service, client, tmp = make()
+    with tmp:
+        sent = datetime.now().astimezone().replace(microsecond=0) - timedelta(days=3)
+        day = lambda n: (sent + timedelta(days=n)).date().isoformat()   # noqa: E731
+        for mid, body in (("hotel2", "Total paid: £180.00"), ("hotel3", "Total paid: $180.00"),
+                          ("hotel4", "Total paid: £180.00")):
+            client.messages[mid] = email(mid, "Your receipt", body)
+            client.messages[mid].date = sent
+        service.db.set_state("freeagent:reference", json.dumps({
+            "bank_accounts": [{"url": bank, "currency": "GBP", "name": "Business"}],
+            "categories": [{"url": category, "description": "Travel"}]}))
+        service.db.set_state("freeagent:accounts", json.dumps([bank]))
+        payment = lambda url, n, amount, **more: {"url": url, "bank_account": bank, "dated_on": day(n),   # noqa: E731
+                                                  "amount": amount, "unexplained_amount": amount,
+                                                  "description": "EXAMPLE HOTEL", **more}
+        service.db.save_bank_transactions([
+            payment("tx/far", 12, -180.0), payment("tx/other", 1, -50.0),
+            payment("tx/hotel", 2, -180.0), payment("tx/later", 3, -180.0)])
+        service.set_payment_settings("tx/hotel", {"category": category})
+
+        found = service.open_email(ME, "hotel2")["payment"]
+        assert (found["url"], found["date"], found["amount"]) == ("tx/hotel", day(2), -180.0), "the nearest"
+        assert found["category"] == category, "as Bank Feed shows it"
+        assert service.open_email(ME, "hotel3")["payment"] is None, "dollars, not the pounds paid"
+        assert service.open_email(ME, "lunch1")["payment"] is None
+
+        # one Bank Feed found this email for comes first
+        service.db.set_state("email_hint:tx/later", json.dumps({"message_id": "hotel4", "supplier": "Example Hotel",
+                                                                "amount": 180.0, "day": day(0)}))
+        assert service.open_email(ME, "hotel4")["payment"]["url"] == "tx/later"
+
+
 def test_the_vat_rate_chosen_is_how_it_will_be_filed() -> None:
     service, _, tmp = make()
     with tmp:

@@ -997,6 +997,10 @@ img.doc, .doc img, .m-doc img { -webkit-user-drag: none; user-select: none; }
   .e-dialog .e-dpreview { display: none; }
 }
 .e-dialog .m-kv { margin-top: 0; }
+.e-dialog .e-claim { margin-top: 10px; }         /* under its label, spaced like Paid with */
+.e-dlabel.e-found { display: flex; align-items: baseline; gap: 8px; }
+.e-dlabel.e-found span { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.e-dlabel.e-found .link { margin-left: auto; text-transform: none; letter-spacing: 0; font-size: 12px; font-weight: 400; }
 .e-dialog .m-kv .pair { flex-wrap: nowrap; }
 .e-dialog .m-kv .pair .edit-input { flex: 1 1 60px; }
 .e-dialog .m-kv .pair select.e-cur { flex: 0 0 auto; height: 26px; }
