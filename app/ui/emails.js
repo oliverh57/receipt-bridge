@@ -39,6 +39,7 @@ const em = {
   opening: null,          // id being downloaded
   openError: "",
   forms: {},              // the "Convert to receipt" form, by message id
+  fetched: {},            // the supplier's own receipt, by message id: {state: loading | ready | failed, since, error}
   dialog: null,           // the email whose "Convert to receipt" dialog is open
   forPayment: null,       // {id, url, payment, category, project}: from Bank Feed's "Use that email", for that payment
   dialogError: "",
@@ -145,7 +146,9 @@ async function openEmail(id, account = "") {
     const d = mail.draft;
     em.forms[id] ||= { supplier: d.supplier || "", date: d.date || "", total: d.total == null ? "" : d.total.toFixed(2),
       currency: d.currency || "GBP", vat: d.vat == null ? "" : d.vat.toFixed(2), vat_choice: vatRateOf(d.vat, d.total),
-      paid_by: "business", document: defaultDocument(mail) };
+      paid_by: "business", document: "",
+      // for an expense, claimed in FreeAgent straight away: the supplier's last category, if it's still yours
+      category: (state.categories || []).some((c) => c.url === mail.category) ? mail.category : "", project: "" };
     const kept = Object.keys(em.mails);
     for (const old of kept.slice(0, Math.max(0, kept.length - MAILS_KEPT))) if (old !== em.sel) delete em.mails[old];
   } catch (err) {
@@ -214,7 +217,8 @@ async function submitDialog() {
     await api(`/api/emails/${encodeURIComponent(id)}/add`, { method: "POST",
       body: { account: mail.account, supplier: f.supplier, date: f.date, total: f.total, currency: f.currency,
               vat: f.vat, vat_choice: f.vat_choice, paid_by: f.paid_by,
-              payment_url: em.forPayment?.id === id ? em.forPayment.url : "", document: f.document || "",
+              payment_url: em.forPayment?.id === id ? em.forPayment.url : "", document: chosenDocument(mail),
+              ...(f.paid_by === "personal" ? { category: f.category || "", project: f.project || "" } : {}),
               ...(em.forPayment?.id === id ? { paid_by: "business", category: em.forPayment.category || "",
                                                project: em.forPayment.project || "" } : {}) } });
   } catch (err) {
@@ -225,6 +229,7 @@ async function submitDialog() {
   const paired = em.forPayment?.id === id;
   closeEmailDialog();
   toast(paired ? `Approving the payment with the ${esc(f.supplier || "email")} email…`
+    : claimsNow(f) ? `Claiming the ${esc(f.supplier || "email")} expense in FreeAgent…`
     : `Adding the ${esc(f.supplier || "email")} email to Files${f.paid_by === "personal" ? " as an expense" : ""}…`);
   refresh(true);
 }
@@ -482,10 +487,13 @@ function dialogHtml(mail) {
         <div class="who"><div class="desc">${esc(paired.payment.description)}</div><div class="sub">${esc(accountName())} · ${esc(longDate(paired.payment.date))}</div></div>
         <span class="amt">${esc(money(paired.payment.amount, "GBP"))}</span></div>` : "";
   const projects = fa.projects || [];
-  const inFreeAgent = paired ? `
-        <span class="k">Category</span><select data-action="e-category" aria-label="Category">${categoryOptions(paired.category)}</select>
+  const faFields = (on) => `
+        <span class="k">Category</span><select data-action="e-category" aria-label="Category">${categoryOptions(on.category)}</select>
         ${projects.length ? `<span class="k">Project</span><select data-action="e-project" aria-label="Project"><option value="">No project</option>${
-          projects.map((p) => `<option value="${esc(p.url)}" ${p.url === paired.project ? "selected" : ""}>${esc(p.client ? `${p.client}: ${p.name}` : p.name)}</option>`).join("")}</select>` : ""}` : "";
+          projects.map((p) => `<option value="${esc(p.url)}" ${p.url === on.project ? "selected" : ""}>${esc(p.client ? `${p.client}: ${p.name}` : p.name)}</option>`).join("")}</select>` : ""}`;
+  const inFreeAgent = paired ? faFields(paired) : "";
+  // an expense is claimed in FreeAgent straight away, so it needs its category here
+  const claim = !paired && f.paid_by === "personal" && canClaim();
   return `<h2 id="e-dialog-title">${paired ? "Approve with this email" : "Convert to receipt"}</h2>
       <p class="sub">${esc(mail.subject || "(no subject)")} · ${esc(mail.from_name)}. ${found}</p>
       ${payment}
@@ -506,12 +514,43 @@ function dialogHtml(mail) {
         ${pw("business", bankBadge(bank), "", bank, "Business account · linked in Bank Feed")}
         ${pw("personal", ICON.cash, "personal", "Expense", "Paid personally · claimed back")}
       </div>`}
+      ${claim ? `<div class="m-kv e-claim">${faFields(f)}</div>` : ""}
       ${before}
       ${em.dialogError ? `<div class="m-note warn">${esc(em.dialogError)}</div>` : ""}
       <div class="m-dialog-foot">
         <button class="btn" data-action="e-cancel">Cancel</button>
-        <button class="btn primary" data-action="e-add" ${paired && !paired.category ? "disabled" : ""}>${paired ? (paired.category ? "Approve" : "Choose a category") : f.paid_by === "personal" ? "Add as an expense" : "Add to Files"} ${kbd("⏎", true)}</button>
+        ${addButton(mail)}
       </div>`;
+}
+
+/** An expense can be claimed from the dialog once FreeAgent's categories
+ * are known; until then it's added to Files, to claim from there. */
+function canClaim() { return (state.categories || []).length > 0; }
+
+/** Why the expense can't be claimed yet, or "". */
+function claimBlocker(f) {
+  if (String(f.total ?? "").trim() === "") return "Enter the total";
+  return f.category ? "" : "Choose a category";
+}
+
+/** This form is claimed in FreeAgent on confirming, not left in Files. */
+function claimsNow(f) { return f.paid_by === "personal" && canClaim() && !claimBlocker(f); }
+
+/** Why the dialog can't be confirmed yet, or "". */
+function dialogBlocker(mail) {
+  const f = em.forms[mail.id];
+  const paired = em.forPayment?.id === mail.id ? em.forPayment : null;
+  if (paired) return paired.category ? "" : "Choose a category";
+  return f.paid_by === "personal" && canClaim() ? claimBlocker(f) : "";
+}
+
+/** The dialog's button: what confirming does, or what's still needed. */
+function addButton(mail) {
+  const f = em.forms[mail.id];
+  const blocker = dialogBlocker(mail);
+  const label = blocker || (em.forPayment?.id === mail.id ? "Approve" : claimsNow(f) ? "Claim expense"
+    : f.paid_by === "personal" ? "Add as an expense" : "Add to Files");
+  return `<button class="btn primary" data-action="e-add" ${blocker ? "disabled" : ""}>${label} ${kbd("⏎", true)}</button>`;
 }
 
 /** What becomes the receipt unless you pick: its first PDF, else the email. */
@@ -520,26 +559,76 @@ function defaultDocument(mail) {
   return i >= 0 ? `att:${i}` : "email";
 }
 
+/** What Convert to receipt files: what you picked, else the supplier's own
+ * receipt (Trainline's, downloaded as a scan would) unless it couldn't be
+ * had in time, else the default. */
+function chosenDocument(mail) {
+  if (em.forms[mail.id]?.document) return em.forms[mail.id].document;
+  return mail.supplier_receipt && em.fetched[mail.id]?.state !== "failed" ? "supplier" : defaultDocument(mail);
+}
+
+/** Download the supplier's own receipt for the preview, once; Add to Files
+ * uses the same copy. It takes a browser and the supplier's site: usually a
+ * few seconds, and past SUPPLIER_SLOW_MS the loader says it's still going.
+ * The app gives up waiting after 30 seconds and the email is used. */
+const SUPPLIER_SLOW_MS = 2000;
+
+async function fetchSupplierReceipt(mail) {
+  if (["loading", "ready"].includes(em.fetched[mail.id]?.state)) return;
+  em.fetched[mail.id] = { state: "loading", since: Date.now() };
+  render();
+  setTimeout(render, SUPPLIER_SLOW_MS + 50);
+  try {
+    await api(`/api/emails/${encodeURIComponent(mail.id)}/supplier-receipt`, { method: "POST", body: { account: mail.account } });
+    em.fetched[mail.id] = { state: "ready" };
+  } catch (err) {
+    em.fetched[mail.id] = { state: "failed", error: err.message };
+  }
+  render();
+}
+
 /** Beside the form: what becomes the receipt, in the same sandbox as the
- * view. `choice`: "email" (it's printed to a PDF) or "att:N" (that PDF or
- * picture); null for the default. `picker`: a menu to choose it (Convert to
+ * view. `choice`: "email" (it's printed to a PDF), "att:N" (that PDF or
+ * picture) or "supplier" (the supplier's own receipt); null for the default. `picker`: a menu to choose it (Convert to
  * receipt), when the email carries anything else that could be it. */
 function previewHtml(mail, choice = null, picker = false) {
   const doc = choice || defaultDocument(mail);
   const i = doc.startsWith("att:") ? Number(doc.slice(4)) : -1;
   const att = i >= 0 ? (mail.attachments || [])[i] : null;
-  const options = (mail.attachments || []).map((a, n) => (a.receipt ? [`att:${n}`, `${a.filename}`] : null)).filter(Boolean);
-  const name = att ? `${PAPERCLIP} ${esc(att.filename)}` : "This email, saved as a PDF";
+  const own = mail.supplier_receipt ? `${mail.supplier_receipt.name}'s own receipt` : "";
+  const got = em.fetched[mail.id] || {};
+  const options = [
+    ...(own && picker ? [["supplier", got.state === "failed" ? `${own} (couldn't get it)` : own]] : []),
+    ...(mail.attachments || []).map((a, n) => (a.receipt ? [`att:${n}`, `📎 ${a.filename}`] : null)).filter(Boolean),
+  ];
+  const name = att ? `${PAPERCLIP} ${esc(att.filename)}` : doc === "supplier" ? esc(own) : "This email, saved as a PDF";
   const head = picker && options.length
     ? `<div class="e-dlabel">Receipt</div><select class="e-docpick" data-action="e-document" aria-label="What becomes the receipt">
-        <option value="email" ${doc === "email" ? "selected" : ""}>This email, saved as a PDF</option>
-        ${options.map(([v, l]) => `<option value="${v}" ${doc === v ? "selected" : ""}>📎 ${esc(l)}</option>`).join("")}</select>`
+        ${options.map(([v, l]) => `<option value="${v}" ${doc === v ? "selected" : ""}>${esc(l)}</option>`).join("")}
+        <option value="email" ${doc === "email" ? "selected" : ""}>This email, saved as a PDF</option></select>`
     : `<div class="e-dlabel">Receipt</div><div class="e-doc-name">${name}</div>`;
   const params = new URLSearchParams({ account: mail.account, t: TOKEN, ...(att ? { index: String(i) } : {}) });
-  const body = att
-    ? `<iframe class="e-pdf" title="${esc(att.filename)}" src="/api/emails/${encodeURIComponent(mail.id)}/pdf?${params}"></iframe>`
+  const body = doc === "supplier" ? supplierPreview(mail, own, got, params)
+    : att ? `<iframe class="e-pdf" title="${esc(att.filename)}" src="/api/emails/${encodeURIComponent(mail.id)}/pdf?${params}"></iframe>`
     : emailFrame(mail).replace('class="doc e-frame"', 'class="e-pdf"');
-  return `<div class="e-dphead">${head}</div>${body}`;
+  // it couldn't be had in time, so the email is shown instead: say why
+  const fellBack = picker && own && got.state === "failed" && !em.forms[mail.id]?.document
+    ? `<div class="m-note warn e-pnote">${esc(got.error)}</div>` : "";
+  return `<div class="e-dphead">${head}</div>${fellBack}${body}`;
+}
+
+/** The supplier's own receipt: downloading, shown, or why it couldn't be had. */
+function supplierPreview(mail, own, got, params) {
+  if (got.state === "ready") {
+    return `<iframe class="e-pdf" title="${esc(own)}" src="/api/emails/${encodeURIComponent(mail.id)}/supplier-receipt?${params}"></iframe>`;
+  }
+  if (got.state === "failed") {
+    return `<div class="e-pdf e-pdf-wait"><div class="m-note warn">${esc(got.error)}</div>
+      <button class="btn" data-action="e-refetch">Try again</button></div>`;
+  }
+  const slow = Date.now() - got.since > SUPPLIER_SLOW_MS;
+  return `<div class="e-pdf e-pdf-wait"><span class="spinner" aria-hidden="true"></span>
+    <span class="muted">${slow ? "Still working on it…" : `Getting ${esc(own)}…`}</span></div>`;
 }
 
 /** The dialog lives in #modal, over the whole window: the form, and the
@@ -557,7 +646,9 @@ function drawEmailDialog() {
         aria-labelledby="e-dialog-title"><div class="e-dform"></div><div class="e-dpreview"></div></section></div>`;
     em.drawn.dialog = em.drawn.preview = undefined;
   }
-  const preview = previewHtml(mail, em.forms[mail.id]?.document, true);
+  const doc = chosenDocument(mail);
+  if (doc === "supplier" && !em.fetched[mail.id]) fetchSupplierReceipt(mail);
+  const preview = previewHtml(mail, doc, true);
   if (em.drawn.preview !== preview) {
     host.querySelector(".e-dpreview").innerHTML = preview;
     em.drawn.preview = preview;
@@ -662,6 +753,10 @@ document.addEventListener("click", (e) => {
       return render();
     case "e-add":
       return submitDialog();
+    case "e-refetch":
+      if (!em.mails[em.dialog]) return;
+      delete em.fetched[em.dialog];
+      return render();
     case "e-show":
       m.sel = Number(target.dataset.rid);
       m.reveal = true;
@@ -676,6 +771,9 @@ document.addEventListener("input", (e) => {
     em.forms[em.dialog][e.target.dataset.field] = e.target.value;
     const note = document.querySelector(".e-dialog .e-vat-note");
     if (note) note.textContent = vatNote(em.forms[em.dialog], em.mails[em.dialog].draft);
+    // a total typed in or cleared changes whether an expense can be claimed yet
+    const button = document.querySelector('.e-dialog [data-action="e-add"]');
+    if (button) button.outerHTML = addButton(em.mails[em.dialog]);
   } else if (a === "e-search") {
     em.q = e.target.value;
     clearTimeout(em.searchTimer);
@@ -690,8 +788,8 @@ document.addEventListener("change", (e) => {
   if (a === "e-currency" && em.forms[em.dialog]) {
     em.forms[em.dialog].currency = e.target.value;
     render();
-  } else if ((a === "e-category" || a === "e-project") && em.forPayment) {
-    em.forPayment[a === "e-category" ? "category" : "project"] = e.target.value;
+  } else if ((a === "e-category" || a === "e-project") && (em.forPayment || em.forms[em.dialog])) {
+    (em.forPayment || em.forms[em.dialog])[a === "e-category" ? "category" : "project"] = e.target.value;
     render();
   } else if (a === "e-document" && em.forms[em.dialog]) {
     em.forms[em.dialog].document = e.target.value;
@@ -715,7 +813,7 @@ document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") { e.preventDefault(); closeEmailDialog(); }
     else if (e.key === "Enter" && !t.closest?.("button, select")) {
       e.preventDefault();
-      if (!em.forPayment || em.forPayment.category) submitDialog();
+      if (!em.mails[em.dialog] || !dialogBlocker(em.mails[em.dialog])) submitDialog();
     }
     return;
   }

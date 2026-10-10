@@ -275,6 +275,48 @@ def test_an_email_is_added_to_files_as_an_expense_with_what_you_typed() -> None:
             assert "already" in str(exc)
 
 
+def test_an_expense_with_its_category_is_claimed_in_freeagent_straight_away() -> None:
+    """Convert to receipt → Expense → Claim expense: filed as an expense
+    claim in FreeAgent there and then, with the category, project and VAT
+    chosen, not left in Files to do again."""
+    import json
+
+    from tests.test_filer import FakeClient as FakeFreeAgent
+
+    category, project = "https://fa.test/v2/categories/285", "https://fa.test/v2/projects/7"
+    service, _, tmp = make()
+    with tmp:
+        service.db.set_state("freeagent:reference", json.dumps({
+            "user_url": "https://fa.test/v2/users/1", "vat": {"registered": True},
+            "categories": [{"url": category, "description": "Travel"}], "projects": [{"url": project, "name": "Tour"}]}))
+        freeagent = FakeFreeAgent()
+        freeagent.connected = freeagent.writes_allowed = True
+        service._freeagent = lambda: freeagent
+        service.sync_freeagent = lambda: None
+        fields = {"supplier": "Example Hotel", "date": "2026-09-26", "total": "180.00", "currency": "CAD",
+                  "vat_choice": "OUT_OF_SCOPE", "paid_by": "personal", "category": category, "project": project}
+        for wrong, why in (({"category": "https://fa.test/v2/categories/1"}, "category"),
+                           ({"project": "https://fa.test/v2/projects/1"}, "project")):
+            try:
+                service.add_email(ME, "hotel1", {**fields, **wrong})
+                raise AssertionError("queued")
+            except ValueError as exc:
+                assert why in str(exc)
+        service.add_email(ME, "hotel1", fields)
+        run_queued(service, "email-add:hotel1")
+        row = service.db.get_receipt(service.emails_in_files(["hotel1"])["hotel1"]["id"])
+        assert row["status"] == "filed" and row["category"] == category
+        claim = next(c[1] for c in freeagent.calls if c[0] == "create_expense")
+        assert (claim["category"], claim["project"], claim["currency"]) == (category, project, "CAD")
+        assert service.db.get_state("category_for:example hotel") == category
+        assert service.open_email(ME, "hotel1")["category"] == category, "offered for its next email"
+
+        # without a category it waits in Files, as before
+        service.add_email(ME, "shop01", {**fields, "supplier": "Shop", "category": ""})
+        run_queued(service, "email-add:shop01")
+        assert service.emails_in_files(["shop01"])["shop01"]["status"] == "pending"
+
+
 def test_the_vat_rate_chosen_is_how_it_will_be_filed() -> None:
     service, _, tmp = make()
     with tmp:
@@ -327,6 +369,100 @@ def test_the_form_is_checked_before_anything_is_queued() -> None:
             except ValueError as exc:
                 assert words in str(exc), (fields, exc)
         assert not any(k.startswith("email-add") for k in service.snapshot()["queued"])
+
+
+def test_a_supplier_whose_receipt_a_scan_downloads_offers_it_here_too() -> None:
+    """Trainline's booking email links to its own expense receipt, which a
+    scan downloads. Convert to receipt offers the same document: downloaded
+    once for the preview, and that copy is what's filed."""
+    from app import fetchers
+    from app.fetchers.base import FetchResult
+
+    calls: list[str] = []
+
+    class FakeFetcher:
+        id = "fake-shop"
+        works = True
+
+        def fetch(self, ctx):
+            calls.append(ctx.url_from_field("order_link"))
+            if not self.works:
+                return None
+            ctx.out_path.write_bytes(b"%PDF-1.4 the shop's own receipt " + ctx.values["reference"].encode())
+            return FetchResult(path=ctx.out_path, source="shop_receipt")
+
+    fetcher = fetchers.register(FakeFetcher())
+    service, _, tmp = make()
+    with tmp:
+        rules = Path(tmp.name) / "watchers"
+        rules.mkdir()
+        service.config.raw["watchers_dir"] = str(rules)
+        (rules / "shop.yaml").write_text(
+            "id: shop\nname: Shop\ngmail_query: from:shop.test\nmatch:\n  from_contains: shop.test\n"
+            "fields:\n  reference:\n    patterns: ['Order (\\d+)']\n"
+            "  order_link:\n    patterns: ['(https://shop\\.test/order/\\S+)']\n"
+            "pdf:\n  - fetcher: fake-shop\n    url_field: order_link\n  - render_email\n", encoding="utf-8")
+        client = service.accounts.list()[0].client()
+        client.messages["shop02"] = email("shop02", "Order 4021", "Order 4021\nhttps://shop.test/order/abc\nTotal £9.50",
+                                          sender="Shop <orders@shop.test>")
+        client.messages["shop03"] = email("shop03", "Order 4022", "Order 4022, no link", sender="Shop <orders@shop.test>")
+
+        assert service.open_email(ME, "shop02")["supplier_receipt"] == {"name": "Shop"}
+        assert service.open_email(ME, "shop03")["supplier_receipt"] is None, "no link to it in this email"
+        assert service.open_email(ME, "hotel1")["supplier_receipt"] is None
+
+        fetcher.works = False
+        try:
+            service.email_supplier_receipt(ME, "shop02")
+            raise AssertionError("a failed download was shown")
+        except ValueError as exc:
+            assert "Couldn't get Shop's own receipt" in str(exc)
+        fetcher.works = True
+        path, source = service.email_supplier_receipt(ME, "shop02")
+        assert source == "shop_receipt" and b"4021" in path.read_bytes()
+        assert service.email_supplier_receipt(ME, "shop02")[0] == path
+        assert calls == ["https://shop.test/order/abc"] * 2, "tried again after failing, then kept"
+
+        service.add_email(ME, "shop02", {"supplier": "Shop", "total": "9.50", "document": "supplier"})
+        run_queued(service, "email-add:shop02")
+        row = service.db.list_receipts("pending")[0]
+        assert row["pdf_source"] == "shop_receipt" and Path(row["pdf_path"]).read_bytes().startswith(b"%PDF-1.4 the shop")
+        assert len(calls) == 2, "the preview's copy is the one filed"
+
+        # Slow: the preview stops waiting and the email is used; the download
+        # carries on, and asking again gets it without starting another
+        import threading
+
+        from app import service as service_module
+
+        go = threading.Event()
+        slow_fetch = FakeFetcher.fetch
+        FakeFetcher.fetch = lambda self, ctx: go.wait(5) and slow_fetch(self, ctx)
+        client.messages["shop05"] = email("shop05", "Order 4024", "Order 4024\nhttps://shop.test/order/ghi",
+                                          sender="Shop <orders@shop.test>")
+        wait, service_module.SUPPLIER_RECEIPT_WAIT = service_module.SUPPLIER_RECEIPT_WAIT, 0.2
+        try:
+            service.email_supplier_receipt(ME, "shop05")
+            raise AssertionError("waited for good")
+        except ValueError as exc:
+            assert "taking too long" in str(exc), exc
+        finally:
+            service_module.SUPPLIER_RECEIPT_WAIT = wait
+        go.set()
+        path, _ = service.email_supplier_receipt(ME, "shop05")
+        assert b"4024" in path.read_bytes() and calls.count("https://shop.test/order/ghi") == 1
+        FakeFetcher.fetch = slow_fetch
+
+        app = create_app(service)
+        api, token = TestClient(app, base_url="http://127.0.0.1"), app.state.token
+        client.messages["shop04"] = email("shop04", "Order 4023", "Order 4023\nhttps://shop.test/order/def",
+                                          sender="Shop <orders@shop.test>")
+        got = api.post("/api/emails/shop04/supplier-receipt", json={"account": ME}, headers={"x-receipt-bridge": token})
+        assert got.status_code == 200, got.text
+        pdf = api.get(f"/api/emails/shop04/supplier-receipt?t={token}")
+        assert pdf.status_code == 200 and b"4023" in pdf.content and pdf.headers["content-type"] == "application/pdf"
+        none = api.post("/api/emails/hotel1/supplier-receipt", json={}, headers={"x-receipt-bridge": token})
+        assert none.status_code == 400 and "no supplier receipt" in none.json()["detail"]
 
 
 def test_signing_out_forgets_its_opened_emails() -> None:

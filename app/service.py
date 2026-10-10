@@ -25,6 +25,8 @@ import shutil
 import subprocess
 import threading
 import time
+from concurrent.futures import Future
+from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -81,6 +83,11 @@ EMAIL_PAGE = 50
 SHIPPED_RULES = {"trainline.yaml"}
 EMAIL_RECEIPT_PAGES = 4          # "Likely receipts": Gmail pages read for one page of the list
 EMAILS_CACHED = 12
+# Waiting for a supplier's own receipt (Trainline's) in Convert to receipt:
+# the preview falls back to the email after this many seconds, while the
+# download carries on, so trying again picks it up. Add to Files waits longer.
+SUPPLIER_RECEIPT_WAIT = 30
+SUPPLIER_RECEIPT_ADD_WAIT = 180
 # Category suggestions asked of the on-device model per run.
 CATEGORY_GUESSES = 20
 FREEAGENT_HISTORY_DAYS = 730       # how far back the first read of an account goes (two years)
@@ -172,6 +179,11 @@ class ReceiptService:
         self._health: dict[str, Health] = {}
         self._connecting = False
         self._email_cache: dict[tuple[str, str], Any] = {}   # the Emails view, most recent last
+        # Suppliers' own receipts downloaded for Convert to receipt, by message
+        # id: each a Future of (path, source). One download at a time, as each
+        # drives a browser.
+        self._fetched: dict[str, Future[tuple[Path, str]]] = {}
+        self._fetching = threading.Lock()
         self._last_log: list[str] = []
         # Bumped on every change, so the UI can skip redrawing when nothing
         # happened since it last looked.
@@ -2655,14 +2667,21 @@ class ReceiptService:
 
     def _email_document(self, message: Any, hint: dict[str, Any], document: str = "") -> tuple[Path, str]:
         """What becomes the receipt. `document`: "email" (the email printed),
-        "att:N" (that attachment, a PDF or a picture), or "" for the email's
-        own PDF if it has one, else the email printed."""
+        "att:N" (that attachment, a PDF or a picture), "supplier" (the
+        supplier's own receipt, downloaded), or "" for the email's own PDF if
+        it has one, else the email printed."""
         from .browser import BrowserPool
         from .pdf import render_email_to_pdf
         from .pipeline import _safe_stem
 
         out = self.config.pdf_dir / f"{_safe_stem(message.message_id)}.pdf"
         out.parent.mkdir(parents=True, exist_ok=True)
+        if document == "supplier":
+            fetched, source = self._supplier_receipt(message, SUPPLIER_RECEIPT_ADD_WAIT)
+            with self._lock:
+                self._fetched.pop(message.message_id, None)
+            shutil.move(fetched, out)
+            return out, source
         if document.startswith("att:"):
             found = _receipt_attachment(message, document)
             if found is None:
@@ -2838,8 +2857,13 @@ class ReceiptService:
             "html": message.html_with_images(),
             "text": message.text,
             "attachments": attachments,
-            "draft": email_inbox.draft(message),
+            "draft": (draft := email_inbox.draft(message)),
+            # the category last used for its supplier, for an expense claimed from here
+            "category": (self.db.get_state(f"category_for:{key}")
+                         if (key := self._supplier_key(draft.get("supplier"))) else None),
             "in_files": self.emails_in_files([message_id]).get(message_id),
+            # the supplier's own receipt, downloadable as a scan would (Trainline's)
+            "supplier_receipt": {"name": found[0].name} if (found := self._supplier_fetch(message)) else None,
         }
 
     def email_pdf(self, account: str, message_id: str, index: int | None = None) -> tuple[str, bytes, str] | None:
@@ -2859,6 +2883,77 @@ class ReceiptService:
         attached = [a for a in message.pdf_attachments() if a.get("data")]
         return (attached[0].get("filename") or "receipt.pdf", attached[0]["data"], "application/pdf") if attached else None
 
+    def _supplier_fetch(self, message: Any) -> tuple[Any, dict[str, Any]] | None:
+        """The supplier rule whose code downloads the supplier's own receipt
+        for this email (Trainline's, from the booking), narrowed to that
+        step, and what it reads from the email; None when there's none. The
+        same rule and step a scan uses, so Convert to receipt can offer the
+        same document."""
+        from dataclasses import replace
+
+        if not self.config.fetchers_enabled:
+            return None
+        watchers, _ = load_watchers_safe(self.config.watchers_dir)
+        for watcher in watchers:
+            steps = [s for s in watcher.pdf if isinstance(s, dict) and s.get("fetcher")]
+            if not steps or not watcher.matches(message):
+                continue
+            values = watcher.extract(message, strict=False)
+            for step in steps:
+                if not step.get("url_field") or values.get(step["url_field"]):     # its link is in this email
+                    return replace(watcher, pdf=[step]), values
+        return None
+
+    def email_supplier_receipt(self, account: str, message_id: str) -> tuple[Path, str]:
+        """The supplier's own receipt for this email, for the preview in
+        Convert to receipt: (path, source). ValueError in words when it
+        can't be had."""
+        chosen, client = self._mail_client(account)
+        return self._supplier_receipt(self._cached_email(chosen, client, message_id), SUPPLIER_RECEIPT_WAIT)
+
+    def _supplier_receipt(self, message: Any, wait: float) -> tuple[Path, str]:
+        """Downloaded once, as a scan would, then kept: the preview and Add
+        to Files share it. Waits `wait` seconds for it; past that, says so,
+        while the download carries on in the background for the next ask.
+        A failure isn't kept, so trying again tries."""
+        found = self._supplier_fetch(message)
+        if found is None:
+            raise ValueError("There's no supplier receipt to download for this email.")
+        with self._lock:
+            job = self._fetched.get(message.message_id)
+            if job is None or (job.done() and (job.exception() is not None or not job.result()[0].exists())):
+                job = self._fetched[message.message_id] = Future()
+                threading.Thread(target=self._download_supplier_receipt, args=(message, *found, job),
+                                 name="supplier-receipt", daemon=True).start()
+        try:
+            return job.result(timeout=wait)
+        except FutureTimeout:
+            raise ValueError(f"{found[0].name} is taking too long, so the email will be used. "
+                             "Try again in a minute.") from None
+
+    def _download_supplier_receipt(self, message: Any, watcher: Any, values: dict[str, Any],
+                                   job: Future[tuple[Path, str]]) -> None:
+        from .browser import BrowserPool
+        from .pipeline import _safe_stem, resolve_pdf
+
+        # always settles the job, or it would count as still downloading for good
+        pool = None
+        try:
+            with self._fetching:
+                out = self.config.pdf_dir / "fetched" / f"{_safe_stem(message.message_id)}.pdf"
+                out.parent.mkdir(parents=True, exist_ok=True)
+                pool = BrowserPool(headless=self.config.headless,
+                                   block_trackers=bool(self.config.pdf.get("block_trackers", True)))
+                path, source, _ = resolve_pdf(self.config, pool, watcher, message, values, out)
+            job.set_result((path, source))
+        except Exception as exc:
+            log.info("supplier receipt for %s: %s", message.message_id, exc)
+            job.set_exception(ValueError(f"Couldn't get {watcher.name}'s own receipt. Use the email "
+                                         "instead, or try again in a minute."))
+        finally:
+            if pool is not None:
+                pool.close()
+
     def add_email(self, account: str, message_id: str, fields: dict[str, Any]) -> bool:
         """"Add to Files" on an email: queued, as printing it takes a browser.
         `fields` is what the form shows (supplier, date, total, currency,
@@ -2876,6 +2971,9 @@ class ReceiptService:
             if why:
                 raise ValueError(f"Can't use that payment: {why}.")
             clean["payment_url"] = t["url"]
+        if clean["payment_url"] or clean["paid_by"] == "personal":
+            # its FreeAgent category and project: for the payment it's paired
+            # with, or for the expense claim it's filed as straight away
             reference = self._freeagent_reference()
             clean["category"] = str(fields.get("category") or "") or None
             if clean["category"] and clean["category"] not in {c["url"] for c in reference.get("categories", [])}:
@@ -2945,6 +3043,16 @@ class ReceiptService:
                 extra["rebill"] = {"project": fields["project"], "type": "none", "factor": None}
                 self.db.update_receipt(receipt_id, {"extra_json": extra})
             self._run_approve(url, receipt_id)
+            return
+        if fields["paid_by"] == "personal" and fields.get("category") and fields["total"] is not None:
+            # an expense with its category: claimed in FreeAgent straight
+            # away; if that fails it waits in Files, saying why
+            self.db.update_receipt(receipt_id, {"category": fields["category"]})
+            if fields.get("project"):                             # linked to the project, not re-billed
+                extra = json.loads(self.db.get_receipt(receipt_id)["extra_json"] or "{}")
+                extra["rebill"] = {"project": fields["project"], "type": "none", "factor": None}
+                self.db.update_receipt(receipt_id, {"extra_json": extra})
+            self._run_file([receipt_id])
             return
         where = "an expense" if fields["paid_by"] == "personal" else "a receipt"
         self._finish("email-add", True, f"Added the {supplier} email to Files as {where}.")
@@ -3700,9 +3808,9 @@ def _email_fields(fields: dict[str, Any]) -> dict[str, Any]:
     paid_by = fields.get("paid_by") or "business"
     if paid_by not in ("business", "personal"):
         raise ValueError("Paid by should be business or personal.")
-    # what becomes the receipt: "" (its PDF, else the email), "email", or "att:N"
+    # what becomes the receipt: "" (its PDF, else the email), "email", "supplier" or "att:N"
     document = str(fields.get("document") or "")
-    if document and document != "email" and not re.fullmatch(r"att:\d{1,3}", document):
+    if document and document not in ("email", "supplier") and not re.fullmatch(r"att:\d{1,3}", document):
         raise ValueError("Choose the receipt from the list.")
     return {"supplier": supplier, "date": day, "total": total, "vat": vat, "vat_choice": vat_choice,
             "currency": currency, "paid_by": paid_by, "document": document}

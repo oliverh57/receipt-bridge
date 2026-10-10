@@ -96,8 +96,8 @@ class EmailAdd(BaseModel):
     vat_choice: str = "auto"
     paid_by: str = "business"
     payment_url: str = ""          # from Bank Feed's "Use that email": paired with this payment
-    document: str = ""             # the receipt: "" (its PDF, else the email), "email" or "att:N"
-    category: str = ""             # with payment_url: its FreeAgent category…
+    document: str = ""             # the receipt: "" (its PDF, else the email), "email", "supplier" or "att:N"
+    category: str = ""             # with payment_url, or paid personally: its FreeAgent category…
     project: str = ""              # …and project (linked, not re-billed)
 
 
@@ -416,6 +416,31 @@ def create_app(service: ReceiptService) -> FastAPI:
         if found is None:
             raise HTTPException(404, "This email has no PDF attached" if index is None else "That attachment can't be a receipt")
         return Response(found[1], media_type=found[2], headers={"Content-Disposition": "inline"})
+
+    @app.post("/api/emails/{message_id}/supplier-receipt")
+    def email_supplier_receipt(message_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        """Download the supplier's own receipt for this email (Trainline's),
+        for Convert to receipt to offer: answers once it's ready to show."""
+        gmail_id(message_id)
+        try:
+            service.email_supplier_receipt(str(body.get("account") or ""), message_id)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except Exception as exc:
+            raise gmail_failed(exc) from exc
+        return {"ok": True}
+
+    @app.get("/api/emails/{message_id}/supplier-receipt")
+    def email_supplier_receipt_pdf(message_id: str, account: str = "") -> Response:
+        """That receipt, for the preview (an <iframe>, so the token comes as ?t=)."""
+        gmail_id(message_id)
+        try:
+            path, _ = service.email_supplier_receipt(account, message_id)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except Exception as exc:
+            raise gmail_failed(exc) from exc
+        return Response(path.read_bytes(), media_type="application/pdf", headers={"Content-Disposition": "inline"})
 
     @app.post("/api/emails/{message_id}/add")
     def email_add(message_id: str, body: EmailAdd) -> dict[str, Any]:

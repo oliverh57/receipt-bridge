@@ -989,6 +989,8 @@ img.doc, .doc img, .m-doc img { -webkit-user-drag: none; user-select: none; }
 .e-dphead .e-dlabel { margin: 0; }
 .e-docpick { height: 28px; max-width: 100%; min-width: 0; border: 1px solid var(--line); border-radius: 6px; padding: 0 8px; background: var(--bg); color: var(--ink); font: inherit; }
 .e-pdf { flex: 1 1 auto; width: 100%; min-height: 0; border: 0; border-radius: 8px; background: #fff; }
+.e-pdf.e-pdf-wait { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px;
+  background: var(--bg); border: 1px dashed var(--line); text-align: center; }
 @media (max-width: 960px) {          /* no room beside it: just the form */
   .m-dialog.e-dialog { width: min(520px, calc(100vw - 32px)); height: auto; max-height: calc(100vh - 100px); }
   .e-dialog .e-dform { flex: 1 1 auto; }
