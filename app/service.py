@@ -83,7 +83,7 @@ EMAIL_RECEIPT_PAGES = 4          # "Likely receipts": Gmail pages read for one p
 EMAILS_CACHED = 12
 # Category suggestions asked of the on-device model per run.
 CATEGORY_GUESSES = 20
-FREEAGENT_HISTORY_DAYS = 120       # how far back the first read of an account goes
+FREEAGENT_HISTORY_DAYS = 730       # how far back the first read of an account goes (two years)
 BACKUPS_KEPT = 7
 UPDATE_CHECK_INTERVAL = timedelta(days=1)   # GitHub is asked at most this often unprompted
 
@@ -151,6 +151,10 @@ class ReceiptService:
             # attachments: read the whole history again on the next sync
             self.db.delete_state("freeagent:last_sync")
             self.db.set_state("tidied:split_explanations", "1")
+        if not self.db.get_state("tidied:history_two_years"):
+            # older installs read only 120 days back: read two years once
+            self.db.delete_state("freeagent:last_sync")
+            self.db.set_state("tidied:history_two_years", "1")
 
         # Posts system notifications. The macOS shell supplies one (with a
         # `status` and `send`); the CLI and tests run without.

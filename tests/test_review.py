@@ -137,6 +137,18 @@ def test_requests_kept_by_the_old_dry_run_are_forgotten() -> None:
         assert again.db.get_state("freeagent:dry_run") is None
 
 
+def test_older_installs_read_two_years_of_payments_once() -> None:
+    """They read only 120 days back: the next sync reads from the start."""
+    service, _rid, tmp = make()
+    with tmp:
+        service.db.set_state("freeagent:last_sync", "2026-10-01T00:00:00+00:00")
+        service.db.delete_state("tidied:history_two_years")
+        again = ReceiptService(service.config)
+        assert again.db.get_state("freeagent:last_sync") is None
+        again.db.set_state("freeagent:last_sync", "2026-10-02T00:00:00+00:00")
+        assert ReceiptService(service.config).db.get_state("freeagent:last_sync")
+
+
 def test_switching_freeagent_company_forgets_the_old_ones_links() -> None:
     """Sandbox → your real books: nothing that points into the sandbox
     (categories, chosen payments, re-billing) is kept."""
