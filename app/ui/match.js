@@ -931,15 +931,15 @@ function suggestedFile(t) {
   return t.status === "in_match" && t.receipt ? findReceipt(t.receipt.id) : null;
 }
 
-/** What each Statement line (all outgoing) counts as: still to do (missing
- * a receipt, or a file suggested), or done (linked, or no receipt needed). */
+/** What each Statement line (all outgoing) counts as: still to approve
+ * (missing a receipt, or a file suggested), or done (linked, or no receipt needed). */
 function stKind(t) {
   // approved in FreeAgent counts as done, with or without a receipt
   if (t.status === "filed" || t.status === "not_needed" || t.status === "approved" || t.approved) return "done";
-  return t.status;                       // "missing" | "in_match"
+  return "todo";                         // "missing" | "in_match"
 }
 
-const ST_FILTERS = ["all", "missing", "in_match", "done"];
+const ST_FILTERS = ["all", "todo", "done"];
 
 function stRows() {
   const st = state.statement || {};
@@ -1051,15 +1051,14 @@ function renderStatement() {
   if (m.stSel && !(st.rows || []).some((t) => t.url === m.stSel)) m.stSel = null;
   const sel = (st.rows || []).find((t) => t.url === m.stSel) || null;
   const count = (k) => (st.rows || []).filter((r) => stKind(r) === k).length;
-  const missing = count("missing"), suggested = count("in_match"), done = count("done");
-  const payments = missing + suggested + done;
-  const todo = missing + suggested;
+  const todo = count("todo"), done = count("done");
+  const payments = todo + done;
   // one row that is both the key to the bar and the filter
   const pill = (k, label, n, dot) => `<button class="st-pill ${filter === k ? "on" : ""}" data-action="st-filter" data-filter="${k}"
       aria-pressed="${filter === k}">${dot ? `<i class="${dot}"></i>` : ""}<span>${label}</span><b>${n}</b></button>`;
   const bar = payments
-    ? `<div class="st-bar" role="img" aria-label="${done} done, ${suggested} with a suggested file, ${missing} missing a receipt">
-        <span class="seg-done" style="flex:${done}"></span><span class="seg-sugg" style="flex:${suggested}"></span><span class="seg-miss" style="flex:${missing}"></span></div>`
+    ? `<div class="st-bar" role="img" aria-label="${done} done, ${todo} needing approval">
+        <span class="seg-done" style="flex:${done}"></span><span class="seg-miss" style="flex:${todo}"></span></div>`
     : "";
   // what's still to approve: the payments not done, of those shown
   const unapproved = (st.rows || []).filter((t) => stKind(t) !== "done").reduce((sum, t) => sum - Number(t.amount || 0), 0);
@@ -1089,8 +1088,7 @@ function renderStatement() {
       </section>
       <div class="st-pills" role="group" aria-label="Show">
         ${pill("all", "All", (st.rows || []).length)}
-        ${pill("missing", "Needs approval", missing, "seg-miss")}
-        ${pill("in_match", "File suggested", suggested, "seg-sugg")}
+        ${pill("todo", "Needs approval", todo, "seg-miss")}
         ${pill("done", "Done", done, "seg-done")}</div>
       <div class="st-table-box"><table class="st-table">
         <thead><tr><th scope="col">Date</th><th scope="col">On the statement</th><th scope="col" class="r">Amount</th><th scope="col">Receipt</th></tr></thead>
