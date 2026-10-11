@@ -966,9 +966,9 @@ img.doc, .doc img, .m-doc img { -webkit-user-drag: none; user-select: none; }
 
 /* the email: full width, "Convert to receipt" beside who sent it */
 .e-h1 { overflow-wrap: anywhere; }
-.e-subline { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-top: 2px; }
-.e-subline .m-dsub { margin-top: 0; min-width: 0; }
-.e-actions { display: flex; align-items: center; gap: 8px; }
+/* under the sender: what to do with it first, making its supplier recurring apart on the right */
+.e-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; }
+.e-actions .e-recur { margin-left: auto; }
 .e-note { margin-top: 8px; }
 .e-figure { margin: 16px 0 0; width: 100%; min-width: 0; }
 .e-doc { padding: 0; overflow: hidden; }

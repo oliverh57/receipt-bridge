@@ -390,24 +390,30 @@ function emailDetail() {
   const d = mail.draft;
   const head = `<div class="m-dhead"><h1 class="e-h1">${esc(mail.subject || "(no subject)")}</h1>${looks}<span class="grow"></span>
       <span class="amt">${d.total != null ? esc(money(d.total, d.currency)) : ""}</span></div>
-    <div class="e-subline"><div class="m-dsub">${esc(mail.from_name)}${mail.from_address && mail.from_address !== mail.from_name ? ` &lt;${esc(mail.from_address)}&gt;` : ""}
+    <div class="m-dsub">${esc(mail.from_name)}${mail.from_address && mail.from_address !== mail.from_name ? ` &lt;${esc(mail.from_address)}&gt;` : ""}
       · ${esc(mail.date ? `${longDate(mail.date)}, ${new Date(mail.date).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}` : "No date")}</div>
-      <div class="e-actions">${emailActions(mail)}</div></div>
+    <div class="e-actions">${emailActions(mail)}</div>
     ${emailNote(mail)}`;
   return { head, frame: emailFrame(mail), caption: emailCaption(mail) };
 }
 
-/** Beside the sender: "Convert to receipt", or where the receipt already is. */
+/** Under the sender: what to do with this email (Convert to receipt,
+ * Ignore), or where its receipt already is; then, apart, making its
+ * supplier recurring. */
 function emailActions(mail) {
   const known = mail.in_files;
+  const row = findEmail(mail.id);
+  const recurring = `<button class="btn quiet e-recur" data-action="e-recurring" title="Collect this supplier's receipts by themselves from now on">Turn into recurring receipt</button>`;
   if (adding(mail.id)) return `<button class="btn primary" disabled><span class="spinner" aria-hidden="true"></span> Adding…</button>`;
   if (known?.status === "pending") {
-    return `<span class="chip info">In Files</span><button class="btn" data-action="e-show" data-rid="${known.id}">Show in Files</button>
-      <button class="btn" data-action="e-recurring" title="Collect this supplier's receipts by themselves from now on">Turn into recurring receipt</button>`;
+    return `<span class="chip info">In Files</span><button class="btn" data-action="e-show" data-rid="${known.id}">Show in Files</button>${recurring}`;
   }
-  const recurring = `<button class="btn" data-action="e-recurring" title="Collect this supplier's receipts by themselves from now on">Turn into recurring receipt</button>`;
   if (known && ["exported", "filed"].includes(known.status)) return `<span class="chip good">Saved to FreeAgent</span>${recurring}`;
-  return `${recurring}<button class="btn primary" data-action="e-convert">Convert to receipt ${kbd("⏎", true)}</button>`;
+  // a receipt still to check can be ignored: not a receipt
+  const ignore = row?.ignored ? `<button class="btn" data-action="e-ignore" data-ignored="0">Don't ignore</button>`
+    : row && emailState(row) === "todo"
+      ? `<button class="btn" data-action="e-ignore" data-ignored="1" title="Not a receipt: move it to Ignored">Ignore ${kbd("⌫")}</button>` : "";
+  return `<button class="btn primary" data-action="e-convert">Convert to receipt ${kbd("⏎", true)}</button>${ignore}${recurring}`;
 }
 
 function emailNote(mail) {
@@ -760,6 +766,8 @@ document.addEventListener("click", (e) => {
       return render();
     case "e-convert":
       return openDialog(em.sel);
+    case "e-ignore":
+      return target.dataset.ignored === "1" ? ignoreAndNext(em.sel) : ignoreEmail(em.sel, false);
     case "e-recurring":
       return em.mails[em.sel] && openSupplierWizardFor(em.mails[em.sel]);
     case "e-cancel":
@@ -862,6 +870,9 @@ document.addEventListener("keydown", (e) => {
   } else if (e.key === "Enter" && canAdd(em.mails[em.sel])) {
     e.preventDefault();
     openDialog(em.sel);
+  } else if ((e.key === "Backspace" || e.key === "Delete") && i >= 0 && emailState(rows[i]) === "todo") {
+    e.preventDefault();                                    // as in Files: ⌫ ignores
+    ignoreAndNext(em.sel);
   } else if (e.key === "/") {
     e.preventDefault();
     document.querySelector('input[data-action="e-search"]')?.focus();
@@ -939,14 +950,26 @@ async function openEmailForPayment(hint, t) {
   document.querySelector('.e-dialog input[data-field="supplier"]')?.focus();
 }
 
-/** Right-click → Ignore (or Don't ignore): kept on this Mac; it moves to
- * the Ignored pill and isn't suggested for a payment in Bank Feed. */
+/** Ignore (or Don't ignore), from the email or right-click: kept on this
+ * Mac; it moves to the Ignored pill and isn't suggested for a payment in
+ * Bank Feed. True once it's done. */
 async function ignoreEmail(id, ignored) {
   const x = findEmail(id);
   try { await api("/api/emails/ignore", { method: "POST", body: { ids: [id], ignored } }); }
-  catch (err) { return toast(`<b>Not changed.</b> ${esc(err.message)}`); }
+  catch (err) { toast(`<b>Not changed.</b> ${esc(err.message)}`); return false; }
   if (x) x.ignored = ignored;
   render();
   undoToast(ignored ? `Ignored: ${x?.subject || "that email"}` : "No longer ignored",
     ignored ? () => ignoreEmail(id, false) : null);
+  return true;
+}
+
+/** Ignore the email shown, then show the next one in the list, as Files
+ * does once it leaves the pill. */
+async function ignoreAndNext(id) {
+  const rows = shownEmails();
+  const i = rows.findIndex((x) => x.id === id);
+  const next = rows[i + 1] || rows[i - 1];
+  if (!(await ignoreEmail(id, true))) return;
+  if (em.sel === id && next && !shownEmails().some((x) => x.id === id)) pick(next.id);
 }
