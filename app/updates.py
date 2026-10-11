@@ -108,6 +108,22 @@ def notes_from(message: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
 
+def local_notes(version: str, project: Path = ROOT) -> str:
+    """What's new for `version` from this git checkout's own history: its
+    release commit ("Receipt Bridge 1.2.18"), for when the last check
+    on GitHub was before that version. "" when it isn't a checkout or the
+    commit isn't there."""
+    if not (project / ".git").exists() or parse(version) is None:
+        return ""
+    title = "^Receipt Bridge " + re.escape(".".join(map(str, parse(version)))) + "$"
+    try:
+        found = subprocess.run(["git", "-C", str(project), "log", "-1", "--format=%B", f"--grep={title}"],
+                               capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return notes_from(found.stdout) if found.returncode == 0 else ""
+
+
 def latest(repo: str = DEFAULT_REPO, session: Any = None) -> dict[str, Any]:
     """The newest version on GitHub: its number, a page about it, notes,
     and where to download it. The version on the default branch, so pushing

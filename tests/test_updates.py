@@ -393,8 +393,13 @@ def test_whats_new_shows_while_a_restart_is_needed_and_after_updating() -> None:
             client, token = _client(service)
             assert client.post("/api/updates/seen", headers={"x-receipt-bridge": token}).status_code == 200
             assert service.just_updated() is None
-        with mock.patch.object(updates, "VERSION", "1.1.3"):
+        with mock.patch.object(updates, "VERSION", "1.1.3"), mock.patch.object(updates, "local_notes", return_value=""):
             assert service.just_updated() == {"version": "1.1.3", "notes": ""}, "notes for another version aren't shown"
+        # checked before 1.1.4 came out: a checkout reads its notes from git, once
+        with mock.patch.object(updates, "VERSION", "1.1.4"), \
+                mock.patch.object(updates, "local_notes", return_value="- From git") as local:
+            assert service.just_updated() == service.just_updated() == {"version": "1.1.4", "notes": "- From git"}
+            local.assert_called_once_with("1.1.4")
 
 
 def test_a_git_checkout_behind_github_pulls() -> None:

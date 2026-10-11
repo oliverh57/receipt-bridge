@@ -191,6 +191,7 @@ class ReceiptService:
         self._fetching = threading.Lock()
         self._last_log: list[str] = []
         self._rates_tried: dict[str, float] = {}     # HMRC months asked for: when
+        self._local_notes: tuple[str, str] | None = None   # (version, What's new from git), read once
         # Bumped on every change, so the UI can skip redrawing when nothing
         # happened since it last looked.
         self._version = 0
@@ -3452,6 +3453,11 @@ class ReceiptService:
         last = self._last_update_check()
         same = updates.parse(last.get("version")) == updates.parse(updates.VERSION)
         notes = (last.get("notes") or "") if same else ""
+        if not notes:
+            # checked before this version came out: a checkout has the notes in its history
+            if self._local_notes is None or self._local_notes[0] != updates.VERSION:
+                self._local_notes = (updates.VERSION, updates.local_notes(updates.VERSION))
+            notes = self._local_notes[1]
         return {"version": updates.VERSION, "notes": notes}
 
     def update_seen(self) -> None:
