@@ -429,24 +429,59 @@ function renderBanner() {
            <button class="btn small" data-action="reconnect">Reconnect</button>`}</div>`;
   } else if (state.snap.update?.can_install) {
     const u = state.snap.update;
-    // "See changes": What's new, opened in the banner
-    const open = state.updateNotes && u.notes;
     el.innerHTML = `<div class="banner info"><div class="text"><b>Version ${esc(u.latest.replace(/^v/i, ""))} of Receipt Bridge is ${u.restart_needed ? "installed" : "available"}.</b>
-      ${u.installing ? " Installing; the app will restart." : u.restart_needed ? " Restart to start using it." : " Takes a few seconds; your receipts and settings are kept."}
-      ${open ? `<pre class="banner-notes">${esc(u.notes)}</pre>` : ""}</div>
-      ${u.notes ? `<button class="btn quiet small" data-action="update-notes" aria-expanded="${!!open}">${open ? "Hide changes" : "See changes"}</button>` : ""}
+      ${u.installing ? " Installing; the app will restart." : u.restart_needed ? " Restart to start using it." : " Takes a few seconds; your receipts and settings are kept."}</div>
+      ${u.notes ? `<button class="btn quiet small" data-action="whats-new">See changes</button>` : ""}
       ${updateButton(u, "btn small")}</div>`;
   } else if (state.snap.updated) {
     // opened after an update: say so, with What's new
     const n = state.snap.updated;
-    const open = state.updateNotes && n.notes;
-    el.innerHTML = `<div class="banner info"><div class="text"><b>Receipt Bridge has updated to ${esc(n.version)}.</b>
-      ${open ? `<pre class="banner-notes">${esc(n.notes)}</pre>` : ""}</div>
-      ${n.notes ? `<button class="btn quiet small" data-action="update-notes" aria-expanded="${!!open}">${open ? "Hide what's new" : "See what's new"}</button>` : ""}
+    el.innerHTML = `<div class="banner good"><div class="text"><b>Receipt Bridge has updated to ${esc(n.version)}.</b></div>
+      ${n.notes ? `<button class="btn quiet small" data-action="whats-new">See what's new</button>` : ""}
       <button class="btn small" data-action="update-seen">Got it</button></div>`;
   } else {
     el.innerHTML = "";
   }
+  renderWhatsNew();
+}
+
+/** What's new, in a card over the app: the version just updated to (Got
+ * it), or the one waiting to be installed (its Update button). Its own
+ * host: Files clears #modal on every redraw. */
+function renderWhatsNew() {
+  let host = $("#whats-new");
+  if (!state.whatsNew) { if (host) host.innerHTML = ""; return; }
+  const n = state.snap.updated, u = state.snap.update;
+  const waiting = !n?.notes && u?.can_install && u.notes;
+  const notes = waiting ? u.notes : n?.notes;
+  if (!notes) { state.whatsNew = false; if (host) host.innerHTML = ""; return; }
+  if (!host) { host = document.createElement("div"); host.id = "whats-new"; document.body.appendChild(host); }
+  const version = waiting ? u.latest.replace(/^v/i, "") : n.version;
+  const html = `<div class="m-overlay wn-overlay" data-action="whats-new-close"><section class="m-dialog wide wn-dialog" role="dialog"
+      aria-modal="true" aria-labelledby="wn-title">
+      <h2 id="wn-title">What's new in ${esc(version)}</h2>
+      <p class="sub">${waiting ? (u.restart_needed ? "Installed. Restart to start using it." : "Ready to install. Your receipts and settings are kept.")
+        : "Receipt Bridge has updated."}</p>
+      <div class="wn-notes">${notesHtml(notes)}</div>
+      <div class="m-dialog-foot">${waiting
+        ? `<button class="btn" data-action="whats-new-close">Close</button>${updateButton(u, "btn primary")}`
+        : `<button class="btn primary" data-action="update-seen">Got it</button>`}</div></section></div>`;
+  if (host.dataset.html !== html) { host.innerHTML = html; host.dataset.html = html; }
+}
+
+/** A release's notes: its "- " lines as a list, without the "Receipt
+ * Bridge 1.2.17" line the card's title already says. */
+function notesHtml(notes) {
+  const lines = notes.split("\n").map((l) => l.trim()).filter(Boolean)
+    .filter((l, i) => !(i === 0 && /^Receipt Bridge\s+v?\d/i.test(l)));
+  let out = "", list = [];
+  const flush = () => { if (list.length) out += `<ul>${list.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>`; list = []; };
+  for (const l of lines) {
+    if (/^[-*•]\s+/.test(l)) list.push(l.replace(/^[-*•]\s+/, ""));
+    else { flush(); out += `<p>${esc(l)}</p>`; }
+  }
+  flush();
+  return out;
 }
 
 const VIEW_COPY = {
@@ -1603,11 +1638,17 @@ document.addEventListener("click", (e) => {
         const { installed } = await api("/api/licence/choose", { method: "POST" });
         if (installed) toast(`<b>Licence installed.</b> ${esc(installed.join(" and "))} can now be connected.`);
       });
-    case "update-notes":
-      state.updateNotes = !state.updateNotes;
-      return renderBanner();
+    case "whats-new":
+      state.whatsNew = true;
+      renderWhatsNew();
+      return document.querySelector(".wn-dialog .btn.primary")?.focus();
+    case "whats-new-close":
+      if (target.classList.contains("wn-overlay") && e.target !== target) return;   // a click inside the card
+      state.whatsNew = false;
+      return renderWhatsNew();
     case "update-seen":
-      state.updateNotes = false;
+      state.whatsNew = false;
+      renderWhatsNew();
       return act(() => api("/api/updates/seen", { method: "POST" }));
     case "update-install":
       return act(() => api("/api/updates/install", { method: "POST" }));
@@ -1767,6 +1808,13 @@ document.addEventListener("change", (e) => {
 });
 
 $("#scan-btn").addEventListener("click", () => act(() => api("/api/check-now", { method: "POST" })));
+
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || !state.whatsNew) return;
+  e.preventDefault(); e.stopImmediatePropagation();
+  state.whatsNew = false;
+  renderWhatsNew();
+}, true);
 
 document.addEventListener("keydown", (e) => {
   if (wiz.open || ed.open || state.view === "settings" || state.view === "pending" || state.view === "statement" || state.view === "expenses" || state.view === "archived" || state.view === "emails" || e.metaKey || e.ctrlKey || e.target.matches("input:not([type=checkbox]), select, textarea")) return;

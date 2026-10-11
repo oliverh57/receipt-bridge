@@ -139,7 +139,13 @@ button { font: inherit; color: inherit; }
 }
 .banner .text { flex: 1; }
 .banner.info { background: var(--warn-bg); color: var(--warn); }
-.banner-notes { margin: 8px 0 0; white-space: pre-wrap; font: inherit; color: var(--ink); max-height: 40vh; overflow-y: auto; }
+.banner.good { background: var(--good-bg); color: var(--good); }   /* good news: Receipt Bridge has updated */
+/* What's new: a card over the app */
+.wn-overlay { z-index: 60; }
+.wn-dialog .wn-notes { min-height: 0; flex-shrink: 1; overflow-y: auto; line-height: 1.5; }
+.wn-dialog .wn-notes ul { margin: 0 0 10px; padding-left: 20px; }
+.wn-dialog .wn-notes li + li { margin-top: 6px; }
+.wn-dialog .wn-notes p { margin: 0 0 10px; }
 
 /* ---- list + preview -------------------------------------------------- */
 
