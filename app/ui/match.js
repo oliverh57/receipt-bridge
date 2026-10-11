@@ -815,9 +815,11 @@ function periodLabel(period, periods) {
   return (periods.years.find((y) => y.period === period) || {}).label || period.replace("..", " to ");
 }
 
+/** A claim in pounds: its total, or one in another currency converted as
+ * its ⓘ shows (FreeAgent's figure where it has one, else HMRC's rate). */
 function gbpOf(r) {
   if (r.currency === "GBP") return Number(r.total || 0);
-  return r.native_gross != null ? Number(r.native_gross) : 0;
+  return r.in_pounds ? Number(r.in_pounds.amount) : 0;
 }
 
 function renderExpenses() {
@@ -832,7 +834,11 @@ function renderExpenses() {
   if (!rows.some((r) => r.id === m.xsel)) m.xsel = null;
   const sel = rows.find((r) => r.id === m.xsel) || null;
   const claimed = rows.reduce((t, r) => t + gbpOf(r), 0);
-  const unpriced = rows.filter((r) => r.currency !== "GBP" && r.native_gross == null).length;
+  // in another currency with no £ figure yet (its month's rates still coming, or a currency HMRC doesn't list)
+  const unpriced = rows.filter((r) => r.currency !== "GBP" && r.total != null && !r.in_pounds).length;
+  const converted = rows.filter((r) => r.currency !== "GBP" && r.in_pounds).length;
+  const totalTip = converted ? `<span class="m-tip fx" tabindex="0">${ICON.info}<span class="m-tip-pop" role="tooltip">Includes ${converted} claim${
+    converted === 1 ? "" : "s"} in another currency, added in pounds: FreeAgent's figure where it has one, otherwise HMRC's rate for the month.</span></span>` : "";
 
   content.innerHTML = `<div class="m-wrap"><div class="st-split ${sel ? "with-panel" : ""}"><div class="st-wrap">
     <header class="m-head">
@@ -845,7 +851,7 @@ function renderExpenses() {
       <section class="st-summary">
         <div class="main"><div class="big">${period === "all" ? (rows.length ? "Claimed" : "Nothing claimed yet")
           : rows.length ? `Claimed in ${esc(when)}` : `Nothing claimed in ${esc(when)}`}</div></div>
-        <div class="money"><span class="muted">Total</span><b>${esc(money(claimed, "GBP"))}${unpriced ? `<span class="muted small"> + ${unpriced} not in pounds</span>` : ""}</b></div>
+        <div class="money"><span class="muted">Total</span><b>${esc(money(claimed, "GBP"))}${totalTip}${unpriced ? `<span class="muted small"> + ${unpriced} not in pounds yet</span>` : ""}</b></div>
       </section>
       <div class="st-table-box"><table class="st-table">
         <thead><tr><th scope="col">Date</th><th scope="col">Supplier</th><th scope="col" class="r">Amount</th><th scope="col">Category</th></tr></thead>
