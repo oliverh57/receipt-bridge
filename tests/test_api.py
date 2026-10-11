@@ -259,7 +259,7 @@ def test_export_writes_files_and_moves_receipts_to_filed() -> None:
 
         state = client.get("/api/state", headers=h).json()
         assert state["counts"] == {"pending": 1, "exported": 2, "ignored": 0, "failed": 0,
-                                   "needs": 1, "missing": 0, "files": 1}
+                                   "needs": 1, "missing": 0, "files": 1, "bank_left": 0}
         filed = client.get("/api/receipts?status=exported", headers=h).json()
         assert {r["export_folder"] for r in filed} == {result["name"]}
 

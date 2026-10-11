@@ -2108,6 +2108,32 @@ class ReceiptService:
                         "out": round(out_total, 2)},
         }
 
+    def _bank_feed_left(self) -> int:
+        """Bank Feed's "Needs approval", in every period and chosen account:
+        payments missing a receipt or paired with a file, and not approved
+        in FreeAgent yet. Sorted as statement() and Bank Feed sort them,
+        without building its lines."""
+        chosen = self._freeagent_accounts()
+        if not chosen:
+            return 0
+        pending = self.db.list_receipts(PENDING)
+        in_match = {m.transaction["url"] for m in self._matches(pending).values() if m.transaction is not None}
+        filed = set()
+        for row in self.db.list_receipts(FILED):
+            state = json.loads(row["freeagent_json"] or "{}") if row["freeagent_json"] else {}
+            if state.get("transaction"):
+                filed.add(state["transaction"])
+        left = 0
+        for t in self.db.bank_transactions(chosen):
+            t = dict(t)
+            if float(t["amount"]) >= 0 or t["url"] in filed or (t.get("explanation_attachments") or 0) > 0:
+                continue                                  # money in, or it has its receipt
+            if (self._freeagent_explanation(t) or {}).get("approved"):
+                continue                                  # approved in FreeAgent: done, as Bank Feed shows it
+            if t["url"] in in_match or not self.db.get_state(f"no_receipt:{t['url']}"):
+                left += 1                                 # paired with a file, or missing: needs approval
+        return left
+
     def _review_line(self, row: Any, match: Any) -> dict[str, str]:
         """A paired receipt's group and reason, for its Statement line."""
         reference = self._freeagent_reference()
@@ -3167,12 +3193,13 @@ class ReceiptService:
         cached = self._review_counts_cache
         if cached and cached[0] == key:
             return cached[1]
-        counts = {"needs": 0, "missing": 0, "files": 0}
+        counts = {"needs": 0, "missing": 0, "files": 0, "bank_left": 0}
         try:
             pending = self.receipts(PENDING)
             counts["needs"] = sum(1 for r in pending if r.get("group") == "needs")
             counts["files"] = len(pending)          # everything not filed yet, expenses included
             counts["missing"] = self.statement(None, None).get("summary", {}).get("missing", 0)
+            counts["bank_left"] = self._bank_feed_left()   # the number on the Dock icon
         except Exception as exc:          # the sidebar must never break the snapshot
             log.warning("sidebar counts: %s", exc)
         self._review_counts_cache = (key, counts)

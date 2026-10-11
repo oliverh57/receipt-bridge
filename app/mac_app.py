@@ -409,11 +409,12 @@ class AppDelegate(NSObject):
 
     def refreshBadge_(self, timer):
         def run():
-            pending = self.service.snapshot()["counts"]["pending"] if self.service else 0
-            label = str(pending) if pending else ""
+            # Bank Feed's payments still to match and approve
+            left = self.service.snapshot()["counts"].get("bank_left", 0) if self.service else 0
+            label = str(left) if left else ""
             if label != self.last_badge:
                 NSApplication.sharedApplication().dockTile().setBadgeLabel_(label)
-                self.window.setTitle_(f"{APP_NAME} — {pending} to file" if pending else APP_NAME)
+                self.window.setTitle_(f"{APP_NAME} — {left} to match in Bank Feed" if left else APP_NAME)
                 self.last_badge = label
             if self.login_item is not None:
                 self.login_item.setState_(1 if login_item.is_enabled() else 0)

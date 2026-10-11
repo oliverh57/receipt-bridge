@@ -560,6 +560,32 @@ def test_the_statement_shows_which_payments_have_receipts() -> None:
         assert {r["url"]: r["status"] for r in service.statement(None, "2026-03")["rows"]}["tx/3"] == "missing"
 
 
+def test_the_dock_icon_counts_bank_feed_payments_left_to_match_and_approve() -> None:
+    """The number on the Dock icon: Bank Feed's "Needs approval" in every
+    month, payments missing a receipt or paired with a file, not approved."""
+    def left_in_bank_feed() -> int:                # Bank Feed's "Needs approval" (match.js stKind)
+        return sum(1 for r in service.statement(None, "all")["rows"]
+                   if r["status"] in ("missing", "in_match") and not r["approved"])
+
+    service, _flagged, tmp = make()
+    with tmp:
+        assert service._bank_feed_left() == 0, "no FreeAgent yet"
+        connected(service, Path(tmp.name))
+        assert service._bank_feed_left() == left_in_bank_feed() == 3
+        email_receipt(service, 1, "Railco", "2026-03-04", 21.5)          # paired in Match: still to approve
+        assert service._bank_feed_left() == left_in_bank_feed() == 3
+        service.mark_no_receipt("tx/3", "Tax payment")
+        assert service._bank_feed_left() == left_in_bank_feed() == 2
+        service.db.save_bank_transactions([{                                # approved in FreeAgent: done
+            "url": "tx/2", "bank_account": "https://fa.test/v2/bank_accounts/1", "dated_on": "2026-03-06",
+            "amount": -9.0, "unexplained_amount": 0, "description": "CAFE",
+            "bank_transaction_explanations": [{"url": "e/2", "bank_transaction": "tx/2", "dated_on": "2026-03-06",
+                                               "gross_value": "-9.0", "category": CATEGORY,
+                                               "marked_for_review": False}]}])
+        assert service._bank_feed_left() == left_in_bank_feed() == 1
+        assert service.review_counts()["bank_left"] == 1
+
+
 def test_the_statement_can_show_every_month_newest_first() -> None:
     service, _flagged, tmp = make()
     with tmp:
