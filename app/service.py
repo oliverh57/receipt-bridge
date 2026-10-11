@@ -88,6 +88,10 @@ EMAILS_CACHED = 12
 # download carries on, so trying again picks it up. Add to Files waits longer.
 SUPPLIER_RECEIPT_WAIT = 30
 SUPPLIER_RECEIPT_ADD_WAIT = 180
+# HMRC's monthly exchange rates (currency units per £1), for showing a
+# receipt in another currency in pounds when FreeAgent has no figure for it.
+HMRC_RATES_URL = "https://www.trade-tariff.service.gov.uk/uk/api/exchange_rates/files/monthly_csv_{month}.csv"
+HMRC_RATES_RETRY = 3600            # seconds before a month that couldn't be fetched is asked for again
 # Category suggestions asked of the on-device model per run.
 CATEGORY_GUESSES = 20
 FREEAGENT_HISTORY_DAYS = 730       # how far back the first read of an account goes (two years)
@@ -153,6 +157,7 @@ class ReceiptService:
         if any(config.setup_folders):
             setup_guide.use_folders(*config.setup_folders)
         self.db = Database(config.db_path)
+        self._apply_label_filed()
         self.accounts = AccountStore(config)
         adopt_legacy_scan_state(self.db, self.accounts)
         self._forget_dry_runs()
@@ -185,6 +190,7 @@ class ReceiptService:
         self._fetched: dict[str, Future[tuple[Path, str]]] = {}
         self._fetching = threading.Lock()
         self._last_log: list[str] = []
+        self._rates_tried: dict[str, float] = {}     # HMRC months asked for: when
         # Bumped on every change, so the UI can skip redrawing when nothing
         # happened since it last looked.
         self._version = 0
@@ -1824,10 +1830,12 @@ class ReceiptService:
         registered = bool(reference.get("vat", {}).get("registered"))
         matches = self._matches(rows) if status == PENDING else {}
         today = datetime.now().date().isoformat()
+        payments = (self._payments_by_url() if any(r["currency"] not in (None, "", "GBP") for r in rows) else {})
         out = []
         for row in rows:
             item = _receipt_json(row, better)
             m = matches.get(row["id"])
+            item["in_pounds"] = self._in_pounds(row, m, payments)
             fa_category = self._freeagent_category(m)
             category = self._shown_category(row, m)
             item["category"] = category or ""
@@ -2003,12 +2011,14 @@ class ReceiptService:
     # ---- Statement (PLAN.md §11): one month of a bank account ---------------
 
     def statement(self, account: str | None, month: str | None, limit: int | None = None,
-                  offset: int = 0) -> dict[str, Any]:
+                  offset: int = 0, show: str = "all") -> dict[str, Any]:
         """Every payment in a month of the cached statement, and whether it
         has a receipt: filed, in Match, missing, or no receipt needed.
         `month="all"`: every month, newest first, a page of `limit` of them
         from `offset` (all when None). `month="YYYY-MM-DD..YYYY-MM-DD"`: the
-        same, between those days (an accounting year)."""
+        same, between those days (an accounting year). `show`: Bank Feed's
+        pill, "todo" (needs approval), "done" or "all"; `shown` counts each
+        across the whole period, and the page is cut from those shown."""
         chosen = self._freeagent_accounts()
         accounts = {a["url"]: a for a in self._freeagent_reference().get("bank_accounts", [])}
         account = account or (chosen[0] if chosen else None)
@@ -2023,13 +2033,6 @@ class ReceiptService:
         transactions = [t for t in outgoing
                         if (span and span[0] <= t["dated_on"][:10] <= span[1])
                         or (not span and (month == "all" or t["dated_on"].startswith(month)))]
-        total_payments = len(transactions)
-        if every:
-            transactions.sort(key=lambda t: (t["dated_on"], t["url"]), reverse=True)
-            transactions = transactions[offset:offset + limit] if limit else transactions
-        else:
-            transactions.sort(key=lambda t: (t["dated_on"], t["url"]))
-
         pending = self.db.list_receipts(PENDING)
         matches = self._matches(pending)
         in_match = {}
@@ -2043,28 +2046,49 @@ class ReceiptService:
             if state.get("transaction"):
                 filed_by_app[state["transaction"]] = row
 
-        rows, counts = [], {"filed": 0, "in_match": 0, "missing": 0, "not_needed": 0, "approved": 0}
-        out_total = 0.0
+        # Every payment in the period is sorted first, so the pills count
+        # them all and `show` filters before a page is cut, not after.
+        sorted_as: dict[str, tuple[str, bool, str | None]] = {}
         for t in transactions:
-            amount = float(t["amount"])
-            out_total += -amount
             marked = self.db.get_state(f"no_receipt:{t['url']}")
             explanation = self._freeagent_explanation(t)
             approved = bool(explanation and explanation["approved"])
-            receipt = None
             if t["url"] in filed_by_app or (t.get("explanation_attachments") or 0) > 0:
                 kind = "filed"
-                receipt = filed_by_app.get(t["url"])
             elif t["url"] in in_match:
                 kind = "in_match"
-                receipt = in_match[t["url"]][0]
             elif marked:
                 kind = "not_needed"
             elif approved:
                 kind = "approved"           # approved in FreeAgent, no receipt: done
             else:
                 kind = "missing"
+            sorted_as[t["url"]] = (kind, approved, marked)
+        counts = {"filed": 0, "in_match": 0, "missing": 0, "not_needed": 0, "approved": 0}
+        for kind, _, _ in sorted_as.values():
             counts[kind] += 1
+        # Bank Feed's pills (match.js stKind): done, or still needing approval
+        done = {u for u, (kind, approved, _) in sorted_as.items()
+                if kind in ("filed", "not_needed", "approved") or approved}
+        shown = {"all": len(transactions), "done": len(done), "todo": len(transactions) - len(done)}
+        if show == "done":
+            transactions = [t for t in transactions if t["url"] in done]
+        elif show == "todo":
+            transactions = [t for t in transactions if t["url"] not in done]
+        total_payments = len(transactions)
+        if every:
+            transactions.sort(key=lambda t: (t["dated_on"], t["url"]), reverse=True)
+            transactions = transactions[offset:offset + limit] if limit else transactions
+        else:
+            transactions.sort(key=lambda t: (t["dated_on"], t["url"]))
+
+        rows = []
+        out_total = 0.0
+        for t in transactions:
+            amount = float(t["amount"])
+            out_total += -amount
+            kind, approved, marked = sorted_as[t["url"]]
+            receipt = filed_by_app.get(t["url"]) if kind == "filed" else in_match[t["url"]][0] if kind == "in_match" else None
             suggestion = None
             if kind == "missing":
                 suggestion = self.email_suggestion(t["url"]) or self._ignored_suggestion(t)
@@ -2099,7 +2123,9 @@ class ReceiptService:
             "month": month,
             "limit": limit if every else None,
             "offset": offset if every and limit else 0,
-            "total_payments": total_payments,       # all of them, however many are shown
+            "total_payments": total_payments,       # all of them shown by `show`, however many are on this page
+            "show": show,
+            "shown": shown,                         # the pills: all, todo, done, in the whole period
             # Bank Feed's period menu: every month with payments, and every accounting year
             "periods": _periods([t["dated_on"][:10] for t in outgoing], self._freeagent_reference().get("year_end")),
             "last_sync": self.db.get_state("freeagent:last_sync"),
@@ -2108,31 +2134,95 @@ class ReceiptService:
                         "out": round(out_total, 2)},
         }
 
+    # ---- a receipt in another currency, in pounds ----------------------
+
+    def _payments_by_url(self) -> dict[str, dict[str, Any]]:
+        """The cached bank payments, with their account's currency."""
+        accounts = {a["url"]: a for a in self._freeagent_reference().get("bank_accounts", [])}
+        return {t["url"]: {**dict(t), "currency": accounts.get(t["bank_account"], {}).get("currency", "GBP")}
+                for t in self.db.bank_transactions(self._freeagent_accounts())}
+
+    def _in_pounds(self, row: Any, match: Any, payments: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
+        """A receipt in another currency, in pounds, for the ⓘ by its
+        amount: FreeAgent's figure where it has one (the bank payment it's
+        paired with or filed against, or the expense as FreeAgent converted
+        it), the £ charged you entered, else HMRC's rate for its month.
+        None for pounds, no total, or a month whose rates aren't here yet
+        (they're fetched in the background)."""
+        currency, total = row["currency"], row["total"]
+        if not currency or currency == "GBP" or total is None:
+            return None
+        if row["native_gross"] is not None:
+            return {"amount": round(float(row["native_gross"]), 2), "source": "charged"}
+        filing = json.loads(row["freeagent_json"] or "{}") if row["freeagent_json"] else {}
+        t = (match.transaction if match is not None and match.status == "matched" and match.transaction else None) \
+            or payments.get(filing.get("transaction") or "")
+        if t is not None and t.get("currency", "GBP") == "GBP":
+            return {"amount": round(abs(float(t["amount"])), 2), "source": "bank", "date": t["dated_on"]}
+        if filing.get("native_gross") is not None:
+            return {"amount": round(float(filing["native_gross"]), 2), "source": "freeagent"}
+        day = row["purchased_on"] or row["email_date"] or ""
+        month = day[:7]
+        if not re.fullmatch(r"\d{4}-\d{2}", month):
+            return None
+        rates = self._hmrc_rates(month)
+        if rates is None:
+            self._want_hmrc_rates(month)
+            return None
+        rate = rates.get(currency.upper())
+        if not rate:
+            return None                                   # HMRC doesn't list it
+        return {"amount": round(float(total) / rate, 2), "source": "hmrc", "rate": rate, "month": month}
+
+    def _hmrc_rates(self, month: str) -> dict[str, float] | None:
+        try:
+            found = json.loads(self.db.get_state(f"hmrc_rates:{month}") or "null")
+        except ValueError:
+            return None
+        return found if isinstance(found, dict) else None
+
+    def _want_hmrc_rates(self, month: str) -> None:
+        """Fetch a month's rates on the worker (request handlers never call
+        out): once, and again an hour after a failure. Months to come
+        aren't published yet."""
+        if month > datetime.now().strftime("%Y-%m"):
+            return
+        now = time.monotonic()
+        with self._lock:
+            if now - self._rates_tried.get(month, -HMRC_RATES_RETRY) < HMRC_RATES_RETRY:
+                return
+            self._rates_tried[month] = now
+        self._enqueue(f"hmrc-rates:{month}", lambda: self._fetch_hmrc_rates(month))
+
+    def _fetch_hmrc_rates(self, month: str) -> None:
+        import csv
+        import io
+
+        try:
+            response = requests.get(HMRC_RATES_URL.format(month=month), timeout=20)
+            response.raise_for_status()
+            rates: dict[str, float] = {}
+            for line in csv.DictReader(io.StringIO(response.text)):
+                code = (line.get("Currency Code") or "").strip().upper()
+                try:
+                    rate = float((line.get("Currency Units per £1") or "").replace(",", ""))
+                except ValueError:
+                    continue
+                if re.fullmatch(r"[A-Z]{3}", code) and rate > 0:
+                    rates.setdefault(code, rate)              # a currency used in several countries: one rate
+        except (requests.RequestException, csv.Error) as exc:
+            log.info("HMRC exchange rates for %s: %s", month, exc)
+            return
+        if rates:
+            self.db.set_state(f"hmrc_rates:{month}", json.dumps(rates))
+            self._bump()
+
     def _bank_feed_left(self) -> int:
         """Bank Feed's "Needs approval", in every period and chosen account:
         payments missing a receipt or paired with a file, and not approved
-        in FreeAgent yet. Sorted as statement() and Bank Feed sort them,
-        without building its lines."""
-        chosen = self._freeagent_accounts()
-        if not chosen:
-            return 0
-        pending = self.db.list_receipts(PENDING)
-        in_match = {m.transaction["url"] for m in self._matches(pending).values() if m.transaction is not None}
-        filed = set()
-        for row in self.db.list_receipts(FILED):
-            state = json.loads(row["freeagent_json"] or "{}") if row["freeagent_json"] else {}
-            if state.get("transaction"):
-                filed.add(state["transaction"])
-        left = 0
-        for t in self.db.bank_transactions(chosen):
-            t = dict(t)
-            if float(t["amount"]) >= 0 or t["url"] in filed or (t.get("explanation_attachments") or 0) > 0:
-                continue                                  # money in, or it has its receipt
-            if (self._freeagent_explanation(t) or {}).get("approved"):
-                continue                                  # approved in FreeAgent: done, as Bank Feed shows it
-            if t["url"] in in_match or not self.db.get_state(f"no_receipt:{t['url']}"):
-                left += 1                                 # paired with a file, or missing: needs approval
-        return left
+        in FreeAgent yet. The number on the Dock icon."""
+        return sum(self.statement(account, "all", limit=1, show="todo").get("shown", {}).get("todo", 0)
+                   for account in self._freeagent_accounts())
 
     def _review_line(self, row: Any, match: Any) -> dict[str, str]:
         """A paired receipt's group and reason, for its Statement line."""
@@ -3271,6 +3361,7 @@ class ReceiptService:
                                   and self.config.freeagent_credentials_file.exists()),
             "freeagent": self.freeagent_snapshot(),
             "update": self.update_snapshot(),
+            "updated": self.just_updated(),
             "file_results": self._file_results,     # the last File / File all (docs/API.md)
             "photo_inbox": {
                 "path": str(self.photo_inbox),
@@ -3348,6 +3439,26 @@ class ReceiptService:
             return {}
         return last if isinstance(last, dict) else {}
 
+    def just_updated(self) -> dict[str, Any] | None:
+        """This version is newer than the last one you saw: "Receipt Bridge
+        has updated", with What's new, until you say Got it. A first run
+        only notes the version."""
+        seen = self.db.get_state("update:seen")
+        if not seen:
+            self.db.set_state("update:seen", updates.VERSION)
+            return None
+        if not updates.is_newer(updates.VERSION, seen):
+            return None
+        last = self._last_update_check()
+        same = updates.parse(last.get("version")) == updates.parse(updates.VERSION)
+        notes = (last.get("notes") or "") if same else ""
+        return {"version": updates.VERSION, "notes": notes}
+
+    def update_seen(self) -> None:
+        """Got it: "Receipt Bridge has updated" goes until the next version."""
+        self.db.set_state("update:seen", updates.VERSION)
+        self._bump()
+
     def _update_check_due(self) -> bool:
         try:
             when = datetime.fromisoformat(self._last_update_check()["checked_at"])
@@ -3366,14 +3477,16 @@ class ReceiptService:
         restart_needed = updates.is_newer(installed) and not behind
         with self._lock:
             installing = "update" in self._queued
+        shown = latest if behind or not restart_needed else installed
         return {
             "current": updates.VERSION,
             "installed": installed,
-            "latest": latest if behind or not restart_needed else installed,
+            "latest": shown,
             "available": behind or restart_needed,
             "restart_needed": restart_needed,
             "url": last.get("url") or "",
-            "notes": last.get("notes") or "",
+            # What's new: the last check's notes, when they're for the version shown
+            "notes": (last.get("notes") or "") if latest and updates.parse(latest) == updates.parse(shown) else "",
             "error": last.get("error") or "",
             "checked_at": last.get("checked_at"),
             "checking": self._checking_updates,
@@ -3589,6 +3702,18 @@ class ReceiptService:
             self._finish("install", False, f"Couldn't install Receipt Bridge: {exc}")
             return
         self._finish("install", True, "Installed in Applications. It will open when you log in.")
+
+    def _apply_label_filed(self) -> None:
+        """Settings → Email's "Label filed emails" wins over config.yaml, so
+        labelling and what a Gmail sign-in asks for follow it."""
+        pref = self.db.get_state("pref:label_filed")
+        if pref in ("0", "1"):
+            self.config.raw.setdefault("gmail", {})["label_filed"] = pref == "1"
+
+    def set_label_filed(self, enabled: bool) -> None:
+        self.db.set_state("pref:label_filed", "1" if enabled else "0")
+        self._apply_label_filed()
+        self._bump()
 
     def set_auto_scan(self, enabled: bool) -> None:
         self.db.set_state("pref:auto_scan", "1" if enabled else "0")

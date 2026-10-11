@@ -375,6 +375,28 @@ def test_files_already_newer_than_what_is_running_only_need_a_restart() -> None:
         assert "Updated to 1.1.2" in service._outcome.message
 
 
+def test_whats_new_shows_while_a_restart_is_needed_and_after_updating() -> None:
+    """Installed, waiting for a restart: What's new is still there. Opened
+    on the new version: "Receipt Bridge has updated", with What's new,
+    until Got it. A first run says nothing."""
+    with tempfile.TemporaryDirectory() as tmp:
+        service = _service(Path(tmp))
+        service.db.set_state("update:last", json.dumps(dict(NEWER, version="v1.1.2", notes="- Faster")))
+        with mock.patch.object(updates, "VERSION", "1.1.1"), \
+                mock.patch.object(updates, "on_disk_version", return_value="1.1.2"):
+            snap = service.update_snapshot()
+            assert snap["restart_needed"] and snap["notes"] == "- Faster"
+            assert service.just_updated() is None, "a first run only notes the version"
+        with mock.patch.object(updates, "VERSION", "1.1.2"), \
+                mock.patch.object(updates, "on_disk_version", return_value="1.1.2"):
+            assert service.just_updated() == {"version": "1.1.2", "notes": "- Faster"}
+            client, token = _client(service)
+            assert client.post("/api/updates/seen", headers={"x-receipt-bridge": token}).status_code == 200
+            assert service.just_updated() is None
+        with mock.patch.object(updates, "VERSION", "1.1.3"):
+            assert service.just_updated() == {"version": "1.1.3", "notes": ""}, "notes for another version aren't shown"
+
+
 def test_a_git_checkout_behind_github_pulls() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         service = _service(Path(tmp))

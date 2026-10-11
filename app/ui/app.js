@@ -117,6 +117,23 @@ function amountOf(r) {
   return money(r.total, r.currency);
 }
 
+/** A receipt's amount; one in another currency has an ⓘ that shows it in
+ * pounds on hover: FreeAgent's figure where it has one, else HMRC's rate
+ * for its month. `focus`: the ⓘ can take the keyboard (not inside a button). */
+function amountHtml(r, focus = true) {
+  const shown = esc(amountOf(r));
+  const p = r.in_pounds;
+  if (!p) return shown;
+  const month = p.month ? new Date(`${p.month}-01T12:00:00`).toLocaleDateString("en-GB", { month: "long", year: "numeric" }) : "";
+  const how = {
+    charged: "The £ charged, as you entered it.",
+    bank: `What the bank payment on ${p.date ? longDate(p.date) : "its day"} took, from FreeAgent.`,
+    freeagent: "As FreeAgent converted it.",
+    hmrc: `At HMRC's rate for ${month}: ${Number(p.rate).toLocaleString("en-GB", { maximumFractionDigits: 4 })} ${r.currency} to £1.`,
+  }[p.source] || "";
+  return `<span class="m-tip fx" ${focus ? 'tabindex="0"' : ""}>${shown}${ICON.info}<span class="m-tip-pop" role="tooltip"><b>${esc(money(p.amount, "GBP"))}</b> ${esc(how)}</span></span>`;
+}
+
 function money(amount, currency) {
   if (amount === null || amount === undefined) return "—";
   try {
@@ -195,10 +212,11 @@ async function refresh(force = false) {
 
   if (state.view === "statement") {
     const paged = !isMonthPeriod(state.stPeriod);          // a month is shown whole
-    const key = `statement:${state.stPeriod}:${paged ? `${state.stLimit}:${state.stPage}` : ""}:${snap.version}`;
+    const show = ["todo", "done"].includes(state.stFilter) ? state.stFilter : "all";   // the pill: filtered before paging
+    const key = `statement:${state.stPeriod}:${show}:${paged ? `${state.stLimit}:${state.stPage}` : ""}:${snap.version}`;
     if (force || key !== state.receiptsKey) {
       // the payments, and the unlinked files that could be their receipts
-      const query = `month=${encodeURIComponent(state.stPeriod)}`
+      const query = `month=${encodeURIComponent(state.stPeriod)}&show=${show}`
         + (paged ? `&limit=${state.stLimit}&offset=${state.stPage * state.stLimit}` : "");
       try { state.statement = await api(`/api/statement?${query}`); }
       catch (err) { state.statement = { error: err.message, rows: [], summary: {} }; }
@@ -411,9 +429,21 @@ function renderBanner() {
            <button class="btn small" data-action="reconnect">Reconnect</button>`}</div>`;
   } else if (state.snap.update?.can_install) {
     const u = state.snap.update;
+    // "See changes": What's new, opened in the banner
+    const open = state.updateNotes && u.notes;
     el.innerHTML = `<div class="banner info"><div class="text"><b>Version ${esc(u.latest.replace(/^v/i, ""))} of Receipt Bridge is ${u.restart_needed ? "installed" : "available"}.</b>
-      ${u.installing ? " Installing; the app will restart." : u.restart_needed ? " Restart to start using it." : " Takes a few seconds; your receipts and settings are kept."}</div>
+      ${u.installing ? " Installing; the app will restart." : u.restart_needed ? " Restart to start using it." : " Takes a few seconds; your receipts and settings are kept."}
+      ${open ? `<pre class="banner-notes">${esc(u.notes)}</pre>` : ""}</div>
+      ${u.notes ? `<button class="btn quiet small" data-action="update-notes" aria-expanded="${!!open}">${open ? "Hide changes" : "See changes"}</button>` : ""}
       ${updateButton(u, "btn small")}</div>`;
+  } else if (state.snap.updated) {
+    // opened after an update: say so, with What's new
+    const n = state.snap.updated;
+    const open = state.updateNotes && n.notes;
+    el.innerHTML = `<div class="banner info"><div class="text"><b>Receipt Bridge has updated to ${esc(n.version)}.</b>
+      ${open ? `<pre class="banner-notes">${esc(n.notes)}</pre>` : ""}</div>
+      ${n.notes ? `<button class="btn quiet small" data-action="update-notes" aria-expanded="${!!open}">${open ? "Hide what's new" : "See what's new"}</button>` : ""}
+      <button class="btn small" data-action="update-seen">Got it</button></div>`;
   } else {
     el.innerHTML = "";
   }
@@ -842,7 +872,7 @@ function updateCard(u) {
         ${u.can_install ? updateButton(u) : ""}
         ${u.available && !u.can_install ? `<button class="btn small" data-action="update-open">View on GitHub</button>` : ""}
         ${u.installing ? "" : `<button class="btn small" data-action="update-check" ${u.checking ? "disabled" : ""}>Check for updates</button>`}</div>
-      ${u.available && !u.restart_needed && u.notes ? `<details class="log"><summary>What's new</summary><pre>${esc(u.notes)}</pre></details>` : ""}
+      ${u.available && u.notes ? `<details class="log"><summary>What's new</summary><pre>${esc(u.notes)}</pre></details>` : ""}
     </div>`;
 }
 
@@ -1016,6 +1046,9 @@ function gmailCard(s) {
         ${state.gmailAsk && !s.connecting ? gmailAskHtml() : ""}
         ${s.has_credentials ? "" : licenceDrop()}
         ${accountRows || `<div class="card-note">No account connected.</div>`}
+        <div class="card-row"><div class="grow">Label filed emails
+            <div class="sub">Once a receipt is filed in FreeAgent, its email is labelled <b>Receipt Bridge/Filed as Expense</b> or <b>Filed as bank transaction</b> in Gmail.</div></div>
+          <label class="switch"><input type="checkbox" data-action="label-filed" ${s.label_filed ? "checked" : ""} aria-label="Label filed emails"><span></span></label></div>
         <div class="card-note">Opens in your browser. Reads your email to find receipts${s.label_filed
           ? `, and labels an email <b>Receipt Bridge/Filed as Expense</b> or <b>Filed as bank transaction</b> once its receipt is filed` : ""}. Never sends or deletes email.</div>
       </div>`;
@@ -1570,6 +1603,12 @@ document.addEventListener("click", (e) => {
         const { installed } = await api("/api/licence/choose", { method: "POST" });
         if (installed) toast(`<b>Licence installed.</b> ${esc(installed.join(" and "))} can now be connected.`);
       });
+    case "update-notes":
+      state.updateNotes = !state.updateNotes;
+      return renderBanner();
+    case "update-seen":
+      state.updateNotes = false;
+      return act(() => api("/api/updates/seen", { method: "POST" }));
     case "update-install":
       return act(() => api("/api/updates/install", { method: "POST" }));
     case "update-check":
@@ -1721,6 +1760,9 @@ document.addEventListener("change", (e) => {
   }
   if (e.target.dataset.action === "auto-scan") {
     act(() => api("/api/settings", { method: "POST", body: { auto_scan: e.target.checked } }));
+  }
+  if (e.target.dataset.action === "label-filed") {
+    act(() => api("/api/settings", { method: "POST", body: { label_filed: e.target.checked } }));
   }
 });
 

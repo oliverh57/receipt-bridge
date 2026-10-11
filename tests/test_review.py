@@ -586,6 +586,96 @@ def test_the_dock_icon_counts_bank_feed_payments_left_to_match_and_approve() -> 
         assert service.review_counts()["bank_left"] == 1
 
 
+def test_a_receipt_in_another_currency_is_shown_in_pounds() -> None:
+    """The ⓘ by a foreign amount: the £ charged you entered, else what the
+    bank payment took (FreeAgent's), else FreeAgent's own conversion of a
+    filed expense, else HMRC's rate for the month, fetched once in the
+    background."""
+    from unittest import mock
+
+    import app.service as service_module
+
+    service, _flagged, tmp = make()
+    with tmp:
+        connected(service, Path(tmp.name))
+        rid = email_receipt(service, 1, "Railco", "2026-03-04", 30.0)
+        service.db.update_receipt(rid, {"currency": "EUR"})
+        assert by_id(service)[rid]["in_pounds"] is None, "no rates for March yet"
+        assert any(k.startswith("hmrc-rates:2026-03") for k in service._queued)
+        csv = ("Country/Territories,Currency,Currency Code,Currency Units per £1,Start date,End date\n"
+               "Eurozone,Euro,EUR,1.2,01/03/2026,31/03/2026\nFrance,Euro,EUR,1.3,01/03/2026,31/03/2026\n")
+        with mock.patch.object(service_module.requests, "get",
+                               return_value=SimpleNamespace(text=csv, raise_for_status=lambda: None)) as get:
+            key, job = service._jobs.get_nowait()
+            job()
+            service._queued.discard(key)
+        assert "monthly_csv_2026-03.csv" in get.call_args.args[0]
+        assert by_id(service)[rid]["in_pounds"] == {"amount": 25.0, "source": "hmrc", "rate": 1.2, "month": "2026-03"}
+        assert not service._queued, "fetched once"
+
+        service.set_receipt_fields(rid, {"native_gross": "26.10"})          # the £ charged, entered
+        assert by_id(service)[rid]["in_pounds"] == {"amount": 26.1, "source": "charged"}
+
+        gbp = email_receipt(service, 2, "Cafe", "2026-03-06", 9.0)
+        assert by_id(service)[gbp]["in_pounds"] is None, "pounds already"
+
+        filed = email_receipt(service, 3, "Hotel", "2026-03-07", 50.0)    # an expense FreeAgent converted
+        service.db.update_receipt(filed, {"currency": "EUR", "status": "filed", "freeagent_json": json.dumps(
+            {"state": "filed", "kind": "expense", "url": "x/1", "native_gross": 42.3})})
+        attached = email_receipt(service, 4, "Railco", "2026-03-04", 25.0)   # filed against a payment: what it took
+        service.db.update_receipt(attached, {"currency": "EUR", "status": "filed", "freeagent_json": json.dumps(
+            {"state": "filed", "kind": "attach", "url": "e/1", "transaction": "tx/1"})})
+        shown = {r["id"]: r["in_pounds"] for r in service.receipts("exported")}
+        assert shown[filed] == {"amount": 42.3, "source": "freeagent"}
+        assert shown[attached] == {"amount": 21.5, "source": "bank", "date": "2026-03-05"}
+
+
+def test_filing_an_expense_in_another_currency_keeps_freeagents_pounds() -> None:
+    from tests.test_filer import env as filer_env
+
+    db, rid, tmp = filer_env()
+    with tmp:
+        db.update_receipt(rid, {"currency": "EUR", "paid_by": "personal"})
+        client = SimpleNamespace(writes_allowed=False, calls=[],
+                                 create_expense=lambda body: {"url": "https://fa.test/v2/expenses/3",
+                                                              "native_gross_value": "-18.40"})
+        plan = filer.plan_for(db.get_receipt(rid), transaction=None, category_url=CATEGORY,
+                              user_url="https://fa.test/v2/users/1", vat_registered=True)
+        filer.file_receipt(client, db, rid, plan)
+        assert json.loads(db.get_receipt(rid)["freeagent_json"])["native_gross"] == 18.4
+
+
+def test_labelling_filed_emails_is_a_setting() -> None:
+    """Settings → Email: "Label filed emails" wins over config.yaml, and
+    while it's off a Gmail sign-in doesn't ask to change email."""
+    service, _flagged, tmp = make()
+    with tmp:
+        assert service.config.label_filed
+        service.set_label_filed(False)
+        assert not service.config.label_filed and service.snapshot()["label_filed"] is False
+        assert "https://www.googleapis.com/auth/gmail.modify" not in service.config.scopes
+        again = ReceiptService(Config(raw=dict(service.config.raw, gmail={})))   # kept for next time
+        assert not again.config.label_filed
+        service.set_label_filed(True)
+        assert service.config.label_filed
+
+
+def test_bank_feed_pills_filter_before_the_page_is_cut() -> None:
+    """Needs approval with one payment is one payment on one page, however
+    many payments the period has; the pills count the whole period."""
+    service, _flagged, tmp = make()
+    with tmp:
+        connected(service, Path(tmp.name))
+        service.mark_no_receipt("tx/1", "Tax payment")
+        service.mark_no_receipt("tx/3", "Tax payment")
+        todo = service.statement(None, "all", limit=1, show="todo")
+        assert [r["url"] for r in todo["rows"]] == ["tx/2"] and todo["total_payments"] == 1
+        assert todo["shown"] == {"all": 3, "done": 2, "todo": 1}
+        done = service.statement(None, "all", limit=1, show="done")
+        assert done["total_payments"] == 2 and len(done["rows"]) == 1, "paged within the filter"
+        assert service.statement(None, "all", limit=1)["total_payments"] == 3
+
+
 def test_the_statement_can_show_every_month_newest_first() -> None:
     service, _flagged, tmp = make()
     with tmp:

@@ -35,7 +35,7 @@ const m = {
   stPick: null,                      // Statement: { url, sel } while picking from all files not yet linked
   stPending: null,                   // Statement: receipt whose payment to open once loaded
   linkFile: null,                    // Statement: receipt id being linked from Files ("Link to other payment")
-  curOpen: null,                     // receipt id whose currency list is open
+  curOpen: null,                     // whose currency list is open: a receipt id, or "email" (Convert to receipt)
   asel: null,                        // Archived: selected receipt id
   multi: [],                         // Files: ids picked with shift- or ⌘-click (2 or more = bulk)
 };
@@ -93,7 +93,7 @@ function rowButton(r, key, sel, note, action) {
       aria-pressed="${on}">
       <span class="ic">${ICON[key] || ICON.link}</span>
       <span class="txt"><span class="top"><span class="v">${esc(r.supplier || "Unknown supplier")}</span>${
-        r.source === "gmail" ? `<span class="src-badge">Email</span>` : ""}<span class="a">${esc(amountOf(r))}</span></span>
+        r.source === "gmail" ? `<span class="src-badge">Email</span>` : ""}<span class="a">${amountHtml(r, false)}</span></span>
         <span class="m-sub">${esc(r.date ? shortDate(r.date) : "No date")} · ${esc(note)}</span></span>
     </button>`;
 }
@@ -331,15 +331,21 @@ const CURRENCIES = [["GBP", "British pound", "£"], ["EUR", "Euro", "€"], ["US
   ["NZD", "New Zealand dollar", "$"], ["PEN", "Peruvian sol"], ["PLN", "Polish złoty", "zł"], ["SEK", "Swedish krona", "kr"],
   ["SGD", "Singapore dollar", "$"], ["THB", "Thai baht", "฿"], ["TRY", "Turkish lira", "₺"], ["ZAR", "South African rand", "R"]];
 
-/** Currency: a button that opens a searchable list. */
-function currencyHtml(r) {
-  const code = r.currency || "";
-  const open = m.curOpen === r.id;
-  const options = CURRENCIES.map(([c, name, sym]) => `<button type="button" class="cur-opt ${c === code ? "on" : ""}" data-action="cur-pick"
-      data-id="${r.id}" data-code="${c}" data-search="${esc(`${c} ${name} ${sym || ""}`.toLowerCase())}">
-      <b>${c}</b><span>${esc(name)}</span>${c === code ? ICON.tick : ""}</button>`).join("");
+/** A file's currency in Files. */
+function currencyHtml(r) { return currencyPicker(r.currency || "", r.id); }
+
+/** Currency: a button that opens a searchable list. `owner`: whose it is,
+ * a receipt's id, or "email" for Convert to receipt's form. */
+function currencyPicker(code, owner) {
+  const open = m.curOpen === owner;
+  const who = typeof owner === "number" ? `data-id="${owner}"` : `data-owner="${esc(owner)}"`;
+  // a code the list doesn't have (read from an email) is still offered
+  const list = CURRENCIES.some(([c]) => c === code) || !code ? CURRENCIES : [[code, code], ...CURRENCIES];
+  const options = list.map(([c, name, sym]) => `<button type="button" class="cur-opt ${c === code ? "on" : ""}" data-action="cur-pick"
+      ${who} data-code="${esc(c)}" data-search="${esc(`${c} ${name} ${sym || ""}`.toLowerCase())}">
+      <b>${esc(c)}</b><span>${esc(name)}</span>${c === code ? ICON.tick : ""}</button>`).join("");
   return `<span class="cur">
-      <button type="button" class="cur-btn ${code ? "" : "unset"}" data-action="cur-open" data-id="${r.id}" aria-haspopup="listbox"
+      <button type="button" class="cur-btn ${code ? "" : "unset"}" data-action="cur-open" ${who} aria-haspopup="listbox"
         aria-expanded="${open}">${esc(code || "Currency")} <span aria-hidden="true">▾</span></button>
       ${open ? `<div class="cur-pop" role="listbox" aria-label="Currency"><input class="cur-q" type="search" placeholder="Search: euro, yen, USD…"
           data-action="cur-search" autocomplete="off"><div class="cur-list">${options}</div></div>` : ""}
@@ -645,7 +651,7 @@ function headHtml(r) {
       <h1>${esc(r.supplier || "Unknown supplier")}</h1>
       <span class="chip ${kind}">${esc(label)}</span>
       <span class="grow"></span>
-      <span class="amt">${esc(amountOf(r))}</span>
+      <span class="amt">${amountHtml(r)}</span>
     </div>
     <div class="m-dsub">${esc(r.date ? longDate(r.date) : "No date on receipt")} · ${esc(source)}</div>`;
 }
@@ -862,7 +868,7 @@ function claimRow(r) {
   return `<tr class="filed ${r.id === m.xsel ? "selected" : ""}" data-action="x-sel" data-id="${r.id}">
     <td class="d">${esc(r.date ? statementDate(r.date.slice(0, 10)) : "No date")}</td>
     <td>${esc(r.supplier || "Unknown supplier")}</td>
-    <td class="r amt">${esc(amountOf(r))}</td>
+    <td class="r amt">${amountHtml(r)}</td>
     <td><div class="st-rec"><span class="st-status filed">${ICON.filed}<span>Claimed</span></span>
       <span class="muted">${esc(detail)}</span></div></td></tr>`;
 }
@@ -885,7 +891,7 @@ function claimPanelHtml(r) {
   const fa = state.snap.freeagent || {};
   return `<div class="st-phead"><div><div class="st-pdesc">${esc(r.supplier || "Unknown supplier")}</div>
       <div class="muted">${esc(r.date ? longDate(r.date) : "No date on receipt")} · ${esc({ photo: "Photo", gmail: "Email" }[r.source] || "File")}</div></div>
-      <span class="amt">${esc(amountOf(r))}</span>
+      <span class="amt">${amountHtml(r)}</span>
       <button class="link" data-action="x-close" aria-label="Close">✕</button></div>
     <div class="st-pbody">${m.xedit === r.id ? claimEditHtml(r) : `
       <div class="m-wait"><div class="t">Claimed</div><div class="b">Saved to FreeAgent as an expense${r.category_name ? ` (${esc(r.category_name)})` : ""}. Nothing more to do.</div></div>
@@ -1050,7 +1056,8 @@ function renderStatement() {
   }
   if (m.stSel && !(st.rows || []).some((t) => t.url === m.stSel)) m.stSel = null;
   const sel = (st.rows || []).find((t) => t.url === m.stSel) || null;
-  const count = (k) => (st.rows || []).filter((r) => stKind(r) === k).length;
+  // the pills count the whole period (the server's), not just this page
+  const count = (k) => st.shown?.[k] ?? (st.rows || []).filter((r) => stKind(r) === k).length;
   const todo = count("todo"), done = count("done");
   const payments = todo + done;
   // one row that is both the key to the bar and the filter
@@ -1087,7 +1094,7 @@ function renderStatement() {
         <div class="money"><span class="muted">Unapproved transaction total${paged ? ", this page" : ""}</span><b>${esc(money(unapproved, "GBP"))}</b></div>
       </section>
       <div class="st-pills" role="group" aria-label="Show">
-        ${pill("all", "All", (st.rows || []).length)}
+        ${pill("all", "All", st.shown?.all ?? (st.rows || []).length)}
         ${pill("todo", "Needs approval", todo, "seg-miss")}
         ${pill("done", "Done", done, "seg-done")}</div>
       <div class="st-table-box"><table class="st-table">
@@ -1695,13 +1702,16 @@ document.addEventListener("click", async (e) => {
         toast(`${deleted} archived receipt${deleted === 1 ? "" : "s"} deleted.`);
       });
     }
-    case "cur-open":
-      m.curOpen = m.curOpen === id ? null : id;
+    case "cur-open": {
+      const owner = target.dataset.owner || id;
+      m.curOpen = m.curOpen === owner ? null : owner;
       render();
       document.querySelector(".cur-q")?.focus();
       return;
+    }
     case "cur-pick":
       m.curOpen = null;
+      if (target.dataset.owner === "email") return setEmailCurrency(target.dataset.code);    // emails.js
       return act(() => api(`/api/receipts/${id}/fields`, { method: "POST", body: { currency: target.dataset.code } }));
     case "m-photo-date":
       return r && act(() => api(`/api/receipts/${r.id}/fields`, { method: "POST", body: { purchased_on: target.dataset.day } }));
@@ -1824,7 +1834,11 @@ document.addEventListener("click", async (e) => {
         await api(`/api/receipts/${id}/payment`, { method: "POST", body: { url: target.dataset.url } });
         toast(`${r ? r.supplier : "That file"} suggested for this payment. Check it, then Approve.`);
       });
-    case "st-filter": state.stFilter = target.dataset.filter; return render();
+    case "st-filter":                    // filtered by the server before paging: from page 1
+      state.stFilter = target.dataset.filter;
+      state.stPage = 0; m.stSel = null;
+      render();
+      return refresh(true);
     case "st-page":
       state.stPage = Math.max(0, Number(target.dataset.page) || 0);
       state.statement = null; m.stSel = null;

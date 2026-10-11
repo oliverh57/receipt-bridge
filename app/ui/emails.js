@@ -203,6 +203,7 @@ function openDialog(id) {
 
 function closeEmailDialog() {
   em.dialog = null;
+  if (m.curOpen === "email") m.curOpen = null;            // its currency list
   em.forPayment = null;
   em.dialogError = "";
   em.drawn.dialog = em.drawn.preview = undefined;
@@ -472,10 +473,7 @@ function dialogHtml(mail) {
   const d = mail.draft;
   const input = (field, type, attrs = "") =>
     `<input class="edit-input" type="${type}" data-action="e-field" data-field="${field}" value="${esc(f[field])}" ${attrs}>`;
-  const codes = CURRENCIES.map(([c]) => c);
-  if (!codes.includes(f.currency)) codes.unshift(f.currency);
-  const currency = `<select class="e-cur" data-action="e-currency" aria-label="Currency">${codes.map((c) =>
-      `<option ${c === f.currency ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>`;
+  const currency = currencyPicker(f.currency, "email");      // the one Files uses (match.js)
   const others = d.amounts.filter((a) => !(a.amount.toFixed(2) === f.total && a.currency === f.currency)).slice(0, 4);
   const found = d.total != null ? `Total read from ${esc(d.total_found_in)}.` : `<span class="ai">No total found</span>`;
   const pw = (to, badge, cls, title, sub) => {
@@ -536,6 +534,13 @@ function dialogHtml(mail) {
         <button class="btn" data-action="e-cancel">Cancel</button>
         ${addButton(mail)}
       </div>`;
+}
+
+/** A currency picked in Convert to receipt's form (the picker is Files'). */
+function setEmailCurrency(code) {
+  if (!em.forms[em.dialog]) return;
+  em.forms[em.dialog].currency = code;
+  render();
 }
 
 /** The category, if it's still one of yours; else "". */
@@ -818,10 +823,7 @@ document.addEventListener("input", (e) => {
 document.addEventListener("change", (e) => {
   if (state.view !== "emails" && !em.dialog) return;
   const a = e.target.dataset.action;
-  if (a === "e-currency" && em.forms[em.dialog]) {
-    em.forms[em.dialog].currency = e.target.value;
-    render();
-  } else if ((a === "e-category" || a === "e-project") && em.mails[em.dialog] && em.forms[em.dialog]) {
+  if ((a === "e-category" || a === "e-project") && em.mails[em.dialog] && em.forms[em.dialog]) {
     (pairedFor(em.mails[em.dialog]) || em.forms[em.dialog])[a === "e-category" ? "category" : "project"] = e.target.value;
     render();
   } else if (a === "e-document" && em.forms[em.dialog]) {

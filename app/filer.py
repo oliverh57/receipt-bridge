@@ -366,15 +366,22 @@ def file_receipt(client: FreeAgent, db: Database, receipt_id: int, plan: Plan) -
             if state.get("state") == "filing" and len(urls) < len(parts):
                 found = _our_expenses(client, plan.body["dated_on"], reference(receipt_id))
                 urls = urls + [u for u in found if u not in urls]
+            # in another currency: FreeAgent's own £ figure, when every part was made here
+            native: Decimal | None = Decimal(0) if not urls else None
             for n, part in enumerate(parts[len(urls):], start=len(urls)):
                 body = dict(part)
                 if n == 0 and plan.attachment:          # the receipt goes on the first
                     body["attachment"] = _encoded(plan.attachment)
                 _record(db, receipt_id, {"state": "filing", "kind": "expense", "urls": urls,
                                          "url": urls[0] if urls else None})
-                urls.append(client.create_expense(body)["url"])
-            _record(db, receipt_id, {"state": "filed", "kind": "expense", "url": urls[0], "urls": urls},
-                    status=FILED, filed_at=_now())
+                made = client.create_expense(body)
+                urls.append(made["url"])
+                value = made.get("native_gross_value")
+                native = native + abs(Decimal(str(value))) if native is not None and value not in (None, "") else None
+            filed = {"state": "filed", "kind": "expense", "url": urls[0], "urls": urls}
+            if native is not None and (plan.body.get("currency") or "GBP") != "GBP":
+                filed["native_gross"] = float(native)
+            _record(db, receipt_id, filed, status=FILED, filed_at=_now())
             split = f", split across {len(urls)} VAT rates" if len(urls) > 1 else ""
             return f"Filed {row['vendor']} as an expense{split}"
 

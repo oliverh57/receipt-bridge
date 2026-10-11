@@ -68,6 +68,7 @@ class Email(BaseModel):
 
 class Settings(BaseModel):
     auto_scan: bool | None = None
+    label_filed: bool | None = None
     theme: str | None = None
     waiting_days: int | None = None
     archive_delete_days: int | None = None
@@ -533,14 +534,18 @@ def create_app(service: ReceiptService) -> FastAPI:
         return {"ok": True}
 
     @app.get("/api/statement")
-    def statement(account: str = "", month: str = "", limit: int = 0, offset: int = 0) -> dict[str, Any]:
+    def statement(account: str = "", month: str = "", limit: int = 0, offset: int = 0,
+                  show: str = "all") -> dict[str, Any]:
         """A month (YYYY-MM), or month=all: every month, newest first, a page
-        of `limit` payments from `offset` (limit 0: all of them)."""
+        of `limit` payments from `offset` (limit 0: all of them). `show`:
+        all, todo (needs approval) or done, filtered before the page is cut."""
         if month and month != "all" and not re.fullmatch(r"\d{4}-\d{2}|\d{4}-\d{2}-\d{2}\.\.\d{4}-\d{2}-\d{2}", month):
             raise HTTPException(400, "month must be YYYY-MM, YYYY-MM-DD..YYYY-MM-DD or all")
         if limit < 0 or offset < 0:
             raise HTTPException(400, "limit and offset can't be negative")
-        return service.statement(account or None, month or None, limit or None, offset)
+        if show not in ("all", "todo", "done"):
+            raise HTTPException(400, "show must be all, todo or done")
+        return service.statement(account or None, month or None, limit or None, offset, show)
 
     @app.post("/api/statement/payment")
     def statement_payment(body: dict[str, Any]) -> dict[str, Any]:
@@ -669,6 +674,11 @@ def create_app(service: ReceiptService) -> FastAPI:
         return {"ok": True}
 
     # ---- receipt folders ----------------------------------------------------
+
+    @app.post("/api/updates/seen")
+    def updates_seen() -> dict[str, Any]:
+        service.update_seen()
+        return {"ok": True}
 
     @app.post("/api/updates/check")
     def updates_check() -> dict[str, Any]:
@@ -854,6 +864,8 @@ def create_app(service: ReceiptService) -> FastAPI:
     def settings(body: Settings) -> dict[str, Any]:
         if body.auto_scan is not None:
             service.set_auto_scan(body.auto_scan)
+        if body.label_filed is not None:
+            service.set_label_filed(body.label_filed)
         if body.waiting_days is not None:
             try:
                 service.set_waiting_days(body.waiting_days)

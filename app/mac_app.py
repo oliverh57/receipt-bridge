@@ -55,6 +55,7 @@ from Foundation import NSMakeRect, NSMakeSize, NSTimer, NSURL, NSURLRequest
 from PyObjCTools import AppHelper
 from UserNotifications import (
     UNAuthorizationOptionAlert,
+    UNAuthorizationOptionBadge,
     UNAuthorizationOptionSound,
     UNAuthorizationStatusAuthorized,
     UNAuthorizationStatusDenied,
@@ -122,8 +123,10 @@ class Notifier(NSObject, protocols=[objc.protocolNamed("UNUserNotificationCenter
                 f"{error.domain()} {error.code()}: {error.localizedDescription()}" if error is not None else None,
             )
 
+        # Badge: macOS only shows the Dock icon's number ("Badge application
+        # icon" in System Settings → Notifications) for an app that asked for it
         self.center.requestAuthorizationWithOptions_completionHandler_(
-            UNAuthorizationOptionAlert | UNAuthorizationOptionSound, done
+            UNAuthorizationOptionAlert | UNAuthorizationOptionSound | UNAuthorizationOptionBadge, done
         )
 
     @objc.python_method
@@ -413,6 +416,7 @@ class AppDelegate(NSObject):
             left = self.service.snapshot()["counts"].get("bank_left", 0) if self.service else 0
             label = str(left) if left else ""
             if label != self.last_badge:
+                log.info("dock badge: %s", label or "none")
                 NSApplication.sharedApplication().dockTile().setBadgeLabel_(label)
                 self.window.setTitle_(f"{APP_NAME} — {left} to match in Bank Feed" if left else APP_NAME)
                 self.last_badge = label
