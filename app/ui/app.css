@@ -432,6 +432,8 @@ legend { font-size: 12px; font-weight: 600; margin-bottom: 4px; padding: 0; }
 .m-tip.fx { position: relative; }
 .m-tip.fx .m-tip-pop { left: auto; right: 0; width: max-content; max-width: 240px; text-align: left; font-size: 12px; white-space: normal; }
 .m-tip.fx svg { width: 13px; height: 13px; }
+/* near the bottom of a table it opens upwards: below, the box would cut it off and grow a scroll bar */
+.st-table tbody tr:nth-last-child(-n+2) .m-tip-pop { top: auto; bottom: calc(100% - 2px); }
 .m-row { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 9px 10px; margin-bottom: 2px; border: 0;
   border-radius: 8px; background: transparent; text-align: left; cursor: default; }
 .m-row:hover { background: var(--hover); }
