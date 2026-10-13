@@ -32,14 +32,14 @@ RECEIPT_TERMS = ('{receipt invoice "order confirmation" "your order" "booking co
                  '"thanks for your order" "amount paid" "tax invoice" "e-ticket"}')
 
 # A subject that says what it is: "Your receipt from Apple", "Invoice INV-0042",
-# "Order confirmation #123", "Your Uber trip".
+# "Order confirmation #123", "Your Uber trip", "Your Friday evening trip with Uber".
 SUBJECT_STRONG = re.compile(
     # not part of a hyphenated name: "[you/receipt-bridge] Secrets exposed"
     r"\breceipts?\b(?!-)|\binvoice\b(?!-)|\border\s+(?:confirm|#|no\b|number|\d)|"
     r"\b(?:payment|purchase|booking|reservation|order)\s+(?:confirm|received|successful|complete)|"
     r"\bconfirm(?:ation|ed)?\b.{0,20}\b(?:order|booking|payment|purchase|reservation)\b|"
     r"thank(?:s| you) for (?:your )?(?:order|purchase|payment|booking|shopping)|"
-    r"\byour (?:\w+ )?(?:order|booking|purchase|trip|ride)\b|\byou(?:'ve)? paid\b|\be-?tickets?\b|"
+    r"\byour (?:\w+ ){0,3}(?:order|booking|purchase|trip|ride)\b|\byou(?:'ve)? paid\b|\be-?tickets?\b|"
     r"\bsubscription (?:renewed|confirmation)|\brenewal confirm",
     re.IGNORECASE,
 )
@@ -63,6 +63,10 @@ NOT_RECEIPT = re.compile(
     r"\bsecrets?\b|\bexposed\b|vulnerabilit|push protection",
     re.IGNORECASE,
 )
+# A forward ("Fwd: Your order"): receipts are what people forward on for
+# their expenses, and what the list sees of one is the forwarding headers,
+# not the sender or total underneath.
+FORWARDED = re.compile(r"^\s*fwd?\s*:", re.IGNORECASE)
 # Gmail's own tabs: Promotions and Social are almost never receipts.
 LABEL_PENALTY = {"CATEGORY_PROMOTIONS": 3, "CATEGORY_SOCIAL": 3, "CATEGORY_FORUMS": 2}
 
@@ -131,6 +135,8 @@ def judge(subject: str, sender: str, snippet: str, labels: list[str] | tuple[str
 
     if SUBJECT_STRONG.search(subject):
         add(3, "The subject says it's a receipt or order")
+        if FORWARDED.match(subject):
+            add(1, "Forwarded on")
     if NOT_RECEIPT.search(subject):
         add(-4, "")
     money = headline_amount(f"{subject}\n{snippet}")

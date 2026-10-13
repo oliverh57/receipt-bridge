@@ -52,6 +52,18 @@ def test_receipts_are_picked_out_from_their_subject_sender_and_snippet() -> None
         assert email_inbox.judge(subject, sender, snippet).level == "likely", subject
 
 
+def test_a_forwarded_receipt_is_picked_out_from_its_subject_alone() -> None:
+    # forwarded twice: the snippet is signatures and forwarding headers, and
+    # the sender is the person who forwarded it, not Uber Receipts
+    snippet = ("Sam Example tel: 07700 900123 email: sam@example.test ---------- Forwarded message "
+               "--------- From: Sam Example &lt;sam.home@example.test&gt; Date: Tue, 18 Aug 2026 at 17:28")
+    signal = email_inbox.judge("Fwd: Your Friday evening trip with Uber", "Sam Example <sam@example.test>",
+                               snippet, ["INBOX"])
+    assert signal.level == "likely", signal
+    assert email_inbox.judge("Your Friday evening trip with Uber", "Sam <sam@example.test>", "Hi").level == "maybe"
+    assert email_inbox.judge("Fwd: Lunch on Friday?", "Sam <sam@example.test>", "Hi").level is None
+
+
 def test_newsletters_sales_and_sign_in_emails_are_not_receipts() -> None:
     for subject, snippet, labels in [
         ("Our autumn sale: 30% off everything", "Coats from £49.99", ["CATEGORY_PROMOTIONS"]),
