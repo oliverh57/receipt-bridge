@@ -200,6 +200,17 @@ def create_app(service: ReceiptService) -> FastAPI:
         return FileResponse(path, media_type=mimetypes.guess_type(path.name)[0] or "application/octet-stream",
                             headers={"Content-Disposition": "inline"})
 
+    @app.post("/api/receipts/{receipt_id}/download")
+    def download(receipt_id: int) -> dict[str, Any]:
+        """A copy of the receipt's original in Downloads, shown in Finder."""
+        try:
+            dest = service.download_original(receipt_id)
+        except OSError as exc:
+            raise HTTPException(500, f"Couldn't save it to Downloads: {exc}") from exc
+        if dest is None:
+            raise HTTPException(404, "No document for that receipt")
+        return {"saved": dest.name}
+
     @app.post("/api/receipts/{receipt_id}/tidy")
     def set_tidy(receipt_id: int, change: TidyChange) -> dict[str, Any]:
         try:

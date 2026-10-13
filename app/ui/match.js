@@ -113,9 +113,11 @@ function docFigure(r) {
   // a photo opens as it arrived, before any tidying: only while you're
   // checking the file, the one time it matters
   const original = r.source === "photo" ? "original" : "pdf";
+  const open = r.stage === "check" && r.status === "pending"
+    ? `<a href="/api/receipts/${r.id}/${original}?t=${encodeURIComponent(TOKEN)}" target="_blank" rel="noopener">Open original</a>` : "";
   return `<figure class="m-figure">
       <div class="m-doc">${r.has_pdf ? "" : `<div class="m-nodoc">No document</div>`}</div>
-      ${r.has_pdf && r.stage === "check" && r.status === "pending" ? `<figcaption><a href="/api/receipts/${r.id}/${original}?t=${encodeURIComponent(TOKEN)}" target="_blank" rel="noopener">Open original</a></figcaption>` : ""}
+      ${r.has_pdf ? `<figcaption>${open}<button class="btn small" data-action="doc-download" data-id="${r.id}">Download original</button></figcaption>` : ""}
     </figure>`;
 }
 
@@ -1758,6 +1760,11 @@ document.addEventListener("click", async (e) => {
       const next = nextIn(fileRows(fileGroups()), r.id);
       return act(() => fileOne(r, () => { if (m.sel === r.id) m.sel = next; }));
     }
+    case "doc-download":
+      return act(async () => {
+        const { saved } = await api(`/api/receipts/${id}/download`, { method: "POST" });
+        toast(`Saved to Downloads: ${esc(saved)}`);
+      });
     case "x-sel": m.xsel = m.xsel === id ? null : id; m.xedit = null; return render();
     case "x-edit": m.xedit = id || null; return render();
     case "x-update":

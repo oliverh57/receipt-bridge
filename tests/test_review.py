@@ -416,6 +416,30 @@ def test_a_receipt_freeagent_attached_to_its_own_guess_still_needs_approval() ->
         assert service._bank_feed_left() == 1
 
 
+def test_download_original_saves_a_copy_named_as_the_receipt() -> None:
+    """A photo as it arrived, else the PDF; never over a file already there."""
+    from unittest import mock
+
+    service, rid, tmp = make()
+    with tmp:
+        base = Path(tmp.name)
+        pdf, photo = base / "r.pdf", base / "IMG_1.HEIC"
+        pdf.write_bytes(b"%PDF"); photo.write_bytes(b"heic")
+        service.db.update_receipt(rid, {"pdf_path": str(pdf), "filename": "2026-03-04 Cafe GBP4.50.pdf"})
+        downloads = base / "Downloads"
+        with mock.patch("app.service.subprocess.run") as run:
+            first = service.download_original(rid, downloads)
+            second = service.download_original(rid, downloads)
+            service.db.update_receipt(rid, {"original_path": str(photo)})
+            third = service.download_original(rid, downloads)
+        assert first.name == "2026-03-04 Cafe GBP4.50.pdf" and first.read_bytes() == b"%PDF"
+        assert second.name == "2026-03-04 Cafe GBP4.50 (2).pdf"
+        assert third.name == "2026-03-04 Cafe GBP4.50.HEIC" and third.read_bytes() == b"heic"
+        assert run.call_args.args[0] == ["open", "-R", str(third)]
+        service.db.update_receipt(rid, {"pdf_path": None, "original_path": None})
+        assert service.download_original(rid, downloads) is None
+
+
 def test_rebill_to_a_client_is_validated_and_kept_per_receipt() -> None:
     service, rid, tmp = make()
     with tmp:

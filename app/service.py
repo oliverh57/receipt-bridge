@@ -3277,6 +3277,26 @@ class ReceiptService:
         path = Path(record["pdf_path"])
         return path if path.exists() else None
 
+    def download_original(self, receipt_id: int, folder: Path | None = None) -> Path | None:
+        """"Download original": a copy of the receipt's file in Downloads,
+        shown in Finder. A photo as it arrived, before any tidying; anything
+        else its PDF. Named as the receipt is, never over another file."""
+        source = self.original_path(receipt_id) or self.pdf_path(receipt_id)
+        if source is None:
+            return None
+        record = self.db.get_receipt(receipt_id)
+        stem = Path(record["filename"] or "").stem.replace("/", "-").replace(":", "-").strip(" .") or source.stem
+        folder = folder or Path.home() / "Downloads"
+        folder.mkdir(parents=True, exist_ok=True)
+        dest = folder / f"{stem}{source.suffix}"
+        n = 2
+        while dest.exists():
+            dest = folder / f"{stem} ({n}){source.suffix}"
+            n += 1
+        shutil.copy2(source, dest)
+        subprocess.run(["open", "-R", str(dest)], check=False)
+        return dest
+
     # ---- the snapshot the UI polls --------------------------------------
 
     @property
