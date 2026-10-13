@@ -761,6 +761,8 @@ document.addEventListener("click", (e) => {
       return render();
     case "e-filter":
       em.receiptsOnly = target.dataset.receipts === "1";
+      // All mail shows all of it; Likely receipts starts at what's to check
+      em.pill = em.receiptsOnly ? "todo" : "all";
       return emailsLoad();
     case "e-reload":
       return emailsLoad();
