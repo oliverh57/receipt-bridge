@@ -1429,8 +1429,8 @@ function panelHtml(t) {
   if (t.status === "review") {
     const said = t.freeagent?.description;
     return `${head}<div class="st-pbody">
-      <div class="m-wait"><div class="t">Waiting for approval in FreeAgent</div>
-        <div class="b">FreeAgent attached a receipt and guessed the rest, but it isn't approved. With FreeAgent's receipt on it, approve it there.${said ? ` Check its description first: FreeAgent called it “${esc(said)}”.` : ""}</div></div>
+      <div class="m-wait"><div class="t">Not approved yet</div>
+        <div class="b">FreeAgent added a receipt to this payment itself, but it still needs your approval. Check the details and approve it in FreeAgent.${said ? ` FreeAgent has named it “${esc(said)}”.` : ""}</div></div>
       ${fa.web ? `<div class="m-actions"><a class="btn primary" href="${esc(fa.web)}" target="_blank" rel="noopener">Open FreeAgent</a></div>` : ""}</div>`;
   }
   if (t.status === "not_needed" && t.explained_here?.state === "filed") {
