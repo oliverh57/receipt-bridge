@@ -944,7 +944,8 @@ function suggestedFile(t) {
 }
 
 /** What each Statement line (all outgoing) counts as: still to approve
- * (missing a receipt, or a file suggested), or done (linked, or no receipt needed). */
+ * (missing a receipt, a file suggested, or FreeAgent's own receipt waiting
+ * for approval there), or done (linked, or no receipt needed). */
 function stKind(t) {
   // approved in FreeAgent counts as done, with or without a receipt
   if (t.status === "filed" || t.status === "not_needed" || t.status === "approved" || t.approved) return "done";
@@ -1122,8 +1123,8 @@ function renderStatement() {
 
 function statementRow(t) {
   let look = t.status;                                   // the colour and icon
-  let icon = { filed: ICON.filed, in_match: ICON.link, missing: ICON.check, not_needed: ICON.waiting, approved: ICON.filed }[t.status];
-  let label = { filed: "Linked", in_match: "Suggested", missing: "No receipt", not_needed: "No receipt needed", approved: "Approved" }[t.status];
+  let icon = { filed: ICON.filed, review: ICON.waiting, in_match: ICON.link, missing: ICON.check, not_needed: ICON.waiting, approved: ICON.filed }[t.status];
+  let label = { filed: "Linked", review: "Approve in FreeAgent", in_match: "Suggested", missing: "No receipt", not_needed: "No receipt needed", approved: "Approved" }[t.status];
   let detail = t.receipt ? `${t.receipt.vendor} · ${shortDate(t.receipt.date)}` : "";
   let action = "";
   const r = suggestedFile(t);
@@ -1138,6 +1139,9 @@ function statementRow(t) {
         action = `<button class="btn small" data-action="st-approve" data-url="${esc(t.url)}" data-id="${r.id}">Attach</button>`;
       }
     }
+  } else if (t.status === "review") {
+    look = "missing";
+    detail = "Receipt there, not approved";
   } else if (t.status === "not_needed") {
     detail = t.detail && !/^(No receipt needed|Other)$/.test(t.detail) ? t.detail : "";
   } else if (t.status === "in_match" && r) {
@@ -1421,6 +1425,13 @@ function panelHtml(t) {
       ${t.receipt ? docFigure(filedFile(t)) : ""}
       <div class="m-actions">${noReceiptButton(t)}${t.receipt ? `<button class="btn" data-action="m-unfile" data-id="${t.receipt.id}">Undo link</button>` : ""}
         ${fa.web ? `<a class="btn" href="${esc(fa.web)}" target="_blank" rel="noopener">View in FreeAgent</a>` : ""}</div></div>`;
+  }
+  if (t.status === "review") {
+    const said = t.freeagent?.description;
+    return `${head}<div class="st-pbody">
+      <div class="m-wait"><div class="t">Waiting for approval in FreeAgent</div>
+        <div class="b">FreeAgent attached a receipt and guessed the rest, but it isn't approved. With FreeAgent's receipt on it, approve it there.${said ? ` Check its description first: FreeAgent called it “${esc(said)}”.` : ""}</div></div>
+      ${fa.web ? `<div class="m-actions"><a class="btn primary" href="${esc(fa.web)}" target="_blank" rel="noopener">Open FreeAgent</a></div>` : ""}</div>`;
   }
   if (t.status === "not_needed" && t.explained_here?.state === "filed") {
     const b = t.explained_here.body || {};

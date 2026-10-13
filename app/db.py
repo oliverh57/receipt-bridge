@@ -140,9 +140,10 @@ ADDED_COLUMNS = (
 
 # What the Statement shows (and can change) of FreeAgent's own explanation.
 EXPLANATION_FIELDS = ("category", "sales_tax_rate", "project", "rebill_type", "rebill_factor",
-                      "marked_for_review")       # false: approved in FreeAgent
+                      "marked_for_review",       # false: approved in FreeAgent
+                      "description")
 # Bumped when the cached transactions gain a field: the next read is a full one.
-BANK_CACHE_VERSION = "2"
+BANK_CACHE_VERSION = "3"
 
 
 class Database:

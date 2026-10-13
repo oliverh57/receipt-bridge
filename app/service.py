@@ -2054,7 +2054,13 @@ class ReceiptService:
             marked = self.db.get_state(f"no_receipt:{t['url']}")
             explanation = self._freeagent_explanation(t)
             approved = bool(explanation and explanation["approved"])
-            if t["url"] in filed_by_app or (t.get("explanation_attachments") or 0) > 0:
+            if t["url"] not in filed_by_app and explanation and explanation["guess"] \
+                    and (t.get("explanation_attachments") or 0) > 0:
+                # FreeAgent attached a receipt itself (Smart Capture) and guessed
+                # the rest: not approved, and with its receipt on it the app
+                # can't replace the guess (removable_explanation). Approve there.
+                kind = "review"
+            elif t["url"] in filed_by_app or (t.get("explanation_attachments") or 0) > 0:
                 kind = "filed"
             elif t["url"] in in_match:
                 kind = "in_match"
@@ -2065,7 +2071,7 @@ class ReceiptService:
             else:
                 kind = "missing"
             sorted_as[t["url"]] = (kind, approved, marked)
-        counts = {"filed": 0, "in_match": 0, "missing": 0, "not_needed": 0, "approved": 0}
+        counts = {"filed": 0, "review": 0, "in_match": 0, "missing": 0, "not_needed": 0, "approved": 0}
         for kind, _, _ in sorted_as.values():
             counts[kind] += 1
         # Bank Feed's pills (match.js stKind): done, or still needing approval
@@ -2117,7 +2123,7 @@ class ReceiptService:
                               "changes": self._explanation_changes(t, self.payment_settings(t["url"]))},
                 "explained_here": json.loads(self.db.get_state(f"explained:{t['url']}") or "null"),
             })
-        payments = counts["filed"] + counts["in_match"] + counts["missing"] + counts["approved"]
+        payments = counts["filed"] + counts["review"] + counts["in_match"] + counts["missing"] + counts["approved"]
         return {
             "account": account,
             "account_name": accounts.get(account, {}).get("name", ""),
@@ -2131,7 +2137,7 @@ class ReceiptService:
             "periods": _periods([t["dated_on"][:10] for t in outgoing], self._freeagent_reference().get("year_end")),
             "last_sync": self.db.get_state("freeagent:last_sync"),
             "rows": rows,
-            "summary": {**counts, "payments": payments, "with_receipt": counts["filed"] + counts["in_match"],
+            "summary": {**counts, "payments": payments, "with_receipt": counts["filed"] + counts["review"] + counts["in_match"],
                         "out": round(out_total, 2)},
         }
 
@@ -2292,6 +2298,8 @@ class ReceiptService:
         return {"category": raw.get("category") or t.get("explanation_category"),
                 "vat_rate": f"{float(rate):.1f}" if rate not in (None, "") else None,
                 "rebill": rebill,
+                # what FreeAgent calls it (Smart Capture's reading of a receipt, say)
+                "description": raw.get("description") or None,
                 # approved in FreeAgent (not a guess waiting for review)
                 "approved": raw.get("marked_for_review") is False,
                 # a guess waiting for approval: filing replaces it (_replace_guess)

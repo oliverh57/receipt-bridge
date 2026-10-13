@@ -388,6 +388,34 @@ def test_a_payment_approved_in_freeagent_is_done() -> None:
         assert summary["missing"] == 1 and summary["payments"] == 2
 
 
+def test_a_receipt_freeagent_attached_to_its_own_guess_still_needs_approval() -> None:
+    """Smart Capture attached a receipt and guessed the explanation: not
+    done, and not shown as linked or approved, until approved in FreeAgent.
+    What FreeAgent called it is shown, so a wrong reading can be fixed."""
+    service, rid, tmp = make()
+    with tmp:
+        acct = "https://fa.test/v2/bank_accounts/1"
+        ref = json.loads(service.db.get_state("freeagent:reference"))
+        ref["bank_accounts"] = [{"url": acct, "name": "Example Bank", "currency": "GBP"}]
+        service.db.set_state("freeagent:reference", json.dumps(ref))
+        service.db.set_state("freeagent:accounts", json.dumps([acct]))
+        def tx(n, review):
+            return {"url": f"t/{n}", "bank_account": acct, "dated_on": f"2026-03-0{n}", "amount": f"-{n}.00",
+                    "unexplained_amount": "0", "description": "TRAINLINE",
+                    "bank_transaction_explanations": [{"url": f"e/{n}", "category": "c", "marked_for_review": review,
+                                                       "description": "Travel - Train - A → B",
+                                                       "attachment": {"url": f"a/{n}"}}]}
+        service.db.save_bank_transactions([tx(1, True), tx(2, False)])
+        st = service.statement(acct, "2026-03")
+        rows = {r["url"]: r for r in st["rows"]}
+        assert rows["t/1"]["status"] == "review" and not rows["t/1"]["approved"]
+        assert rows["t/1"]["freeagent"]["description"] == "Travel - Train - A → B"
+        assert rows["t/2"]["status"] == "filed" and rows["t/2"]["approved"]
+        assert st["shown"] == {"all": 2, "done": 1, "todo": 1}
+        assert st["summary"]["review"] == 1 and st["summary"]["payments"] == 2
+        assert service._bank_feed_left() == 1
+
+
 def test_rebill_to_a_client_is_validated_and_kept_per_receipt() -> None:
     service, rid, tmp = make()
     with tmp:
