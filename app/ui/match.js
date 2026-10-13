@@ -117,7 +117,7 @@ function docFigure(r) {
     ? `<a href="/api/receipts/${r.id}/${original}?t=${encodeURIComponent(TOKEN)}" target="_blank" rel="noopener">Open original</a>` : "";
   return `<figure class="m-figure">
       <div class="m-doc">${r.has_pdf ? "" : `<div class="m-nodoc">No document</div>`}</div>
-      ${r.has_pdf ? `<figcaption>${open}<button class="btn small" data-action="doc-download" data-id="${r.id}">Download original</button></figcaption>` : ""}
+      ${r.has_pdf ? `<figcaption>${open}<button class="btn small" data-action="m-download" data-id="${r.id}">Download original</button></figcaption>` : ""}
     </figure>`;
 }
 
@@ -1760,7 +1760,7 @@ document.addEventListener("click", async (e) => {
       const next = nextIn(fileRows(fileGroups()), r.id);
       return act(() => fileOne(r, () => { if (m.sel === r.id) m.sel = next; }));
     }
-    case "doc-download":
+    case "m-download":
       return act(async () => {
         const { saved } = await api(`/api/receipts/${id}/download`, { method: "POST" });
         toast(`Saved to Downloads: ${esc(saved)}`);

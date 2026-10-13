@@ -425,7 +425,8 @@ def test_download_original_saves_a_copy_named_as_the_receipt() -> None:
         base = Path(tmp.name)
         pdf, photo = base / "r.pdf", base / "IMG_1.HEIC"
         pdf.write_bytes(b"%PDF"); photo.write_bytes(b"heic")
-        service.db.update_receipt(rid, {"pdf_path": str(pdf), "filename": "2026-03-04 Cafe GBP4.50.pdf"})
+        service.db.update_receipt(rid, {"pdf_path": str(pdf), "filename": "2026-03-04 Old Name GBP4.50.pdf",
+                                        "vendor": "Cafe", "purchased_on": "2026-03-04", "total": 4.5, "currency": "GBP"})
         downloads = base / "Downloads"
         with mock.patch("app.service.subprocess.run") as run:
             first = service.download_original(rid, downloads)

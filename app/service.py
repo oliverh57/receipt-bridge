@@ -3280,12 +3280,15 @@ class ReceiptService:
     def download_original(self, receipt_id: int, folder: Path | None = None) -> Path | None:
         """"Download original": a copy of the receipt's file in Downloads,
         shown in Finder. A photo as it arrived, before any tidying; anything
-        else its PDF. Named as the receipt is, never over another file."""
+        else its PDF. Named by what the receipt says now (date, supplier,
+        total), never over another file."""
         source = self.original_path(receipt_id) or self.pdf_path(receipt_id)
         if source is None:
             return None
         record = self.db.get_receipt(receipt_id)
-        stem = Path(record["filename"] or "").stem.replace("/", "-").replace(":", "-").strip(" .") or source.stem
+        money = f" {record['currency'] or ''}{record['total']:.2f}" if record["total"] is not None else ""
+        stem = Path(build_filename("{day} {supplier}{money}", {
+            "day": record["purchased_on"] or "", "supplier": record["vendor"] or "Receipt", "money": money})).stem
         folder = folder or Path.home() / "Downloads"
         folder.mkdir(parents=True, exist_ok=True)
         dest = folder / f"{stem}{source.suffix}"
