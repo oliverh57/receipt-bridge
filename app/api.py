@@ -60,6 +60,7 @@ class TidyChange(BaseModel):
 
 class Connect(BaseModel):
     scan_from: str | None = None     # first scan of the new mailbox starts here
+    email: str | None = None         # reconnecting: the address to pre-select
 
 
 class Email(BaseModel):
@@ -335,7 +336,7 @@ def create_app(service: ReceiptService) -> FastAPI:
                 raise HTTPException(400, "scan_from must be a date (YYYY-MM-DD)")
             if scan_from > date.today():
                 raise HTTPException(400, "scan_from can't be in the future")
-        return {"started": service.connect_account(scan_from)}
+        return {"started": service.connect_account(scan_from, (body.email or "") if body else "")}
 
     @app.post("/api/accounts/connect/cancel")
     def cancel_connect() -> dict[str, Any]:

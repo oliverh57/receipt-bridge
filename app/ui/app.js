@@ -418,14 +418,14 @@ function renderBanner() {
   } else if (needs_attention.length) {
     const a = needs_attention[0];
     el.innerHTML = `<div class="banner"><div class="text"><b>${esc(a.email)} needs reconnecting.</b> Email receipts aren't being checked.</div>
-      ${connecting ? `<button class="btn small" data-action="connect-stop">Cancel sign-in</button>` : `<button class="btn small" data-action="reconnect">Reconnect</button>`}</div>`;
+      ${connecting ? `<button class="btn small" data-action="connect-stop">Cancel sign-in</button>` : `<button class="btn small" data-action="reconnect" data-email="${esc(a.email)}">Reconnect</button>`}</div>`;
   } else if (unlabelled) {
     el.innerHTML = `<div class="banner info"><div class="text"><b>Reconnect ${esc(unlabelled.email)} to label filed emails.</b>
       Receipt Bridge now labels an email in Gmail once its receipt is filed, which needs one more permission from Google.
       It still never sends or deletes email.</div>
       ${connecting ? `<button class="btn small" data-action="connect-stop">Cancel sign-in</button>`
         : `<button class="btn quiet small" data-action="label-later">Not now</button>
-           <button class="btn small" data-action="reconnect">Reconnect</button>`}</div>`;
+           <button class="btn small" data-action="reconnect" data-email="${esc(unlabelled.email)}">Reconnect</button>`}</div>`;
   } else if (state.snap.update?.can_install) {
     const u = state.snap.update;
     el.innerHTML = `<div class="banner info"><div class="text"><b>Version ${esc(u.latest.replace(/^v/i, ""))} of Receipt Bridge is ${u.restart_needed ? "installed" : "available"}.</b>
@@ -1047,6 +1047,7 @@ function gmailAskHtml() {
         `<button type="button" class="${ask.months === n ? "on" : ""}" data-action="connect-months" data-months="${n}" aria-pressed="${ask.months === n}">${label}</button>`).join("")}</div>
       ${ask.months === 0 ? `<label class="gm-date">From <input type="date" data-action="connect-date" max="${today}" value="${esc(ask.date)}"></label>` : ""}
       <div class="card-note">${from ? `Emails from ${esc(longDate(from))} onwards. Older receipts link only if FreeAgent has their payments.` : "Choose a date."}</div>
+      ${(state.snap.accounts || []).length ? `<div class="card-note">Google asks which account. For one not listed there, choose <b>Use another account</b>.</div>` : ""}
       <div class="gm-actions"><button class="btn primary small" data-action="connect" ${from ? "" : "disabled"}>Continue to Google</button>
         <button class="btn small" data-action="connect-cancel">Cancel</button></div>
     </div>`;
@@ -1066,7 +1067,7 @@ function gmailCard(s) {
         <div class="grow"><div class="selectable">${esc(a.email)}</div>
           <div class="sub">${pill} · ${a.receipts} receipt${a.receipts === 1 ? "" : "s"}${unlabelled ? " · Reconnect to label filed emails" : ""}</div>
           ${a.state === "expired" ? `<div class="sub">Expires weekly? Set your Google Cloud consent screen to <b>In production</b>.</div>` : ""}</div>
-        ${broken || unlabelled ? `<button class="btn small" data-action="reconnect" ${s.connecting ? "disabled" : ""}>Reconnect</button>` : ""}
+        ${broken || unlabelled ? `<button class="btn small" data-action="reconnect" data-email="${esc(a.email)}" ${s.connecting ? "disabled" : ""}>Reconnect</button>` : ""}
         <button class="btn small danger" data-action="disconnect" data-email="${esc(a.email)}">Sign out</button>
       </div>`;
   }).join("");
@@ -1565,14 +1566,14 @@ document.addEventListener("click", (e) => {
       state.gmailAsk = null;
       return act(async () => {
         await api("/api/accounts/connect", { method: "POST", body: { scan_from: from } });
-        toast("Finish signing in in your browser.", 9000);
+        toast("Finish signing in in your browser, choosing the account to add.", 9000);
       });
     }
     case "reconnect":
       // the same mailbox again: no start date, so the one chosen when it was
       // first connected stays
       return act(async () => {
-        await api("/api/accounts/connect", { method: "POST", body: {} });
+        await api("/api/accounts/connect", { method: "POST", body: { email: target.dataset.email || "" } });
         toast("Finish signing in in your browser. Choose the same account and allow every permission.", 9000);
       });
     case "label-later":

@@ -1756,11 +1756,12 @@ class ReceiptService:
                 if email not in known:
                     del self._health[email]
 
-    def connect_account(self, scan_from: date | None = None) -> bool:
+    def connect_account(self, scan_from: date | None = None, reconnect: str = "") -> bool:
         """Sign in to Google in the user's real browser.
 
         `scan_from`: how far back to look for receipts in this mailbox (asked
-        before sign-in); its first scan starts there. Runs on its own thread,
+        before sign-in); its first scan starts there. `reconnect`: the address
+        being signed in again, which Google pre-selects. Runs on its own thread,
         not the worker: sign-in waits on a person, for up to five minutes, and
         nothing else should queue behind that.
         """
@@ -1771,16 +1772,23 @@ class ReceiptService:
         self._bump()
 
         def run() -> None:
+            known = {a.email for a in self.accounts.list()}
             try:
-                account = self.accounts.add_interactive()
+                account = self.accounts.add_interactive(reconnect)
             except SignInCancelled:
                 self._finish("connect", False, "Gmail sign-in cancelled.")
             except Exception as exc:
                 self._finish("connect", False, f"Sign-in didn't complete: {exc}")
             else:
-                if scan_from:
+                again = account.email in known
+                if scan_from and not again:
                     self.db.set_state(f"scan_from:{account.email}", scan_from.isoformat())
-                self._finish("connect", True, f"Connected {account.email}")
+                if again and not reconnect:
+                    # "Add account", but Google was given one already here
+                    self._finish("connect", True, f"{account.email} was already connected, so it was "
+                                 "signed in again. To add another, choose Use another account in Google.")
+                else:
+                    self._finish("connect", True, f"{'Reconnected' if again else 'Connected'} {account.email}")
                 self.check_accounts()
                 self.scan("connected")          # its receipts, from the date chosen
             finally:

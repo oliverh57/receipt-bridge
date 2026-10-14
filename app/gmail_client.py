@@ -61,6 +61,7 @@ class GmailClient:
         self._labels: dict[str, str] | None = None    # lower-case name → id
         self._sign_in_port: int | None = None
         self._cancelled = False
+        self.login_hint = ""      # the address a sign-in should pre-select
 
     # ---- auth -----------------------------------------------------------
 
@@ -134,6 +135,12 @@ class GmailClient:
         flow = InstalledAppFlow.from_client_secrets_file(
             str(self.credentials_file), self.scopes
         )
+        # Google skips its account chooser when the browser has one Google
+        # session, so "Add account" quietly signed that same account in again
+        # and a second mailbox could never be added. `select_account` always
+        # shows the chooser, with "Use another account"; a reconnect hints
+        # the address it is for so that one is pre-selected.
+        extra = {"login_hint": self.login_hint} if self.login_hint else {}
         # Chosen here rather than by the flow so cancel_sign_in knows where
         # the flow is listening.
         self._sign_in_port = _free_port()
@@ -141,7 +148,8 @@ class GmailClient:
         try:
             creds = flow.run_local_server(
                 port=self._sign_in_port,
-                prompt="consent",
+                prompt="select_account consent",
+                **extra,
                 # Without a limit, abandoning the Google tab left this waiting
                 # forever, holding whatever thread called it.
                 timeout_seconds=SIGN_IN_TIMEOUT,
@@ -188,9 +196,11 @@ class GmailClient:
         # The refresh token is a long-lived mailbox key; keep it owner-only.
         self.token_file.chmod(0o600)
 
-    def authorise(self) -> str:
-        """Run the interactive sign-in. Returns the signed-in address."""
+    def authorise(self, login_hint: str = "") -> str:
+        """Run the interactive sign-in. Returns the signed-in address.
+        `login_hint`: the address Google's chooser should pre-select."""
         self._service = None
+        self.login_hint = login_hint
         self._load_credentials(interactive=True)
         return self.profile_address()
 

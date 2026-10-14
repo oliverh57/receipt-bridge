@@ -120,8 +120,12 @@ class AccountStore:
         client = self._pending
         return bool(client and client.cancel_sign_in())
 
-    def add_interactive(self) -> Account:
+    def add_interactive(self, login_hint: str = "") -> Account:
         """Run Google's sign-in flow and store the result under its address.
+
+        Google always asks which account, so another mailbox can be added
+        while the browser is signed in to one already. `login_hint` pre-selects
+        an address, for reconnecting it.
 
         The flow deliberately opens the user's real browser. Google refuses
         OAuth inside embedded webviews, so this cannot happen in the app's own
@@ -135,7 +139,7 @@ class AccountStore:
         )
         self._pending = client
         try:
-            email = client.authorise()
+            email = client.authorise(login_hint)
         except Exception:
             staging.unlink(missing_ok=True)
             raise

@@ -453,6 +453,44 @@ def test_a_sign_in_waiting_on_the_browser_can_be_cancelled() -> None:
         assert not (store.dir / ".pending.json").exists()
 
 
+def test_signing_in_always_asks_which_google_account() -> None:
+    """With one Google session in the browser, Google skipped its chooser and
+    "Add account" signed the same mailbox in again, so a second one could
+    never be added. Reconnecting pre-selects the address it is for."""
+    from unittest import mock
+
+    from google_auth_oauthlib.flow import InstalledAppFlow
+
+    from app.gmail_client import SignInCancelled
+
+    with tempfile.TemporaryDirectory() as tmp:
+        config = _config(Path(tmp))
+        config.credentials_file.write_text(json.dumps({"installed": {
+            "client_id": "id", "client_secret": "secret",
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": ["http://localhost"],
+        }}), encoding="utf-8")
+        store = AccountStore(config)
+        asked = []
+
+        def run_local_server(self, **kwargs):
+            asked.append(kwargs)
+            raise SignInCancelled("stop here")
+
+        with mock.patch.object(InstalledAppFlow, "run_local_server", run_local_server):
+            for hint in ("", "b@x.com"):
+                try:
+                    store.add_interactive(hint)
+                except SignInCancelled:
+                    pass
+
+        assert all("select_account" in a["prompt"].split() for a in asked)
+        assert all("consent" in a["prompt"].split() for a in asked), "consent still gets a refresh token"
+        assert "login_hint" not in asked[0]
+        assert asked[1]["login_hint"] == "b@x.com"
+
+
 if __name__ == "__main__":
     failures = 0
     for name, func in sorted(globals().items()):
