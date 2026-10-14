@@ -836,7 +836,7 @@ img.doc, .doc img, .m-doc img { -webkit-user-drag: none; user-select: none; }
 .st-bar .seg-sugg, .st-pill i.seg-sugg { background: var(--accent); }
 .st-bar .seg-miss, .st-pill i.seg-miss { background: #e8a33a; }
 .st-pills { display: flex; flex-wrap: wrap; gap: 6px; }
-.e-pills { gap: 4px; flex-wrap: nowrap; }
+.e-pills { gap: 4px; flex-wrap: wrap; }      /* Recurring, when shown, makes five: too many for one line */
 .e-pills .st-pill { padding: 3px 7px; font-size: 11.5px; gap: 5px; white-space: nowrap; }
 .st-pill i.e-dot-ignored { background: var(--muted); }
 .e-pills .st-pill.on i { box-shadow: 0 0 0 1.5px var(--bg); }
