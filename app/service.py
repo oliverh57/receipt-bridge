@@ -34,7 +34,7 @@ from typing import Any, Callable
 
 import requests
 
-from . import login_item, setup_guide, updates
+from . import login_item, setup_guide, tfl, updates
 from .accounts import AccountStore, adopt_legacy_scan_state
 from .config import Config
 from .db import DELETED, EXPORTED, FAILED, FILED, IGNORED, PENDING, Database
@@ -858,6 +858,8 @@ class ReceiptService:
                 fetched += self.db.save_bank_transactions(rows)
             self.db.set_state("freeagent:last_sync", started)
             self.guess_categories()
+            if self.tfl_receipts:
+                self.make_tfl_receipts()          # before auto-link, which may then link them
             self.auto_link()
             self.find_emails()
             self._freeagent_error = self._freeagent_problem = ""
@@ -2121,6 +2123,8 @@ class ReceiptService:
                                                          **(self._review_line(*in_match[t["url"]])
                                                             if kind == "in_match" else {})},
                 "suggestion": suggestion,
+                # a TfL fare with no receipt: "Make TfL receipt" (TfL sends none)
+                "tfl": kind == "missing" and tfl.is_tfl(t["description"]) and not why_not_open(t),
                 # no receipt, but FreeAgent won't take one through here: why
                 "blocked": why_not_open(t) if kind == "missing" else None,
                 # the payment's own FreeAgent settings, and FreeAgent's explanation if it has one
@@ -2833,6 +2837,99 @@ class ReceiptService:
         else:
             self._finish("use-email", False, "That email is already a receipt.")
 
+    # ---- TfL: a receipt made from the bank payment ------------------------
+    #
+    # TfL sends no receipt for contactless travel, so "Make TfL receipt" on a
+    # Statement line (or, with the setting on, every TfL payment as it
+    # arrives) prints one from the payment itself (app/tfl.py) and puts it in
+    # Match, paired with that payment.
+
+    @property
+    def tfl_receipts(self) -> bool:
+        """Settings → FreeAgent → "Make TfL receipts automatically"."""
+        return self.db.get_state("pref:tfl_receipts") == "1"
+
+    def set_tfl_receipts(self, enabled: bool) -> None:
+        self.db.set_state("pref:tfl_receipts", "1" if enabled else "0")
+        self._bump()
+        if enabled:
+            self.make_tfl_receipts()
+
+    def make_tfl_receipt(self, transaction_url: str) -> bool:
+        """"Make TfL receipt" on one Statement line (queued; read `outcome`)."""
+        return self._enqueue(f"tfl:{transaction_url}", lambda: self._run_make_tfl_receipts([transaction_url]))
+
+    def make_tfl_receipts(self) -> bool:
+        """One for every TfL payment with no receipt (queued, quietly)."""
+        return self._enqueue("tfl-receipts", lambda: self._run_make_tfl_receipts(None))
+
+    def _run_make_tfl_receipts(self, urls: list[str] | None) -> None:
+        """`urls`: the payments asked for, each reported; None: every TfL
+        payment still missing its receipt, reported only when some were made."""
+        # asked for: any payment in the statement; by itself: the last weeks, as Gmail is searched
+        payments = {t["url"]: t for t in self._missing_payments(days=FREEAGENT_HISTORY_DAYS if urls else EMAIL_HINT_DAYS)}
+        if urls is None:
+            chosen = [t for t in payments.values() if tfl.is_tfl(t["description"]) and not why_not_open(t)]
+        else:
+            chosen = [payments[u] for u in urls if u in payments]
+            if not chosen:
+                self._finish("tfl", False, "That payment already has a receipt, or is no longer in the statement.")
+                return
+            blocked = why_not_open(chosen[0])
+            if blocked:
+                self._finish("tfl", False, f"Can't add a receipt to it: {blocked}.")
+                return
+        if not chosen:
+            return
+        self._set_activity(busy=True, kind="tfl", label="Making TfL receipts", started_at=_now(), log=[])
+        from .browser import BrowserPool
+
+        accounts = {a["url"]: a for a in self._freeagent_reference().get("bank_accounts", [])}
+        made = 0
+        pool = BrowserPool(headless=self.config.headless)
+        try:
+            for t in sorted(chosen, key=lambda t: t["dated_on"]):
+                made += bool(self._make_tfl_receipt(pool, t, accounts.get(t["bank_account"], {}).get("name", "")))
+        except Exception as exc:
+            log.exception("TfL receipt")
+            self._finish("tfl", False, f"Couldn't make the TfL receipt: {exc}")
+            return
+        finally:
+            pool.close()
+        if made:
+            self._finish("tfl", True, "Made the TfL receipt and put it in Match, paired with this payment."
+                         if urls is not None else f"Made {made} TfL receipt{'s' if made > 1 else ''} for Match.")
+        elif urls is not None:
+            self._finish("tfl", False, "That payment already has a TfL receipt.")
+
+    def _make_tfl_receipt(self, pool: Any, t: dict[str, Any], account_name: str) -> int:
+        """Print the receipt for one payment and stage it. Its id, or 0 when
+        one was made for this payment before (even if since ignored)."""
+        from .pipeline import _safe_stem
+
+        source_id = f"tfl:{t['url']}"
+        with self.db.connect() as conn:
+            if conn.execute("SELECT 1 FROM receipts WHERE source_id = ?", (source_id,)).fetchone():
+                return 0
+        day = t["dated_on"][:10]
+        amount = round(-float(t["amount"]), 2)
+        out = self.config.pdf_dir / f"tfl-{_safe_stem(t['url'].rstrip('/').rsplit('/', 1)[-1])}.pdf"
+        tfl.render(pool, t, out, account_name, self.config.pdf)
+        travel = next((c["url"] for c in self._freeagent_reference().get("categories", [])
+                       if c.get("description", "").strip().lower() == tfl.CATEGORY.lower()), None)
+        remembered = self.db.get_state(f"category_for:{self._supplier_key(tfl.SUPPLIER)}")
+        return self.db.insert_receipt({
+            "watcher_id": "tfl", "source": "tfl", "source_id": source_id,
+            "vendor": tfl.SUPPLIER, "purchased_on": day, "total": amount, "currency": t.get("currency") or "GBP",
+            "vat": 0.0, "description": "Contactless travel", "paid_by": "business",
+            "category": None if remembered else travel,
+            "pdf_path": str(out), "pdf_source": "generated",
+            "filename": f"{day} {tfl.SUPPLIER} {t.get('currency') or 'GBP'}{amount:.2f}.pdf",
+            "transaction_url": t["url"], "status": PENDING,
+            # fares are zero-rated: 0% VAT, not "none shown"
+            "extra_json": {"made_for_payment": t["url"], "vat_choice": "0.0"},
+        })
+
     def _email_document(self, message: Any, hint: dict[str, Any], document: str = "") -> tuple[Path, str]:
         """What becomes the receipt. `document`: "email" (the email printed),
         "att:N" (that attachment, a PDF or a picture), "supplier" (the
@@ -3396,6 +3493,7 @@ class ReceiptService:
             "export_dir": str(self.config.export_dir),
             "has_credentials": self.config.credentials_file.exists(),
             "label_filed": self.config.label_filed,
+            "tfl_receipts": self.tfl_receipts,
             # the app keys come in a licence file dropped on the app (app/licence.py)
             "needs_licence": not (self.config.credentials_file.exists()
                                   and self.config.freeagent_credentials_file.exists()),
@@ -3868,6 +3966,7 @@ def _has_better_source(watcher: Any) -> bool:
 #   email     — the email itself, and that is all this supplier provides
 #   fallback  — the email, because getting the supplier's receipt failed
 #   photo     — photographed on the phone and read on this Mac
+#   generated — made here from the bank payment (TfL, which sends none)
 def _receipt_json(row: Any, better: set[str] | frozenset[str] = frozenset()) -> dict[str, Any]:
     source = row["pdf_source"] or ""
     keys = row.keys()
@@ -3884,6 +3983,8 @@ def _receipt_json(row: Any, better: set[str] | frozenset[str] = frozenset()) -> 
         document = "none"
     elif source == "rendered_email":
         document = "fallback" if row["watcher_id"] in better else "email"
+    elif source == "generated":
+        document = "generated"
     else:
         document = "supplier"
     return {

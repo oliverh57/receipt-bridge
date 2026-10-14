@@ -1156,6 +1156,10 @@ function statementRow(t) {
     label = "No receipt"; detail = "Attach it in FreeAgent";
   } else if (t.status === "missing" && t.suggestion) {
     detail = t.suggestion.kind === "email" ? "An email may be the receipt" : "An ignored file may be the receipt";
+  } else if (t.status === "missing" && t.tfl) {
+    detail = "TfL sends none: make one";
+    action = `<button class="btn small" data-action="st-tfl" data-url="${esc(t.url)}"
+      ${state.snap.queued.includes(`tfl:${t.url}`) ? "disabled" : ""}>Make receipt</button>`;
   }
   // a suggested file shows its receipt on hover, as in the candidate list
   const thumb = t.status === "in_match" && r ? thumbUrl(r) : "";
@@ -1481,12 +1485,17 @@ function panelHtml(t) {
       <div class="b">${esc(s.label)}</div>
       ${s.kind === "email" && s.message_id ? hintMailHtml(s) : ""}
       <div class="m-iss-ctl"><button class="btn small primary" data-action="st-use" data-url="${esc(t.url)}">${s.kind === "email" ? "Use that email" : "Use that file"}</button></div></div>` : "";
+  // TfL sends no receipt for contactless travel: make one from the payment
+  const tflHint = t.tfl && !hint ? `<div class="m-issue"><div class="t">TfL doesn't send receipts</div>
+      <div class="b">Make one from this payment: ${esc(money(-t.amount, "GBP"))} to Transport for London, VAT £0. It goes to Match, paired with this payment.</div>
+      <div class="m-iss-ctl"><button class="btn small primary" data-action="st-tfl" data-url="${esc(t.url)}"
+        ${state.snap.queued.includes(`tfl:${t.url}`) ? "disabled" : ""}>Make TfL receipt</button></div></div>` : "";
   const approvedNote = t.approved && t.status !== "filed"
     ? `<div class="m-wait"><div class="t">Approved in FreeAgent</div><div class="b">Nothing to do. You can still attach a receipt below.</div></div>` : "";
   return `${head}<div class="st-pbody">
     ${linkHereHtml(t)}
     ${approvedNote}
-    ${hint}
+    ${hint}${tflHint}
     ${paymentCardHtml(t)}
     ${candidatesHtml(t, r ? "Other files that could be this payment" : "Files that could be this payment")}
     <div class="m-actions end">
@@ -1906,6 +1915,9 @@ document.addEventListener("click", async (e) => {
       // the status line shows the fetch; the outcome toast says how it went
       return act(() => api("/api/statement/use-suggestion", { method: "POST", body: { url: target.dataset.url } }));
     }
+    case "st-tfl":
+      // the status line shows it being made; the outcome toast says how it went
+      return act(() => api("/api/statement/tfl-receipt", { method: "POST", body: { url: target.dataset.url } }));
     case "st-open":
       m.sel = id;
       m.reveal = true;

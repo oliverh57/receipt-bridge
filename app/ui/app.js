@@ -187,6 +187,7 @@ const DOC_LABEL = {
   fallback: ["email", "Email copy", "The supplier's own receipt wasn't available, so this is a printout of the email"],
   none: ["none", "No document", "No PDF could be produced"],
   photo: ["neutral", "Photo", "Photographed on your phone and read on this Mac"],
+  generated: ["neutral", "Made from payment", "Made by Receipt Bridge from the bank payment: the supplier issues no receipt"],
 };
 const PAID_BY = { business: "Business account", personal: "Personal expense" };
 function docTag(kind) {
@@ -995,6 +996,16 @@ function freeagentCard(fa) {
     </div>`;
 }
 
+/** TfL sends no receipt for contactless travel: one made from the payment. */
+function tflCard(on) {
+  return `<div class="card">
+      <div class="card-head"><h3>TfL travel</h3></div>
+      <div class="card-row"><div class="grow">Make TfL receipts automatically
+          <div class="sub">TfL doesn't issue receipts for contactless travel. Each TfL payment without one gets a receipt made from the bank payment (VAT £0), waiting in Match for you to link. Without this, use <b>Make TfL receipt</b> on the payment in Bank Feed.</div></div>
+        <label class="switch"><input type="checkbox" data-action="tfl-receipts" ${on ? "checked" : ""} aria-label="Make TfL receipts automatically"><span></span></label></div>
+    </div>`;
+}
+
 /** One status for the connection: never "Connected" beside a problem. */
 function freeagentStatus(fa) {
   if (!fa.error) return `<span class="pill ok">Connected</span>`;
@@ -1105,7 +1116,7 @@ function renderSettings() {
 
   const sections = {
     about: state.settingsTab === "about" ? aboutHtml() : "",
-    freeagent: freeagentCard(s.freeagent),
+    freeagent: freeagentCard(s.freeagent) + (s.freeagent?.connected ? tflCard(s.tfl_receipts) : ""),
 
     email: `
       ${gmailCard(s)}
@@ -1783,6 +1794,10 @@ document.addEventListener("change", (e) => {
   }
   if (e.target.dataset.action === "notify-category") {
     act(() => api("/api/settings", { method: "POST", body: { notify_categories: { [e.target.dataset.category]: e.target.checked } } }));
+    return;
+  }
+  if (e.target.dataset.action === "tfl-receipts") {
+    act(() => api("/api/settings", { method: "POST", body: { tfl_receipts: e.target.checked } }));
     return;
   }
   if (e.target.dataset.action === "open-at-login") {

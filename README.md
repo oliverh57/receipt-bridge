@@ -53,6 +53,11 @@ New versions arrive inside the app (**Update now**).
    receipt: filed, in Match, or missing. For a missing one: **Use that
    email** (an email showing that amount was found in Gmail), **Add photo**,
    or **No receipt needed** (tax payment, transfer, bank fee…).
+   TfL sends no receipt for contactless travel, so a TfL payment has
+   **Make TfL receipt**: a receipt made from the bank payment (Transport for
+   London, Travel, VAT £0, marked as made by Receipt Bridge) goes to Match,
+   paired with it. **Settings → FreeAgent → Make TfL receipts
+   automatically** does this for every TfL payment as it arrives.
 
 5. **Expenses paid personally** stay in **Files** like everything else:
    switch *Paid with* to Expense, set the category, VAT and re-billing by

@@ -70,6 +70,7 @@ class Email(BaseModel):
 class Settings(BaseModel):
     auto_scan: bool | None = None
     label_filed: bool | None = None
+    tfl_receipts: bool | None = None
     theme: str | None = None
     waiting_days: int | None = None
     archive_delete_days: int | None = None
@@ -639,6 +640,13 @@ def create_app(service: ReceiptService) -> FastAPI:
             raise HTTPException(400, "url is required")
         return {"queued": service.use_suggestion(body["url"])}
 
+    @app.post("/api/statement/tfl-receipt")
+    def statement_tfl_receipt(body: dict[str, Any]) -> dict[str, Any]:
+        """"Make TfL receipt": one made from the payment, into Match; read `outcome`."""
+        if not isinstance(body.get("url"), str):
+            raise HTTPException(400, "url is required")
+        return {"queued": service.make_tfl_receipt(body["url"])}
+
     @app.post("/api/statement/find-emails")
     def statement_find_emails() -> dict[str, Any]:
         """Look in Gmail now for receipts for payments without one."""
@@ -878,6 +886,8 @@ def create_app(service: ReceiptService) -> FastAPI:
             service.set_auto_scan(body.auto_scan)
         if body.label_filed is not None:
             service.set_label_filed(body.label_filed)
+        if body.tfl_receipts is not None:
+            service.set_tfl_receipts(body.tfl_receipts)
         if body.waiting_days is not None:
             try:
                 service.set_waiting_days(body.waiting_days)

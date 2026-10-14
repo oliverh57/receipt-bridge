@@ -133,6 +133,19 @@ def render_email_to_pdf(
         + "</body></html>"
     )
 
+    return html_to_pdf(pool, document, out_path, settings)
+
+
+def html_to_pdf(
+    pool: BrowserPool,
+    document: str,
+    out_path: Path,
+    pdf_config: dict[str, Any] | None = None,
+) -> Path:
+    """Print a whole HTML document to `out_path` and return the path."""
+    settings = pdf_config or {}
+    page_format = settings.get("format", "A4")
+    margin = settings.get("margin", "12mm")
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with pool.page() as page:
         page.set_content(document, wait_until="load")

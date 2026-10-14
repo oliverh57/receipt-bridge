@@ -219,8 +219,9 @@ def review(row: Any, match: Match | None, ctx: Context, *, overdue: bool) -> dic
     else:
         kind = "Bank explanation"
     vat_text = _vat_text(row, ctx, match)
-    attachment = {"photo": "Photo", "supplier": "Supplier PDF"}.get(
-        "photo" if row["source"] == "photo" else ("supplier" if row["pdf_source"] not in ("rendered_email", None) else ""),
+    attachment = {"photo": "Photo", "supplier": "Supplier PDF", "generated": "Made from the bank payment"}.get(
+        "photo" if row["source"] == "photo" else row["pdf_source"] if row["pdf_source"] == "generated"
+        else ("supplier" if row["pdf_source"] not in ("rendered_email", None) else ""),
         "Email PDF")
 
     # ---- where it is in Files: check / link / waiting / expense (ready to claim) ----
