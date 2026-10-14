@@ -348,11 +348,10 @@ function renderNav() {
     el.textContent = n ? n : "";
   }
 
-  // Statement: payments missing a receipt this month.
+  // Bank Feed: its "Needs approval", in every period (the Dock icon's number).
   // Files: everything not saved to FreeAgent yet, expenses included
   document.querySelector('[data-count="files"]').textContent = counts.files || "";
-  const missing = counts.missing;
-  document.querySelector('[data-count="statement"]').textContent = missing ? `${missing} missing` : "";
+  document.querySelector('[data-count="statement"]').textContent = counts.bank_left || "";
   const fa = state.snap.freeagent;
   const badge = $("#sandbox-badge");
   badge.hidden = !(fa?.connected && fa.environment === "sandbox");
