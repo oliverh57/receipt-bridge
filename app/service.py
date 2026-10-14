@@ -2914,7 +2914,8 @@ class ReceiptService:
         day = t["dated_on"][:10]
         amount = round(-float(t["amount"]), 2)
         out = self.config.pdf_dir / f"tfl-{_safe_stem(t['url'].rstrip('/').rsplit('/', 1)[-1])}.pdf"
-        tfl.render(pool, t, out, account_name, self.config.pdf)
+        company = (self._freeagent_reference().get("vat") or {}).get("company") or ""
+        tfl.render(pool, t, out, account_name, self.config.pdf, company=company)
         travel = next((c["url"] for c in self._freeagent_reference().get("categories", [])
                        if c.get("description", "").strip().lower() == tfl.CATEGORY.lower()), None)
         remembered = self.db.get_state(f"category_for:{self._supplier_key(tfl.SUPPLIER)}")

@@ -32,12 +32,19 @@ def test_tfl_payments_are_known_by_their_statement_line() -> None:
 
 
 def test_the_page_shows_the_payment_and_says_where_it_came_from() -> None:
-    page = tfl.receipt_html({"dated_on": "2026-10-05", "amount": -9.9, "description": "TFL // CARD_PURCHASE///"},
-                            "Mettle Business")
-    assert "5 October 2026" in page and "£9.90" in page and "Mettle Business" in page
-    assert "£0.00 (fares are zero-rated)" in page
-    assert "not a document from TfL" in page
+    payment = {"url": "https://api.freeagent.com/v2/bank_transactions/98765", "dated_on": "2026-10-05",
+               "amount": -9.9, "description": "TFL // CARD_PURCHASE///"}
+    page = tfl.receipt_html(payment, "Mettle Business", "Example Ltd")
+    assert "5 October 2026" in page and "£9.90" in page and "Mettle Business" in page and "Example Ltd" in page
+    assert "TFL-20261005-98765" in page and tfl.receipt_number(payment) == "TFL-20261005-98765"
+    assert "0% (zero-rated)" in page and "£0.00" in page
+    assert "It is not issued by Transport for London" in page
     assert "CARD_PURCHASE" not in page                    # the statement line as the bank shows it
+
+
+def test_without_a_company_the_page_still_reads() -> None:
+    page = tfl.receipt_html({"dated_on": "2026-10-05", "amount": -9.9, "description": "TFL"})
+    assert "Expense record" in page and "TFL-20261005-0" in page and "of the account named above" not in page
 
 
 # ---- through the app --------------------------------------------------------------
@@ -51,6 +58,7 @@ def make(*payments: tuple[str, float, str]) -> tuple[ReceiptService, list[dict],
         "photo_inbox": str(base / "inbox"), "freeagent": {"credentials_file": str(base / "none.json")}}))
     service.db.set_state("freeagent:reference", json.dumps(
         {"bank_accounts": [{"url": ACCOUNT, "currency": "GBP", "name": "Business"}],
+         "vat": {"registered": True, "company": "Example Ltd"},
          "categories": [{"url": TRAVEL, "description": "Travel", "nominal_code": "365", "group": "admin"}]}))
     service.db.set_state("freeagent:accounts", json.dumps([ACCOUNT]))
     paid = (datetime.now() - timedelta(days=3)).date().isoformat()
@@ -60,8 +68,8 @@ def make(*payments: tuple[str, float, str]) -> tuple[ReceiptService, list[dict],
         for url, amount, description in payments])
     printed: list[dict] = []
 
-    def render(pool, payment, out_path, account_name="", pdf_config=None):   # no Chromium in tests
-        printed.append({"payment": payment, "account": account_name})
+    def render(pool, payment, out_path, account_name="", pdf_config=None, company=""):   # no Chromium in tests
+        printed.append({"payment": payment, "account": account_name, "company": company})
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_bytes(b"%PDF-1.4 tfl")
         return out_path
@@ -82,7 +90,7 @@ def test_make_tfl_receipt_puts_one_in_match_paired_with_the_payment() -> None:
         assert row(service, "tx/shop")["tfl"] is False
 
         service._run_make_tfl_receipts(["tx/tfl"])
-        assert printed[0]["account"] == "Business"
+        assert printed[0]["account"] == "Business" and printed[0]["company"] == "Example Ltd"
         receipt = next(r for r in service.receipts("pending") if r["supplier"] == "Transport for London")
         assert receipt["total"] == 9.9 and receipt["pinned_payment"] == "tx/tfl"
         assert receipt["document"] == "generated"
