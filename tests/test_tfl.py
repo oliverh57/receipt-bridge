@@ -116,6 +116,28 @@ def test_an_ignored_tfl_receipt_is_not_made_again_by_itself() -> None:
         assert len(printed) == 1
 
 
+def test_asking_again_replaces_one_you_removed_or_deleted() -> None:
+    service, printed, tmp = make(("tx/tfl", -9.9, "TFL // CARD_PURCHASE///"))
+    with tmp:
+        service._run_make_tfl_receipts(["tx/tfl"])
+        first = next(r["id"] for r in service.receipts("pending"))
+        service.remove_file_from_payment(first, "tx/tfl")      # "Remove file"
+        assert row(service, "tx/tfl")["status"] == "missing"
+
+        service._run_make_tfl_receipts(None)                  # by itself: you removed it, so no
+        assert len(printed) == 1
+
+        service._run_make_tfl_receipts(["tx/tfl"])            # asked: a new one, the old one gone
+        assert len(printed) == 2 and service.snapshot()["outcome"]["ok"] is True
+        assert service.db.get_receipt(first)["status"] == "deleted"
+        second = next(r["id"] for r in service.receipts("pending"))
+        assert second != first and row(service, "tx/tfl")["status"] == "in_match"
+
+        service._delete_receipt(second)                       # deleted: asked again, made again
+        service._run_make_tfl_receipts(["tx/tfl"])
+        assert len(printed) == 3 and row(service, "tx/tfl")["status"] == "in_match"
+
+
 def test_automatically_only_tfl_payments_and_only_when_switched_on() -> None:
     service, printed, tmp = make(("tx/a", -2.3, "TFL // CARD_PURCHASE///"), ("tx/b", -7.2, "TFL // CARD_PURCHASE///"),
                                  ("tx/shop", -4.0, "TESCO STORES"))

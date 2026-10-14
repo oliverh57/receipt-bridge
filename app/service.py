@@ -2889,7 +2889,8 @@ class ReceiptService:
         pool = BrowserPool(headless=self.config.headless)
         try:
             for t in sorted(chosen, key=lambda t: t["dated_on"]):
-                made += bool(self._make_tfl_receipt(pool, t, accounts.get(t["bank_account"], {}).get("name", "")))
+                made += bool(self._make_tfl_receipt(pool, t, accounts.get(t["bank_account"], {}).get("name", ""),
+                                                    asked=urls is not None))
         except Exception as exc:
             log.exception("TfL receipt")
             self._finish("tfl", False, f"Couldn't make the TfL receipt: {exc}")
@@ -2902,15 +2903,24 @@ class ReceiptService:
         elif urls is not None:
             self._finish("tfl", False, "That payment already has a TfL receipt.")
 
-    def _make_tfl_receipt(self, pool: Any, t: dict[str, Any], account_name: str) -> int:
+    def _make_tfl_receipt(self, pool: Any, t: dict[str, Any], account_name: str, asked: bool = False) -> int:
         """Print the receipt for one payment and stage it. Its id, or 0 when
-        one was made for this payment before (even if since ignored)."""
+        it has one already. One made before and since removed from the
+        payment, ignored or deleted: by itself, left alone (you didn't want
+        it); `asked` ("Make TfL receipt"), replaced by a new one."""
         from .pipeline import _safe_stem
 
         source_id = f"tfl:{t['url']}"
         with self.db.connect() as conn:
-            if conn.execute("SELECT 1 FROM receipts WHERE source_id = ?", (source_id,)).fetchone():
+            before = conn.execute("SELECT id, status, transaction_url FROM receipts WHERE source_id = ?",
+                                  (source_id,)).fetchone()
+        if before is not None:
+            if not asked or before["status"] in (FILED, EXPORTED) or (
+                    before["status"] == PENDING and before["transaction_url"] == t["url"]):
                 return 0
+            # the old one goes, as Delete does, and gives up its place
+            self._delete_receipt(before["id"])
+            self.db.update_receipt(before["id"], {"source_id": f"{source_id}#replaced-{before['id']}"})
         day = t["dated_on"][:10]
         amount = round(-float(t["amount"]), 2)
         out = self.config.pdf_dir / f"tfl-{_safe_stem(t['url'].rstrip('/').rsplit('/', 1)[-1])}.pdf"
