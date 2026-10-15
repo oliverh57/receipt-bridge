@@ -188,6 +188,7 @@ const DOC_LABEL = {
   none: ["none", "No document", "No PDF could be produced"],
   photo: ["neutral", "Photo", "Photographed on your phone and read on this Mac"],
   generated: ["neutral", "Made from payment", "Made by Receipt Bridge from the bank payment: the supplier issues no receipt"],
+  freeagent: ["neutral", "From FreeAgent", "Attached to the payment in FreeAgent, copied here so you can check and approve it"],
 };
 const PAID_BY = { business: "Business account", personal: "Personal expense" };
 function docTag(kind) {

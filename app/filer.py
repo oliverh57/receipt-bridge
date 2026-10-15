@@ -473,9 +473,21 @@ RESTORE_FIELDS = ("bank_transaction", "dated_on", "gross_value", "category", "de
 NOT_SPENDING = ("transfer_bank_account", "paid_user", "paid_invoice", "paid_bill", "disposed_asset")
 
 
-def removable_explanation(client: FreeAgent, transaction_url: str, explanation_url: str) -> dict[str, Any]:
+def attachment_urls(explanation: dict[str, Any]) -> list[str]:
+    """The URLs of the receipts on an explanation (a list of attachments,
+    or one, as objects or bare URLs)."""
+    found = list(explanation.get("attachments") or [])
+    if explanation.get("attachment"):
+        found.append(explanation["attachment"])
+    return [a.get("url") if isinstance(a, dict) else str(a) for a in found]
+
+
+def removable_explanation(client: FreeAgent, transaction_url: str, explanation_url: str,
+                          copied: list[str] | None = None) -> dict[str, Any]:
     """FreeAgent's explanation of a payment, read live, if it's the payment's
-    only one and may be removed. Raises FilingError saying why not."""
+    only one and may be removed. Raises FilingError saying why not.
+    `copied`: the attachments the app has its own copy of (a receipt
+    FreeAgent attached itself, brought into Match), which may go with it."""
     transaction = client.get_url(transaction_url)["bank_transaction"]
     explanations = [e for e in transaction.get("bank_transaction_explanations") or [] if isinstance(e, dict)]
     if len(explanations) != 1 or explanations[0].get("url") != explanation_url:
@@ -485,7 +497,10 @@ def removable_explanation(client: FreeAgent, transaction_url: str, explanation_u
         raise FilingError("That explanation is locked in FreeAgent (a filed VAT return?)")
     if current.get("is_deletable") is False:
         raise FilingError("FreeAgent won't let that explanation be removed")
-    if current.get("attachment") or current.get("attachments"):
+    attached = attachment_urls(current)
+    if attached and copied and set(attached) != set(copied):
+        raise FilingError("FreeAgent's receipt on that payment has changed; refresh and try again")
+    if attached and not copied:
         raise FilingError("That explanation has a receipt attached in FreeAgent; change it there")
     return current
 

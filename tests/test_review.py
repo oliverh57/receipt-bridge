@@ -1016,6 +1016,134 @@ def test_a_transfer_is_never_replaced_by_a_receipt() -> None:
         assert client.deleted == [] and client.created == []
 
 
+class AttachedFreeAgent(GuessingFreeAgent):
+    """A guess carrying a receipt FreeAgent attached itself (uploaded on its
+    website, or Smart Capture). Attachments are listed by URL; each is read
+    for its short-lived download link."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.attached = []
+
+    def get_url(self, url):
+        if "/attachments/" in url:
+            return {"attachment": {"url": url, "file_name": "uber-receipt.pdf", "content_type": "application/pdf",
+                                   "content_src": f"https://s3.test/{url.rsplit('/', 1)[-1]}?signed"}}
+        return super().get_url(url)
+
+    def download(self, content_src):
+        return b"%PDF-1.4 freeagent's own receipt"
+
+    def add_explanation_attachments(self, url, attachments):
+        self._write()
+        made = [{"url": f"https://fa.test/v2/attachments/{len(self.attached) + 20}"} for _ in attachments]
+        self.attached.append((url, attachments))
+        for e in self.explanations:
+            if e["url"] == url:
+                e["attachments"] = list(e.get("attachments") or []) + made
+        return made
+
+
+def _attached(service, fail_create=False):
+    """The £12.00 guess, with a receipt FreeAgent attached to it."""
+    client = _guessed(service, fail_create)
+    attached = AttachedFreeAgent("tx/g", -12.0, {**client.explanations[0],
+                                                 "attachments": ["https://fa.test/v2/attachments/9"],
+                                                 "sales_tax_value": "-2.0"}, fail_create)
+    tx = dict(service._cached_transaction("tx/g"))
+    tx["bank_transaction_explanations"] = list(attached.explanations)
+    service.db.save_bank_transactions([tx])
+    service._freeagent = lambda: attached
+    return attached
+
+
+def _sheet_row(service, url):
+    return next(r for r in service.statement(None, "2026-03")["rows"] if r["url"] == url)
+
+
+def test_a_receipt_freeagent_attached_comes_into_match_and_is_approved_here() -> None:
+    service, _flagged, tmp = make()
+    with tmp:
+        connected(service, Path(tmp.name))
+        client = _attached(service)
+        assert _sheet_row(service, "tx/g")["status"] == "review"
+
+        assert service._copy_freeagent_receipts(client) == 1
+        assert service._copy_freeagent_receipts(client) == 0, "once"
+        copy = next(r for r in service.db.list_receipts("pending") if r["source"] == "freeagent")
+        assert (copy["vendor"], copy["total"], copy["purchased_on"], copy["transaction_url"]) == \
+            ("TOOLCO", 12.0, "2026-03-10", "tx/g")
+        assert copy["vat"] == 2.0 and json.loads(copy["extra_json"])["vat_choice"] == "20.0"
+        assert Path(copy["pdf_path"]).read_bytes() == b"%PDF-1.4 freeagent's own receipt"
+        row = _sheet_row(service, "tx/g")
+        assert row["status"] == "in_match" and row["receipt"]["id"] == copy["id"]
+        assert by_id(service)[copy["id"]]["document"] == "freeagent"
+        assert copy["id"] not in service.auto_link_candidates(), "you approve these yourself"
+
+        service._run_approve("tx/g", copy["id"])
+        assert client.deleted == ["https://fa.test/v2/bank_transaction_explanations/50"]
+        made = client.created[0]
+        assert made["receipt_reference"] == f"RB-{copy['id']}" and made["category"] == CATEGORY
+        assert made["sales_tax_rate"] == "20.0"
+        assert client.attached and client.attached[0][0] == made["url"], "the receipt goes back on, approved"
+        assert service.db.get_receipt(copy["id"])["status"] == "filed"
+
+
+def test_a_failed_approve_puts_back_freeagents_guess_and_its_receipt() -> None:
+    service, _flagged, tmp = make()
+    with tmp:
+        connected(service, Path(tmp.name))
+        client = _attached(service, fail_create=True)
+        service._copy_freeagent_receipts(client)
+        rid = next(r["id"] for r in service.db.list_receipts("pending") if r["source"] == "freeagent")
+        service._run_approve("tx/g", rid)
+        assert len(client.explanations) == 1 and client.explanations[0]["category"] == CATEGORY
+        assert client.attached and client.attached[0][0] == client.explanations[0]["url"]
+        assert "and its receipt were put back" in service._file_results["results"][0]["note"]
+        extra = json.loads(service.db.get_receipt(rid)["extra_json"])
+        assert extra["freeagent_attachments"] == ["https://fa.test/v2/attachments/20"], "ready for another try"
+
+
+def test_a_receipt_changed_in_freeagent_since_it_was_copied_is_left_alone() -> None:
+    service, _flagged, tmp = make()
+    with tmp:
+        connected(service, Path(tmp.name))
+        client = _attached(service)
+        service._copy_freeagent_receipts(client)
+        rid = next(r["id"] for r in service.db.list_receipts("pending") if r["source"] == "freeagent")
+        client.explanations[0]["attachments"] = ["https://fa.test/v2/attachments/10"]
+        service._run_approve("tx/g", rid)
+        assert client.deleted == [] and client.created == []
+        assert "has changed" in service._file_results["results"][0]["note"]
+
+
+def test_a_copy_you_ignored_is_not_made_again() -> None:
+    service, _flagged, tmp = make()
+    with tmp:
+        connected(service, Path(tmp.name))
+        client = _attached(service)
+        service._copy_freeagent_receipts(client)
+        rid = next(r["id"] for r in service.db.list_receipts("pending") if r["source"] == "freeagent")
+        service.db.set_status(rid, "ignored")
+        assert service._copy_freeagent_receipts(client) == 0
+        assert _sheet_row(service, "tx/g")["status"] == "review", "back to approving it in FreeAgent"
+
+
+def test_a_receipt_freeagent_has_on_an_email_receipts_payment_stays_put() -> None:
+    """Only the copy may take that payment: another receipt for the same
+    amount never replaces the receipt FreeAgent has."""
+    service, _flagged, tmp = make()
+    with tmp:
+        connected(service, Path(tmp.name))
+        client = _attached(service)
+        service._copy_freeagent_receipts(client)
+        copy = next(r["id"] for r in service.db.list_receipts("pending") if r["source"] == "freeagent")
+        other = _toolco_receipt(service, Path(tmp.name))
+        matched = service._matches(service.db.list_receipts("pending"))
+        assert matched[copy].transaction["url"] == "tx/g"
+        assert matched[other].transaction is None
+
+
 def test_remove_explanation_leaves_the_payment_unexplained() -> None:
     service, _flagged, tmp = make()
     with tmp:

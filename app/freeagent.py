@@ -259,6 +259,15 @@ class FreeAgent:
     def get_url(self, url: str) -> dict:
         return self.get(url).json()
 
+    def download(self, content_src: str) -> bytes:
+        """An attachment's file, from the short-lived link FreeAgent gives
+        (`content_src`). The link carries its own permission, so no sign-in
+        is sent with it."""
+        response = self.session.get(content_src, timeout=60, headers={"User-Agent": USER_AGENT})
+        if response.status_code >= 400:
+            raise FreeAgentError(f"FreeAgent attachment download failed ({response.status_code})")
+        return response.content
+
     def create_explanation(self, explanation: dict) -> dict:
         response = self._request("POST", "bank_transaction_explanations",
                                  body={"bank_transaction_explanation": explanation})

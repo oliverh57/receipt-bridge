@@ -857,6 +857,7 @@ class ReceiptService:
                     row.setdefault("bank_account", url)
                 fetched += self.db.save_bank_transactions(rows)
             self.db.set_state("freeagent:last_sync", started)
+            self._copy_freeagent_receipts(client)
             self.guess_categories()
             if self.tfl_receipts:
                 self.make_tfl_receipts()          # before auto-link, which may then link them
@@ -1285,7 +1286,9 @@ class ReceiptService:
         reference = self._freeagent_reference()
         names = {c["url"]: c["description"] for c in reference.get("categories", [])}
         registered = bool(reference.get("vat", {}).get("registered"))
-        rows = [r for r in self.db.list_receipts(PENDING) if self._auto_link_on(r) and r["paid_by"] != "personal"]
+        # not FreeAgent's own receipts: they were copied in to be checked and approved by you
+        rows = [r for r in self.db.list_receipts(PENDING)
+                if self._auto_link_on(r) and r["paid_by"] != "personal" and r["source"] != "freeagent"]
         if not rows:
             return []
         matches = self._matches(self.db.list_receipts(PENDING))
@@ -1383,7 +1386,9 @@ class ReceiptService:
                     line = self._replace_guess(
                         client, transaction,
                         lambda _guess: file_receipt(client, self.db, receipt_id, plan),
-                        with_receipt=True).replace("Filed", "Approved and linked", 1)
+                        with_receipt=True,
+                        copy=row if self._is_freeagent_copy(row, transaction["url"]) else None,
+                    ).replace("Filed", "Approved and linked", 1)
                 else:
                     line = file_receipt(client, self.db, receipt_id, plan)
                 self._note(line)
@@ -1580,6 +1585,12 @@ class ReceiptService:
             for t in self.db.bank_transactions(chosen)
         ]
         currencies = {accounts[u].get("currency", "GBP") for u in chosen if u in accounts}
+        # A receipt FreeAgent attached to its own guess, brought into Match:
+        # that payment is open to it, though FreeAgent already has a receipt
+        copies = {r["transaction_url"] for r in rows if self._is_freeagent_copy(r, r["transaction_url"])}
+        for t in transactions:
+            if t["url"] in copies and (self._freeagent_explanation(t) or {}).get("guess"):
+                t["explanation_attachments"] = 0
         receipts = [
             {"id": r["id"], "date": r["purchased_on"], "total": r["total"], "currency": r["currency"],
              "vendor": r["vendor"], "paid_by": r["paid_by"], "pinned": r["transaction_url"],
@@ -2064,16 +2075,17 @@ class ReceiptService:
             marked = self.db.get_state(f"no_receipt:{t['url']}")
             explanation = self._freeagent_explanation(t)
             approved = bool(explanation and explanation["approved"])
-            if t["url"] not in filed_by_app and explanation and explanation["guess"] \
+            if t["url"] not in filed_by_app and t["url"] in in_match:
+                # paired in Match: FreeAgent's own receipt, copied in, counts too
+                kind = "in_match"
+            elif t["url"] not in filed_by_app and explanation and explanation["guess"] \
                     and (t.get("explanation_attachments") or 0) > 0:
                 # FreeAgent attached a receipt itself (Smart Capture) and guessed
-                # the rest: not approved, and with its receipt on it the app
-                # can't replace the guess (removable_explanation). Approve there.
+                # the rest, and it couldn't be copied into Match
+                # (_copy_freeagent_receipts) or you took the copy away. Approve there.
                 kind = "review"
             elif t["url"] in filed_by_app or (t.get("explanation_attachments") or 0) > 0:
                 kind = "filed"
-            elif t["url"] in in_match:
-                kind = "in_match"
             elif marked:
                 kind = "not_needed"
             elif approved:
@@ -2461,15 +2473,22 @@ class ReceiptService:
         self._run_freeagent_sync()
 
     def _replace_guess(self, client: Any, t: dict[str, Any], make: Callable[[dict[str, Any]], str],
-                       with_receipt: bool) -> str:
+                       with_receipt: bool, copy: Any = None) -> str:
         """Approve a payment FreeAgent guessed. Its API can't approve one
         (`marked_for_review` is read only), and linking a receipt to a guess
         only attached it and left it waiting. So the guess is checked,
         removed, and `make(guess)` explains the payment again: FreeAgent
         doesn't mark the app's own explanations for approval. If `make`
-        fails, the guess is put back."""
-        from .filer import NOT_SPENDING, create_explanation, removable_explanation, remove_explanation, restore_body
-        guess = removable_explanation(client, t["url"], t["explanation_url"])
+        fails, the guess is put back. `copy`: the receipt FreeAgent had
+        attached to the guess, brought into Match (_copy_freeagent_receipt);
+        it goes with the guess, and back with it on a failure."""
+        from .filer import (NOT_SPENDING, _attachment, _encoded, create_explanation, removable_explanation,
+                            remove_explanation, restore_body)
+        copied = None
+        if copy is not None:
+            extra = json.loads(copy["extra_json"] or "{}") if copy["extra_json"] else {}
+            copied = extra.get("freeagent_attachments") or None
+        guess = removable_explanation(client, t["url"], t["explanation_url"], copied=copied)
         if with_receipt and any(guess.get(k) for k in NOT_SPENDING):
             raise FilingError("FreeAgent explained this as a transfer or a payment of an invoice, not "
                               "spending. Approve it in FreeAgent.")
@@ -2480,8 +2499,20 @@ class ReceiptService:
             line = make(guess)
         except (FilingError, FreeAgentError, OSError) as exc:
             try:
-                create_explanation(client, restore_body(guess))
+                url = create_explanation(client, restore_body(guess))
                 put_back = "FreeAgent's explanation was put back."
+                attachment = _attachment(copy)[0] if copied else None
+                if attachment:
+                    client.writes_allowed = True
+                    try:
+                        added = client.add_explanation_attachments(url, [_encoded(attachment)])
+                    finally:
+                        client.writes_allowed = False
+                    # the copy now matches what FreeAgent has, for another try
+                    extra = json.loads(copy["extra_json"] or "{}") if copy["extra_json"] else {}
+                    extra["freeagent_attachments"] = [a.get("url") for a in added]
+                    self.db.update_receipt(copy["id"], {"extra_json": json.dumps(extra)})
+                    put_back = "FreeAgent's explanation and its receipt were put back."
             except FreeAgentError:
                 put_back = "Putting FreeAgent's explanation back failed too: explain it in FreeAgent."
             raise FilingError(f"{exc}. {put_back}") from exc
@@ -2939,6 +2970,95 @@ class ReceiptService:
             "transaction_url": t["url"], "status": PENDING,
             # fares are zero-rated: 0% VAT, not "none shown"
             "extra_json": {"made_for_payment": t["url"], "vat_choice": "0.0"},
+        })
+
+    # ---- receipts FreeAgent attached itself --------------------------------
+    # One uploaded on FreeAgent's website or caught by its Smart Capture sits
+    # on a guess waiting for approval. A copy comes into Match, paired with
+    # its payment, to be checked and approved here like any other receipt;
+    # approving replaces the guess (_replace_guess) with the copy attached.
+
+    @staticmethod
+    def _is_freeagent_copy(row: Any, transaction_url: str | None) -> bool:
+        return bool(transaction_url) and row["source"] == "freeagent" \
+            and row["source_id"] == f"freeagent:{transaction_url}" and row["transaction_url"] == transaction_url
+
+    def _copy_freeagent_receipts(self, client: FreeAgent) -> int:
+        """Each payment whose guess carries a receipt FreeAgent attached, once:
+        a copy you removed, ignored or deleted isn't made again. One that
+        couldn't be copied (several receipts, a file FreeAgent can't take
+        back) stays "Approve in FreeAgent"."""
+        filed = set()
+        for row in self.db.list_receipts(FILED):
+            state = json.loads(row["freeagent_json"] or "{}") if row["freeagent_json"] else {}
+            if state.get("transaction"):
+                filed.add(state["transaction"])
+        accounts = {a["url"]: a for a in self._freeagent_reference().get("bank_accounts", [])}
+        made = 0
+        for t in self.db.bank_transactions(self._freeagent_accounts()):
+            t = dict(t)
+            guess = (self._freeagent_explanation(t) or {}).get("guess")
+            if (float(t["amount"]) >= 0 or not guess or t.get("explanation_attachments") != 1
+                    or t.get("explanation_locked") or t["url"] in filed
+                    or self.db.has_source(f"freeagent:{t['url']}")
+                    or self.db.get_state(f"freeagent_copy_skipped:{t['url']}") == (t.get("updated_at") or "")):
+                continue
+            currency = accounts.get(t["bank_account"], {}).get("currency", "GBP")
+            try:
+                copied = self._copy_freeagent_receipt(client, t, currency)
+                made += bool(copied)
+                if not copied:                           # not asked again until the payment changes
+                    self.db.set_state(f"freeagent_copy_skipped:{t['url']}", t.get("updated_at") or "")
+            except (FreeAgentError, requests.RequestException, OSError, KeyError, ValueError) as exc:
+                log.info("FreeAgent's receipt on %s not copied: %s", t["url"], exc)
+        if made:
+            self._note(f"FreeAgent: {made} receipt{'s' if made > 1 else ''} attached there brought into Match")
+        return made
+
+    def _copy_freeagent_receipt(self, client: FreeAgent, t: dict[str, Any], currency: str) -> int:
+        """Download the receipt on one guess and stage it. Its id, or 0."""
+        from .filer import CONTENT_TYPES, FIXED_RATES
+        from .pipeline import _safe_stem
+
+        explanations = [e for e in client.get_url(t["url"])["bank_transaction"].get("bank_transaction_explanations")
+                        or [] if isinstance(e, dict)]
+        if len(explanations) != 1 or explanations[0].get("marked_for_review") is not True:
+            return 0                                     # changed since the last read
+        e = explanations[0]
+        found = list(e.get("attachments") or []) + ([e["attachment"]] if e.get("attachment") else [])
+        if len(found) != 1:
+            return 0
+        attachment = found[0] if isinstance(found[0], dict) else {"url": str(found[0])}
+        if not attachment.get("content_src"):
+            attachment = client.get_url(attachment["url"])["attachment"]
+        name = attachment.get("file_name") or ""
+        suffix = Path(name).suffix.lower() or next(
+            (s for s, kind in CONTENT_TYPES.items() if kind == attachment.get("content_type")), "")
+        if suffix not in CONTENT_TYPES:
+            return 0                                     # it couldn't go back on the payment
+        data = client.download(attachment["content_src"])
+        # approving replaces FreeAgent's receipt with this copy: only a real document
+        if not data.startswith((b"%PDF", b"\xff\xd8\xff", b"\x89PNG", b"GIF8")):
+            return 0
+        out = self.config.pdf_dir / f"freeagent-{_safe_stem(t['url'].rstrip('/').rsplit('/', 1)[-1])}{suffix}"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(data)
+        day = t["dated_on"][:10]
+        amount = round(-float(t["amount"]), 2)
+        supplier = ((e.get("description") or t["description"] or "").split("//")[0].strip() or "Receipt")[:80]
+        rate = e.get("sales_tax_rate")
+        rate = f"{float(rate):.1f}" if rate not in (None, "") else None
+        vat = e.get("sales_tax_value")
+        extra: dict[str, Any] = {"made_for_payment": t["url"], "freeagent_attachments": [attachment["url"]]}
+        if rate in FIXED_RATES:
+            extra["vat_choice"] = rate                   # FreeAgent's guess, until you change it
+        return self.db.insert_receipt({
+            "watcher_id": "freeagent", "source": "freeagent", "source_id": f"freeagent:{t['url']}",
+            "vendor": supplier, "purchased_on": day, "total": amount, "currency": currency,
+            "vat": abs(float(vat)) if vat not in (None, "") else None, "paid_by": "business",
+            "pdf_path": str(out), "pdf_source": "freeagent",
+            "filename": name or f"{day} {supplier}{suffix}",
+            "transaction_url": t["url"], "status": PENDING, "extra_json": extra,
         })
 
     def _email_document(self, message: Any, hint: dict[str, Any], document: str = "") -> tuple[Path, str]:
@@ -3978,6 +4098,7 @@ def _has_better_source(watcher: Any) -> bool:
 #   fallback  — the email, because getting the supplier's receipt failed
 #   photo     — photographed on the phone and read on this Mac
 #   generated — made here from the bank payment (TfL, which sends none)
+#   freeagent — attached to the payment in FreeAgent, copied here to approve
 def _receipt_json(row: Any, better: set[str] | frozenset[str] = frozenset()) -> dict[str, Any]:
     source = row["pdf_source"] or ""
     keys = row.keys()
@@ -3996,6 +4117,8 @@ def _receipt_json(row: Any, better: set[str] | frozenset[str] = frozenset()) -> 
         document = "fallback" if row["watcher_id"] in better else "email"
     elif source == "generated":
         document = "generated"
+    elif source == "freeagent":
+        document = "freeagent"
     else:
         document = "supplier"
     return {

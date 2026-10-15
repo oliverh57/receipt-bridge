@@ -648,7 +648,7 @@ const STAGE_CHIP = { check: ["To check", "warn"], link: ["Ready to link", "info"
 
 function headHtml(r) {
   const [label, kind] = STAGE_CHIP[r.stage] || STAGE_CHIP.check;
-  const source = { photo: "Photo", gmail: "Email" }[r.source] || "File";
+  const source = { photo: "Photo", gmail: "Email", freeagent: "FreeAgent" }[r.source] || "File";
   return `<div class="m-dhead">
       <h1>${esc(r.supplier || "Unknown supplier")}</h1>
       <span class="chip ${kind}">${esc(label)}</span>
@@ -898,7 +898,7 @@ function expenseExtrasHtml(r) {
 function claimPanelHtml(r) {
   const fa = state.snap.freeagent || {};
   return `<div class="st-phead"><div><div class="st-pdesc">${esc(r.supplier || "Unknown supplier")}</div>
-      <div class="muted">${esc(r.date ? longDate(r.date) : "No date on receipt")} · ${esc({ photo: "Photo", gmail: "Email" }[r.source] || "File")}</div></div>
+      <div class="muted">${esc(r.date ? longDate(r.date) : "No date on receipt")} · ${esc({ photo: "Photo", gmail: "Email", freeagent: "FreeAgent" }[r.source] || "File")}</div></div>
       <span class="amt">${amountHtml(r)}</span>
       <button class="link" data-action="x-close" aria-label="Close">✕</button></div>
     <div class="st-pbody">${m.xedit === r.id ? claimEditHtml(r) : `
@@ -1232,7 +1232,7 @@ function candRow(t, { r, option, diff }) {
     <span class="st-thumb">${thumb ? `<img src="${esc(thumb)}" alt="" loading="lazy" draggable="false">` : ICON.expense.replace(/16/g, "18")}</span>
     <span class="st-cand-txt">
       <span class="top"><b>${esc(r.supplier || "Unknown supplier")}</b><span class="amt">${esc(amountOf(r))}</span></span>
-      <span class="sub">${esc(r.date ? shortDate(r.date) : "No date")} · ${esc({ photo: "Photo", gmail: "Email" }[r.source] || "File")}${
+      <span class="sub">${esc(r.date ? shortDate(r.date) : "No date")} · ${esc({ photo: "Photo", gmail: "Email", freeagent: "FreeAgent" }[r.source] || "File")}${
         note ? ` · <span class="${warn ? "warn" : ""}" ${r.payment && !option ? 'title="Choosing it here moves it off that payment"' : ""}>${esc(note)}</span>` : ""}</span>
     </span>
     <button class="btn small" data-action="st-use-file" data-id="${r.id}" data-url="${esc(t.url)}">Use this</button></div>`;
@@ -1267,7 +1267,7 @@ function pickHtml() {
     return `<button class="pk-row ${r.id === m.stPick.sel ? "on" : ""}" data-action="st-pick-sel" data-id="${r.id}" data-search="${esc(search)}">
       <span class="st-thumb">${thumb ? `<img src="${esc(thumb)}" alt="" loading="lazy" draggable="false">` : ICON.expense.replace(/16/g, "18")}</span>
       <span class="st-cand-txt"><span class="top"><b>${esc(r.supplier || "Unknown supplier")}</b><span class="amt">${esc(amountOf(r))}</span></span>
-        <span class="sub">${esc(r.date ? shortDate(r.date) : "No date")} · ${esc({ photo: "Photo", gmail: "Email" }[r.source] || "File")}${note ? ` · ${esc(note)}` : ""}</span></span></button>`;
+        <span class="sub">${esc(r.date ? shortDate(r.date) : "No date")} · ${esc({ photo: "Photo", gmail: "Email", freeagent: "FreeAgent" }[r.source] || "File")}${note ? ` · ${esc(note)}` : ""}</span></span></button>`;
   }).join("");
   const sel = all.find((c) => c.r.id === m.stPick.sel)?.r;
   return `<div class="m-overlay" data-action="st-pick-close"><section class="m-dialog pk-dialog" role="dialog" aria-label="Pick a file">
@@ -1289,7 +1289,7 @@ function pickPreviewHtml(r) {
     ["Amount", amountOf(r)],
     ["VAT", r.vat != null ? money(r.vat, "GBP") : ""],
     ["Date", r.date ? longDate(r.date) : "No date"],
-    ["From", { photo: "Photo", gmail: "Email" }[r.source] || "File"],
+    ["From", { photo: "Photo", gmail: "Email", freeagent: "FreeAgent" }[r.source] || "File"],
     ["Category", r.will_file?.category || ""],
   ].filter(([, v]) => v);
   return `<div class="pk-img">${src ? `<img src="${esc(src)}" alt="Receipt">` : `<div class="m-nodoc">No picture</div>`}</div>
