@@ -52,6 +52,17 @@ def test_receipts_are_picked_out_from_their_subject_sender_and_snippet() -> None
         assert email_inbox.judge(subject, sender, snippet).level == "likely", subject
 
 
+def test_a_shop_with_sale_in_its_name_is_still_a_receipt() -> None:
+    """"Yard Sale Pizza" isn't a sale: an order email from it is a receipt,
+    though its snippet is only pictures."""
+    for snippet in ("YOUR ORDER HAS BEEN ACCEPTED ETA ASAP < 25 min.", ""):
+        signal = email_inbox.judge("[Yard Sale Pizza Tottenham] Order registered",
+                                   "Yard Sale Pizza <orders@livepepper.com>", snippet, ["CATEGORY_UPDATES"])
+        assert signal.level == "likely", (snippet, signal)
+    assert email_inbox.judge("[Yard Sale Pizza] Our summer sale starts now", "Yard Sale Pizza <news@shop.test>",
+                             "Pizzas from £8").level is None, "its sales are still sales"
+
+
 def test_a_forwarded_receipt_is_picked_out_from_its_subject_alone() -> None:
     # forwarded twice: the snippet is signatures and forwarding headers, and
     # the sender is the person who forwarded it, not Uber Receipts

@@ -36,7 +36,8 @@ RECEIPT_TERMS = ('{receipt invoice "order confirmation" "your order" "booking co
 SUBJECT_STRONG = re.compile(
     # not part of a hyphenated name: "[you/receipt-bridge] Secrets exposed"
     r"\breceipts?\b(?!-)|\binvoice\b(?!-)|\border\s+(?:confirm|#|no\b|number|\d)|"
-    r"\b(?:payment|purchase|booking|reservation|order)\s+(?:confirm|received|successful|complete)|"
+    r"\b(?:payment|purchase|booking|reservation|order)\s+(?:confirm|received|successful|complete|"
+    r"registered|accepted|placed)|"
     r"\bconfirm(?:ation|ed)?\b.{0,20}\b(?:order|booking|payment|purchase|reservation)\b|"
     r"thank(?:s| you) for (?:your )?(?:order|purchase|payment|booking|shopping)|"
     r"\byour (?:\w+ ){0,3}(?:order|booking|purchase|trip|ride)\b|\byou(?:'ve)? paid\b|\be-?tickets?\b|"
@@ -54,15 +55,22 @@ SENDER_STRONG = re.compile(r"^(?:receipts?|invoices?|billing|payments?|accounts?
 SENDER_NAME = re.compile(r"\b(?:receipts?|invoices?|invoicing|billing)\b", re.IGNORECASE)   # "Uber Receipts"
 SENDER_WEAK = re.compile(r"^(?:orders?|bookings?|purchases?|store|shop|sales)[._-]?", re.IGNORECASE)
 # Never receipts, even when they mention money: the same list the Statement's
-# email search uses, plus the sales and newsletters that show prices.
+# email search uses, plus newsletters and sign-in mail.
 NOT_RECEIPT = re.compile(
     r"\bstatement\b|newsletter|your bill is ready|direct debit|payment (?:request|reminder)|"
     r"invoice (?:due|overdue)|\brefund|declined|\bfailed\b|"
-    r"\d+\s*% off|\bsale\b|\bdeals?\b|\boffers?\b|discount|webinar|last chance|don't miss|"
     r"\bpassword\b|verify your|sign[- ]in|security alert|\bcode\b|"
     r"\bsecrets?\b|\bexposed\b|vulnerabilit|push protection",
     re.IGNORECASE,
 )
+# Sales and offers that show prices. Not when the subject already says it's
+# an order or receipt, and not in a shop's name in brackets: "[Yard Sale
+# Pizza Tottenham] Order registered" is a receipt.
+PROMO = re.compile(
+    r"\d+\s*% off|\bsale\b|\bdeals?\b|\boffers?\b|discount|webinar|last chance|don't miss",
+    re.IGNORECASE,
+)
+SHOP_TAG = re.compile(r"^\s*\[[^\]]*\]\s*")
 # A forward ("Fwd: Your order"): receipts are what people forward on for
 # their expenses, and what the list sees of one is the forwarding headers,
 # not the sender or total underneath.
@@ -133,11 +141,12 @@ def judge(subject: str, sender: str, snippet: str, labels: list[str] | tuple[str
         if why and points > 0:
             signal.reasons.append(why)
 
-    if SUBJECT_STRONG.search(subject):
+    strong = bool(SUBJECT_STRONG.search(subject))
+    if strong:
         add(3, "The subject says it's a receipt or order")
         if FORWARDED.match(subject):
             add(1, "Forwarded on")
-    if NOT_RECEIPT.search(subject):
+    if NOT_RECEIPT.search(subject) or (not strong and PROMO.search(SHOP_TAG.sub("", subject))):
         add(-4, "")
     money = headline_amount(f"{subject}\n{snippet}")
     if money:
