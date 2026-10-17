@@ -503,19 +503,21 @@ def test_a_failed_update_says_why_and_does_not_restart() -> None:
         assert not service._outcome.ok and "GitHub is down." in service._outcome.message
 
 
-def test_automatic_updates_install_once_idle_and_only_when_switched_on() -> None:
+def test_automatic_updates_install_once_idle_unless_switched_off() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         service = _service(Path(tmp))
         _away_from_this_checkout(tmp)
         service.db.set_state("update:last", json.dumps(NEWER))
         service.restart = mock.Mock(return_value=True)
         with mock.patch.object(service, "install_update", return_value=True) as install:
-            assert service.update_snapshot()["auto"] is False
-            assert not service._auto_update(), "off unless you switch it on"
+            assert service.update_snapshot()["auto"] is True, "on unless you switch it off"
             client, token = _client(service)
+            assert client.post("/api/settings", json={"auto_update": False},
+                               headers={"x-receipt-bridge": token}).status_code == 200
+            assert service.update_snapshot()["auto"] is False
+            assert not service._auto_update(), "switched off: it waits for Update now"
             assert client.post("/api/settings", json={"auto_update": True},
                                headers={"x-receipt-bridge": token}).status_code == 200
-            assert service.update_snapshot()["auto"] is True
             service._queued.add("scan")
             assert not service._auto_update(), "never in the middle of a scan or filing"
             service._queued.clear()

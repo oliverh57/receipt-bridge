@@ -3699,8 +3699,9 @@ class ReceiptService:
 
     @property
     def auto_update(self) -> bool:
-        """Settings → Updates: install new versions by themselves."""
-        return self.db.get_state("pref:auto_update", "0") == "1"
+        """Settings → Updates: install new versions by themselves. On unless
+        you switched it off."""
+        return self.db.get_state("pref:auto_update", "1") == "1"
 
     def set_auto_update(self, enabled: bool) -> None:
         self.db.set_state("pref:auto_update", "1" if enabled else "0")
