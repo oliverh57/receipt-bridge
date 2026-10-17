@@ -276,6 +276,47 @@ def test_flags_a_token_with_no_refresh_token() -> None:
         assert not by_email["stale@example.com"].has_refresh_token
 
 
+def test_no_internet_is_offline_not_a_lapsed_sign_in() -> None:
+    """Refreshing the token without a network failed, and the account was
+    shown as needing reconnecting. It's offline; Google saying no is still
+    expired."""
+    import socket
+
+    from google.auth.exceptions import RefreshError, TransportError
+
+    from app.gmail_client import GmailClient, is_offline
+
+    no_dns = TransportError("Failed to resolve")
+    no_dns.__cause__ = socket.gaierror(8, "nodename nor servname provided")
+    assert is_offline(no_dns) and is_offline(TimeoutError()) and is_offline(ConnectionResetError())
+    assert not is_offline(RefreshError("invalid_grant: Token has been expired or revoked."))
+    assert not is_offline(ValueError("bad"))
+
+    class Creds:
+        valid, expired, refresh_token = False, True, "r"
+
+        def __init__(self, error):
+            self.error = error
+
+        def refresh(self, request):
+            raise self.error
+
+    from google.oauth2 import credentials as google_credentials
+    original = google_credentials.Credentials.from_authorized_user_file
+    with tempfile.TemporaryDirectory() as tmp:
+        token = Path(tmp) / "a.json"
+        token.write_text("{}")
+        client = GmailClient(Path(tmp) / "credentials.json", token)
+        try:
+            google_credentials.Credentials.from_authorized_user_file = staticmethod(lambda path: Creds(no_dns))
+            assert client.check()[0] == "offline"
+            google_credentials.Credentials.from_authorized_user_file = staticmethod(
+                lambda path: Creds(RefreshError("invalid_grant")))
+            assert client.check()[0] == "expired"
+        finally:
+            google_credentials.Credentials.from_authorized_user_file = original
+
+
 def test_removing_an_account_deletes_its_token() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         store = AccountStore(_config(Path(tmp)))

@@ -41,6 +41,27 @@ class SignInCancelled(GmailAuthError):
     """The user cancelled a sign-in that was waiting on the browser."""
 
 
+class GmailOffline(RuntimeError):
+    """Google couldn't be reached (no internet): the sign-in may be fine."""
+
+
+def is_offline(exc: BaseException) -> bool:
+    """A failure to reach Google at all, rather than Google saying no: no
+    network, no DNS, a timeout. Looks through the chain of causes, as
+    google-auth and httplib2 wrap the socket's error in their own."""
+    seen: BaseException | None = exc
+    for _ in range(6):
+        if seen is None:
+            return False
+        name = type(seen).__name__
+        if isinstance(seen, (GmailOffline, ConnectionError, TimeoutError, socket.gaierror, socket.timeout)) \
+                or name in ("TransportError", "ServerNotFoundError", "ConnectionError", "Timeout",
+                            "ConnectTimeout", "ReadTimeout", "NewConnectionError", "MaxRetryError"):
+            return True
+        seen = seen.__cause__ or seen.__context__
+    return False
+
+
 def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("localhost", 0))
@@ -72,7 +93,9 @@ class GmailClient:
     def check(self) -> tuple[str, str]:
         """Actually exercise the credentials. Returns (state, detail).
 
-        States: `ok`, `signed_out`, `expired`, `error`.
+        States: `ok`, `signed_out`, `expired`, `offline`, `error`.
+        `offline`: Google couldn't be reached, so nothing is known about the
+        sign-in; it isn't a reason to reconnect.
 
         `is_authorised` only proves a file is on disk, which is why a revoked
         account could sit on the status screen looking healthy until a scan
@@ -91,6 +114,8 @@ class GmailClient:
         except GmailAuthError:
             return "expired", "Sign-in has expired — reconnect this account."
         except Exception as exc:
+            if is_offline(exc):
+                return "offline", "Google couldn't be reached. This Mac may be offline."
             text = str(exc)
             if "invalid_grant" in text or "expired or revoked" in text:
                 return "expired", "Google has expired or revoked this token."
@@ -118,6 +143,9 @@ class GmailClient:
                 self._save(creds)
                 return creds
             except Exception as exc:
+                if is_offline(exc):
+                    # not an expired sign-in: Google couldn't be asked
+                    raise GmailOffline(f"Google couldn't be reached: {exc}") from exc
                 log.warning("token refresh failed, re-authorising: %s", exc)
 
         if not interactive:

@@ -121,7 +121,7 @@ def _now() -> str:
 class Health:
     """The last known state of one Gmail account. Never computed on demand."""
 
-    state: str = "unknown"  # ok | expired | signed_out | error | unknown
+    state: str = "unknown"  # ok | expired | signed_out | offline | error | unknown
     detail: str = ""
     checked_at: str | None = None
 
@@ -320,7 +320,11 @@ class ReceiptService:
             if time.monotonic() - last_freeagent >= wait and self._freeagent_connected():
                 self.sync_freeagent()
                 last_freeagent = time.monotonic()
-            if time.monotonic() - last_health >= HEALTH_INTERVAL.total_seconds():
+            with self._lock:
+                offline = any(h.state == "offline" for h in self._health.values())
+            # sooner while Google couldn't be reached, so "Offline" clears once it's back
+            health_every = FREEAGENT_RETRY_SECONDS if offline else HEALTH_INTERVAL.total_seconds()
+            if time.monotonic() - last_health >= health_every:
                 self.check_accounts()
                 last_health = time.monotonic()
 
@@ -1757,7 +1761,7 @@ class ReceiptService:
             # Say so once, when it changes — otherwise a lapsed sign-in goes
             # unnoticed until someone opens the app and wonders why nothing
             # new has arrived.
-            if previous == "ok" and state in ("expired", "signed_out"):
+            if previous in ("ok", "offline") and state in ("expired", "signed_out"):
                 self.notify_about(
                     "problems",
                     f"Gmail access for {account.email} has lapsed. Open Receipt Bridge to reconnect.",

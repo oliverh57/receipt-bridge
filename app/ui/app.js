@@ -421,6 +421,10 @@ function renderBanner() {
     const a = needs_attention[0];
     el.innerHTML = `<div class="banner"><div class="text"><b>${esc(a.email)} needs reconnecting.</b> Email receipts aren't being checked.</div>
       ${connecting ? `<button class="btn small" data-action="connect-stop">Cancel sign-in</button>` : `<button class="btn small" data-action="reconnect" data-email="${esc(a.email)}">Reconnect</button>`}</div>`;
+  } else if (state.snap.accounts.some((a) => a.state === "offline")) {
+    // no internet: say so, not "reconnect" (the sign-in is checked once Google can be reached)
+    el.innerHTML = `<div class="banner info"><div class="text"><b>Offline.</b> Gmail can't be reached, so new email
+      receipts aren't being checked. Receipt Bridge tries again every few minutes.</div></div>`;
   } else if (unlabelled) {
     el.innerHTML = `<div class="banner info"><div class="text"><b>Reconnect ${esc(unlabelled.email)} to label filed emails.</b>
       Receipt Bridge now labels an email in Gmail once its receipt is filed, which needs one more permission from Google.
@@ -1071,8 +1075,10 @@ function gmailCard(s) {
   const accountRows = s.accounts.map((a) => {
     const pill = a.state === "ok" ? `<span class="pill ok">Working</span>`
       : a.state === "unknown" ? `<span class="pill unknown">Checking…</span>`
+      : a.state === "offline" ? `<span class="pill unknown" title="Google couldn't be reached. It's checked again every few minutes.">Offline</span>`
       : `<span class="pill bad">${a.state === "expired" ? "Needs reconnecting" : "Problem"}</span>`;
-    const broken = a.state !== "ok" && a.state !== "unknown";
+    // offline says nothing about the sign-in: no Reconnect until Google can be asked
+    const broken = !["ok", "unknown", "offline"].includes(a.state);
     // connected before labelling: reading still works, labelling needs a new sign-in
     const unlabelled = s.label_filed && !a.can_label && !broken;
     return `<div class="card-row">
