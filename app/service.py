@@ -331,6 +331,7 @@ class ReceiptService:
             self.flush_notifications()
             if self._update_check_due():
                 self.check_for_updates()
+            self._auto_update()
             if time.monotonic() - last_purge >= 3600:
                 self.purge_archived()
                 last_purge = time.monotonic()
@@ -3696,10 +3697,39 @@ class ReceiptService:
         threading.Thread(target=run, name="receipt-updates", daemon=True).start()
         return True
 
-    def _announce_update(self) -> None:
-        """One notification per new version, however often it's checked."""
+    @property
+    def auto_update(self) -> bool:
+        """Settings → Updates: install new versions by themselves."""
+        return self.db.get_state("pref:auto_update", "0") == "1"
+
+    def set_auto_update(self, enabled: bool) -> None:
+        self.db.set_state("pref:auto_update", "1" if enabled else "0")
+        self._bump()
+
+    def _auto_update(self) -> bool:
+        """With automatic updates on, install a version the check found once
+        the app is idle (no scan or filing running or waiting), then restart.
+        Each version is tried once: one that fails waits for Update now."""
+        if not self.auto_update or self.restart is None:
+            return False
         snap = self.update_snapshot()
-        if not snap["available"] or self.db.get_state("update:notified") == snap["latest"]:
+        if not snap["can_install"] or snap["installing"]:
+            return False
+        with self._lock:
+            if self._queued or self._activity.busy:
+                return False
+        target = snap["latest"] or snap["installed"]
+        if self.db.get_state("update:auto_tried") == target:
+            return False
+        self.db.set_state("update:auto_tried", target)
+        return self.install_update()
+
+    def _announce_update(self) -> None:
+        """One notification per new version, however often it's checked.
+        None with automatic updates on: it installs by itself."""
+        snap = self.update_snapshot()
+        if not snap["available"] or self.db.get_state("update:notified") == snap["latest"] \
+                or (self.auto_update and self.restart is not None and snap["can_install"]):
             return
         self.db.set_state("update:notified", snap["latest"])
         self.notify_about("updates", f"Version {snap['latest'].lstrip('vV')} is available. "
@@ -3774,6 +3804,7 @@ class ReceiptService:
             "git_checkout": git,
             "restarts": self.restart is not None,
             "repo": self.config.update_repo,
+            "auto": self.auto_update,
         }
 
     def install_update(self) -> bool:

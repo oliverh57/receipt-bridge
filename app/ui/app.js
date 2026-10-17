@@ -913,6 +913,10 @@ function updateCard(u) {
         ${u.available && !u.can_install ? `<button class="btn small" data-action="update-open">View on GitHub</button>` : ""}
         ${u.installing ? "" : `<button class="btn small" data-action="update-check" ${u.checking ? "disabled" : ""}>Check for updates</button>`}</div>
       ${u.available && u.notes ? `<details class="log"><summary>What's new</summary><pre>${esc(u.notes)}</pre></details>` : ""}
+      ${u.restarts ? `<div class="card-row"><div class="grow">Install updates automatically
+          <div class="sub">${u.auto ? "A new version installs once Receipt Bridge isn't busy, then the app restarts by itself."
+            : "Off: you're told when there's a new version, and click Update now."}</div></div>
+        <label class="switch"><input type="checkbox" data-action="auto-update" ${u.auto ? "checked" : ""} aria-label="Install updates automatically"><span></span></label></div>` : ""}
     </div>`;
 }
 
@@ -1823,6 +1827,9 @@ document.addEventListener("change", (e) => {
   }
   if (e.target.dataset.action === "auto-scan") {
     act(() => api("/api/settings", { method: "POST", body: { auto_scan: e.target.checked } }));
+  }
+  if (e.target.dataset.action === "auto-update") {
+    act(() => api("/api/settings", { method: "POST", body: { auto_update: e.target.checked } }));
   }
   if (e.target.dataset.action === "label-filed") {
     act(() => api("/api/settings", { method: "POST", body: { label_filed: e.target.checked } }));

@@ -69,6 +69,7 @@ class Email(BaseModel):
 
 class Settings(BaseModel):
     auto_scan: bool | None = None
+    auto_update: bool | None = None
     label_filed: bool | None = None
     tfl_receipts: bool | None = None
     theme: str | None = None
@@ -884,6 +885,8 @@ def create_app(service: ReceiptService) -> FastAPI:
     def settings(body: Settings) -> dict[str, Any]:
         if body.auto_scan is not None:
             service.set_auto_scan(body.auto_scan)
+        if body.auto_update is not None:
+            service.set_auto_update(body.auto_update)
         if body.label_filed is not None:
             service.set_label_filed(body.label_filed)
         if body.tfl_receipts is not None:
