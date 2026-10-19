@@ -38,7 +38,7 @@ from typing import Callable
 from .config import Config
 from .db import FAILED, PENDING, Database
 from .receipt_reader import PhotoReading, ReaderError, choose_copy, read_file, using_copy
-from .receipt_text import CONFIRMED, UNCONFIRMED, ReceiptText, same_purchase
+from .receipt_text import CONFIRMED, UNCONFIRMED, ReceiptText, find_vat_number, same_purchase
 
 log = logging.getLogger(__name__)
 
@@ -286,6 +286,10 @@ def receipt_fields(reading: PhotoReading, *, paid_by: str | None, filename: str,
                    db: Database, exclude_id: int | None = None) -> dict:
     """The receipt row for one reading (new photo, or a photo read again)."""
     text = reading.text
+    own = db.get_state("own_vat_number")
+    if own and text.vat_number == own:
+        # your own number, printed as the customer's: look for the supplier's
+        text = replace(text, vat_number=find_vat_number("\n".join(reading.rows), text.currency, own))
     taken = _photo_date(reading, filename)
     supplier, supplier_source = _supplier(text, reading, db)
     text = _total_from_name(text, supplier)

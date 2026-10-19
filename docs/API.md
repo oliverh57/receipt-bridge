@@ -94,7 +94,7 @@ screen shows, worked out in `app/review.py`:
 | `payment` | the chosen payment or `null`: `{description, date, amount, chips[], pinned, explained}`. `chips`: "Amount" (or "+£6.89" for a chosen bigger payment), "Name", "Date" (within the usual settling days), or "+21 days" for a payment you chose further away (`far: true`) |
 | `options[]` | for "Which payment is this?" (`match.status == "choose"`) and near misses (`waiting`): `{url, date, amount, description, difference}`. "This one" / "Use this" → `POST /api/receipts/{id}/payment {url}` |
 | `waiting_until` | Waiting for bank: the date it moves to Needs you |
-| `will_file` | `{type, category, vat, attachment}`, e.g. `{"Bank explanation", "Travel", "£0.55 (20%)", "Photo"}`; `vat` may read "£0.52 (20%) + £0 (0%)", "Reverse charge", "£0 (foreign VAT)", "… + £6.89 tip (0%)" |
+| `will_file` | `{type, category, vat, attachment}`, e.g. `{"Bank explanation", "Travel", "£0.55 (20%)", "Photo"}`; `vat` may read "£0.52 (20%) + £0 (0%)", "Reverse charge (£3.00 due and reclaimed)", "£0 (foreign VAT)", "… + £6.89 tip (0%)" |
 | `ai_guess.supplier` | the supplier name was guessed: tag it "Guess" |
 | `ai_guess.category` | `category` is a suggestion made on this Mac (only ever one of the FreeAgent expense categories): show it in yellow, like an unchecked field. Choosing a category replaces it; filing with it keeps it for the supplier. Never filed automatically |
 | `photo_taken` | the day the photo was taken (photos), for "Use photo date" when the receipt shows none (→ `fields` `purchased_on`) |

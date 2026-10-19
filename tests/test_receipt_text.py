@@ -29,6 +29,7 @@ from app.receipt_text import (  # noqa: E402
     MISSING,
     ReceiptText,
     find_dates,
+    find_vat_number,
     read_text,
     same_purchase,
 )
@@ -203,6 +204,15 @@ def test_not_a_vat_receipt_never_has_a_vat_number() -> None:
 def test_foreign_tax_numbers_are_not_uk_vat_numbers() -> None:
     got = read_text("ALDI\nZU ZAHLEN   1,67 €\nUSt. ID: DE 158 668 627")
     assert got.currency == "EUR" and got.vat_number is None
+
+
+def test_your_own_vat_number_is_never_the_suppliers() -> None:
+    """A reverse-charge invoice prints the customer's VAT number (made-up
+    numbers here). Whichever comes first, the supplier's is the one kept."""
+    text = "Bill to\nGB VAT 123456789\nVAT Registration UK VAT: GB987654321"
+    assert find_vat_number(text, "GBP") == "GB123456789", "without yours known, the first"
+    assert find_vat_number(text, "GBP", own="GB123456789") == "GB987654321"
+    assert find_vat_number("Bill to\nVAT No: GB123456789", "GBP", own="GB123456789") is None
 
 
 def test_dollars_alone_leave_the_currency_to_be_settled() -> None:

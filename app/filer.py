@@ -196,9 +196,13 @@ def plan_for(row: Any, *, transaction: dict[str, Any] | None, category_url: str 
              allow_difference: bool = False, rebill: dict[str, Any] | None = None) -> Plan:
     """`vat_treatment` is the supplier's setting: "printed" (the default: VAT
     exactly as printed) or "reverse_charge" (an overseas supplier of
-    services; your accountant's call, PLAN.md §6.2). FreeAgent accepts
-    reverse charge only at 0% and only with EC VAT reporting switched on in
-    its company settings (checked in the sandbox).
+    services; your accountant's call, PLAN.md §6.2). FreeAgent takes
+    reverse charge only at "Auto" or 0%, and only with EC VAT reporting
+    switched on in its company settings (sandbox). At 0% it still works out
+    the VAT at 20% itself: on live (Oct 2026) a £15 Anthropic payment added
+    £3.00 to box 1 and £15 to box 6, and FreeAgent's help says boxes 4 and 7
+    get the same. A receipt that shows UK VAT isn't reverse charged: it
+    stops instead.
 
     `allow_difference`: you chose a payment bigger than the receipt (a tip
     added after the bill was printed). The receipt files as printed and the
@@ -222,6 +226,12 @@ def plan_for(row: Any, *, transaction: dict[str, Any] | None, category_url: str 
     description = f"{row['vendor'] or 'Receipt'}: {row['description'] or ''}".strip(": ")[:200]
 
     reverse = vat_registered and vat_treatment == REVERSE_CHARGE
+    if reverse:
+        printed, _ = vat_parts(row, total or Decimal(0), True)
+        if any(rate not in ("0.0", None) for _, rate in printed):
+            problems.append(f"{row['vendor'] or 'This supplier'} is set to reverse charge, but this "
+                            "receipt shows UK VAT. Check the invoice, or set the supplier's VAT to "
+                            "As printed.")
 
     if row["paid_by"] == "personal":
         # Expenses take one VAT rate each, so a mixed-rate receipt becomes one
@@ -310,8 +320,8 @@ def plan_for(row: Any, *, transaction: dict[str, Any] | None, category_url: str 
         if difference and n == len(split):
             body["description"] = f"{description}: difference from the receipt (tip or service)"[:200]
         body.update(tax_fields(rate))
-        if reverse:
-            body["ec_status"] = "Reverse Charge"
+        if reverse and not (difference and n == len(split)):
+            body["ec_status"] = "Reverse Charge"            # not a tip added on top
         parts.append(body)
     problems += _apply_rebill(parts, rebill)
     return Plan("explanation", parts[0], attachment, transaction["url"] if transaction else None,

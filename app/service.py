@@ -848,6 +848,9 @@ class ReceiptService:
                 "fetched_at": _now(),
             }
             self.db.set_state("freeagent:reference", json.dumps(reference))
+            # never taken for a supplier's: invoices to you print it as the customer's
+            own = re.sub(r"\D", "", company.get("sales_tax_registration_number") or "")[:9]
+            self.db.set_state("own_vat_number", f"GB{own}" if len(own) == 9 else "")
 
             since = self.db.get_state("freeagent:last_sync")
             started = _now()

@@ -238,17 +238,22 @@ _NOT_VAT_RECEIPT = re.compile(r'NOT\s+A\s+(VAT|TAX)\s+(RECEIPT|INVOICE)', re.I)
 MAX_UK_VAT_SHARE = Decimal(20) / Decimal(120)
 
 
-def find_vat_number(text: str, currency: str | None) -> str | None:
+def find_vat_number(text: str, currency: str | None, own: str | None = None) -> str | None:
     """A UK VAT number, only when it's labelled as one. Foreign tax numbers
     (ABN, CVR, USt-ID, 登録番号) are never UK VAT evidence. A bare number with
-    its label lost is not accepted: that costs a reclaim, never invents one."""
+    its label lost is not accepted: that costs a reclaim, never invents one.
+    `own` is your company's VAT number: an invoice that prints it (a
+    reverse-charge one must) shows the customer's number, not the supplier's."""
     if currency != 'GBP' or _NOT_VAT_RECEIPT.search(text):
         return None
-    m = _VAT_NUMBER.search(text)
-    if not m:
-        return None
-    digits = re.sub(r'\D', '', m.group(1))
-    return 'GB' + digits if len(digits) in (9, 12) else None
+    for m in _VAT_NUMBER.finditer(text):
+        digits = re.sub(r'\D', '', m.group(1))
+        if len(digits) not in (9, 12):
+            return None
+        if own and 'GB' + digits[:9] == own[:11]:
+            continue
+        return 'GB' + digits
+    return None
 
 
 def find_printed_vat(rows: list[str], currency: str | None, total: Decimal | None) -> Decimal | None:

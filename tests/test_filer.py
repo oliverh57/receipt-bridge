@@ -248,13 +248,40 @@ def test_a_mixed_rate_receipt_is_one_explanation_with_the_printed_vat() -> None:
 
 
 def test_reverse_charge_goes_at_zero_with_the_ec_status() -> None:
-    """FreeAgent accepts reverse charge only at 0% (checked in the sandbox)."""
-    db, rid, tmp = env(vat=2.50)
+    """FreeAgent takes reverse charge at Auto or 0% (sandbox), and works out
+    the 20% for boxes 1 and 4 itself (live)."""
+    db, rid, tmp = env()
     with tmp:
         p = plan(db, rid, vat_treatment="reverse_charge")
         assert not p.problems and len(p.parts) == 1
         assert p.body["ec_status"] == "Reverse Charge" and p.body["sales_tax_rate"] == "0.0"
+        assert p.body["gross_value"] == "-21.50", "what you paid: the reverse charge isn't added to it"
         assert "ec_status" not in plan(db, rid).body, "only when the supplier is set to reverse charge"
+
+
+def test_reverse_charge_stops_when_the_receipt_shows_uk_vat() -> None:
+    """A supplier that charged UK VAT this time (no VAT number on your
+    account, say) isn't reverse charged: that would reclaim nothing paid."""
+    db, rid, tmp = env(vat=3.58)
+    with tmp:
+        problems = plan(db, rid, vat_treatment="reverse_charge").problems
+        assert any("shows UK VAT" in p for p in problems), problems
+
+
+def test_a_reverse_charge_expense_stops_when_the_receipt_shows_uk_vat() -> None:
+    db, rid, tmp = env(vat=3.58, paid_by="personal")
+    with tmp:
+        problems = plan(db, rid, vat_treatment="reverse_charge", transaction=None).problems
+        assert any("shows UK VAT" in p for p in problems), problems
+
+
+def test_a_tip_on_a_reverse_charge_receipt_isnt_reverse_charged() -> None:
+    db, rid, tmp = env(total=15.00)
+    with tmp:
+        p = plan(db, rid, transaction=dict(TX, amount=-17.00), allow_difference=True,
+                 vat_treatment="reverse_charge")
+        assert not p.problems, p.problems
+        assert [b.get("ec_status") for b in p.parts] == ["Reverse Charge", None]
 
 
 def test_a_mixed_rate_expense_is_one_expense_with_the_printed_vat() -> None:

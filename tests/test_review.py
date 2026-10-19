@@ -485,6 +485,24 @@ def test_names_and_categories_are_remembered() -> None:
         assert service._category_for(service.db.get_receipt(other)) == CATEGORY
 
 
+def test_an_invoice_that_says_reverse_charge_asks_about_it() -> None:
+    from datetime import date
+
+    from app.review import Context, review
+    from tests.test_filer import env as filer_env
+    layout = [{"pieces": [{"t": "[1] Tax to be paid on reverse charge basis"}]}]
+    db, rid, tmp = filer_env(total=15.00, extra_json=json.dumps({"layout": layout}))
+    with tmp:
+        row = db.get_receipt(rid)
+        ctx = Context(vat_registered=True, vat_treatment="printed", category_name="Software",
+                      waiting_days=7, today=date(2026, 3, 10))
+        assert "Reverse charge?" in review(row, None, ctx, overdue=False)["reasons"]
+        ctx.vat_treatment = "reverse_charge"
+        got = review(row, None, ctx, overdue=False)
+        assert "Reverse charge?" not in got["reasons"]
+        assert got["will_file"]["vat"] == "Reverse charge (£3.00 due and reclaimed)"
+
+
 def test_vat_treatment_is_a_supplier_setting() -> None:
     service, rid, tmp = make()
     with tmp:

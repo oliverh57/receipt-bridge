@@ -10,6 +10,7 @@ the wording lives here so it stays short and consistent.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
@@ -49,7 +50,10 @@ FLAG_REASONS = (
 # (Statement) or claiming it (Expenses).
 FILE_ISSUES = ("Not a receipt?", "No total", "Possible duplicate", "Split bill?", "Which currency?",
                "No date", "Check the date", "Over 18 months old", "Who paid?", "Reprint",
-               "Check the total", "Check supplier", "Check the VAT")
+               "Check the total", "Check supplier", "Check the VAT", "Reverse charge?")
+
+# "Tax to be paid on reverse charge basis": an overseas supplier of services
+REVERSE_CHARGE_WORDS = re.compile(r"\breverse[\s-]*charge", re.I)
 
 
 @dataclass
@@ -112,6 +116,12 @@ def explained_for_good(t: dict[str, Any]) -> bool:
     return _explanation(t) is not None and not is_guess(t)
 
 
+def says_reverse_charge(extra: dict[str, Any]) -> bool:
+    """The document's own words, when it was read (a photo, or a PDF's text)."""
+    return any(REVERSE_CHARGE_WORDS.search(" ".join(p.get("t", "") for p in line.get("pieces", [])))
+               for line in extra.get("layout") or [] if isinstance(line, dict))
+
+
 def is_undated(row: Any) -> bool:
     """The date stands in from the photo: the receipt didn't show one."""
     return any(("No date on the receipt" in f or "No date found" in f) for f in _flags(row))
@@ -141,6 +151,8 @@ def review(row: Any, match: Match | None, ctx: Context, *, overdue: bool) -> dic
     for needle, words in FLAG_REASONS:
         if any(needle in f for f in flags) and words not in reasons:
             reasons.append(words)
+    if ctx.vat_registered and ctx.vat_treatment != "reverse_charge" and says_reverse_charge(extra):
+        reasons.append("Reverse charge?")    # set the supplier's VAT to Reverse charge
     if not row["category"] and not ctx.category_name and not (
             match and match.transaction and match.transaction.get("explanation_url")
             and not match.transaction.get("unexplained_amount")):
@@ -279,7 +291,11 @@ def _vat_text(row: Any, ctx: Context, match: Match | None) -> str:
     if not ctx.vat_registered:
         return "Not VAT registered"
     if ctx.vat_treatment == "reverse_charge":
-        return "Reverse charge"
+        if row["total"] is None or (row["currency"] or "GBP") != "GBP":
+            return "Reverse charge"
+        # FreeAgent adds 20% of the net to boxes 1 and 4: nothing to pay
+        vat = (Decimal(str(row["total"])) / 5).quantize(Decimal("0.01"))
+        return f"Reverse charge (£{vat} due and reclaimed)"
     if row["currency"] and row["currency"] != "GBP":
         return "£0 (foreign VAT)"
     if row["total"] is None:

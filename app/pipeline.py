@@ -245,7 +245,7 @@ def process_email(
             # beside it: what review checks before a VAT reclaim is filed.
             "vat": values.get("vat"),
             "vat_number": find_vat_number(f"{message.text}\n{message.attachment_text}",
-                                          values.get("currency")),
+                                          values.get("currency"), db.get_state("own_vat_number")),
             "description": values.get("description"),
             "subject": message.subject,
             "email_date": message.date_iso,
