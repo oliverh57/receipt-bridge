@@ -199,10 +199,10 @@ def plan_for(row: Any, *, transaction: dict[str, Any] | None, category_url: str 
     services; your accountant's call, PLAN.md §6.2). FreeAgent takes
     reverse charge only at "Auto" or 0%, and only with EC VAT reporting
     switched on in its company settings (sandbox). At 0% it still works out
-    the VAT at 20% itself: on live (Oct 2026) a £15 Anthropic payment added
-    £3.00 to box 1 and £15 to box 6, and FreeAgent's help says boxes 4 and 7
-    get the same. A receipt that shows UK VAT isn't reverse charged: it
-    stops instead.
+    the VAT at 20% itself: on live (Oct 2026) a £15 Anthropic payment at 0%
+    posted £3.00 to VAT Charged (box 1) and £3.00 to VAT Reclaimed (box 4),
+    and its £15 went into boxes 6 and 7. A receipt that shows UK VAT isn't
+    reverse charged: it stops instead.
 
     `allow_difference`: you chose a payment bigger than the receipt (a tip
     added after the bill was printed). The receipt files as printed and the
