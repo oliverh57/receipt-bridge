@@ -17,7 +17,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from app.db import FILED, PENDING, Database  # noqa: E402
-from app.filer import FilingError, file_receipt, plan_for, unfile, update_claim, vat_rate  # noqa: E402
+from app.filer import (FilingError, file_receipt, plan_for, removed_in_freeagent, unfile,  # noqa: E402
+                       update_claim, vat_rate)
 from app.freeagent import WritesOff  # noqa: E402
 
 TX = {"url": "https://fa.test/v2/bank_transactions/7", "dated_on": "2026-03-05", "amount": -21.50}
@@ -282,6 +283,37 @@ def test_a_tip_on_a_reverse_charge_receipt_isnt_reverse_charged() -> None:
                  vat_treatment="reverse_charge")
         assert not p.problems, p.problems
         assert [b.get("ec_status") for b in p.parts] == ["Reverse Charge", None]
+
+
+def test_an_explanation_removed_in_freeagent_puts_the_receipt_back() -> None:
+    """Removed in FreeAgent (not with Unfile here): the next read of the
+    payment shows it unexplained, and the receipt goes back to To file."""
+    db, rid, tmp = env()
+    with tmp:
+        client = FakeClient()
+        file_receipt(client, db, rid, plan(db, rid))
+        ours = "https://fa.test/v2/bank_transaction_explanations/99"
+        still = dict(TX, unexplained_amount=0.0, explanation_url=ours)
+        assert removed_in_freeagent(db, [still]) == [] and db.get_receipt(rid)["status"] == FILED
+        partly = dict(TX, unexplained_amount=-10.0, explanation_url=None)
+        assert removed_in_freeagent(db, [partly]) == [], "split, part still there: left alone"
+        assert removed_in_freeagent(db, [dict(TX, unexplained_amount=-15.0, amount=-21.5, explanation_url=None),
+                                         ]) == [], "unclear: left alone"
+        gone = dict(TX, amount=-21.5, unexplained_amount=-21.5, explanation_url=None)
+        assert removed_in_freeagent(db, [gone]) == [rid]
+        row = db.get_receipt(rid)
+        assert row["status"] == PENDING and row["filed_at"] is None
+        assert json.loads(row["freeagent_json"])["state"] == "removed in FreeAgent"
+        assert removed_in_freeagent(db, [gone]) == [], "only once"
+        assert [c[0] for c in client.calls].count("delete") == 0, "nothing written to FreeAgent"
+
+
+def test_an_explanation_replaced_in_freeagent_puts_the_receipt_back() -> None:
+    db, rid, tmp = env()
+    with tmp:
+        file_receipt(FakeClient(), db, rid, plan(db, rid))
+        theirs = dict(TX, unexplained_amount=0.0, explanation_url="https://fa.test/v2/bank_transaction_explanations/5")
+        assert removed_in_freeagent(db, [theirs]) == [rid]
 
 
 def test_a_mixed_rate_expense_is_one_expense_with_the_printed_vat() -> None:

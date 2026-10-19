@@ -617,6 +617,29 @@ def unfile(client: FreeAgent, db: Database, receipt_id: int) -> str:
     return f"Unfiled {row['vendor']}"
 
 
+def removed_in_freeagent(db: Database, transactions: list[Any]) -> list[int]:
+    """Receipts filed onto these transactions (as last read from FreeAgent)
+    whose explanation is no longer there: someone removed it in FreeAgent.
+    They go back to To file, as if unfiled here; nothing is written to
+    FreeAgent. Gone means the payment is wholly unexplained again, or now
+    has one explanation that isn't ours."""
+    known = {t["url"]: t for t in transactions}
+    reopened = []
+    for row in db.list_receipts(FILED):
+        state = _previous(row)
+        t = known.get(state.get("transaction")) if state.get("kind") in ("explanation", "attach") else None
+        if t is None or t["unexplained_amount"] is None:
+            continue
+        ours = state.get("urls") or ([state["url"]] if state.get("url") else [])
+        unexplained = t["amount"] and float(t["unexplained_amount"]) == float(t["amount"])
+        replaced = bool(t["explanation_url"]) and t["explanation_url"] not in ours
+        if ours and (unexplained or replaced):
+            _record(db, row["id"], {"state": "removed in FreeAgent", "previous": ours},
+                    status=PENDING, filed_at=None)
+            reopened.append(row["id"])
+    return reopened
+
+
 def _apply_rebill(parts: list[dict[str, Any]], rebill: dict[str, Any] | None) -> list[str]:
     """Link each entry to the project and add re-billing, unless it's "none"
     (linked, not re-billed). A set price can't be shared out between VAT

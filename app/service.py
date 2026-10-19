@@ -38,7 +38,7 @@ from . import login_item, setup_guide, tfl, updates
 from .accounts import AccountStore, adopt_legacy_scan_state
 from .config import Config
 from .db import DELETED, EXPORTED, FAILED, FILED, IGNORED, PENDING, Database
-from .filer import FilingError, file_receipt, plan_for, unfile
+from .filer import FilingError, file_receipt, plan_for, removed_in_freeagent, unfile
 from .export import ExportResult, export_receipts
 from .freeagent import Credentials, FreeAgent, FreeAgentError, NotConnected, TokenStore, VAT_SCHEMES, vat_settings
 from .gmail_client import SignInCancelled
@@ -865,6 +865,11 @@ class ReceiptService:
                     row.setdefault("bank_account", url)
                 fetched += self.db.save_bank_transactions(rows)
             self.db.set_state("freeagent:last_sync", started)
+            reopened = removed_in_freeagent(self.db, self.db.bank_transactions(self._freeagent_accounts()))
+            if reopened:
+                self._label_emails(reopened)     # back in To file: the "Filed" label comes off
+                self._note(f"{len(reopened)} filed receipt(s) back in To file: "
+                           "their explanation was removed in FreeAgent")
             self._copy_freeagent_receipts(client)
             self.guess_categories()
             if self.tfl_receipts:
