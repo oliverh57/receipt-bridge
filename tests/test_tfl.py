@@ -45,6 +45,7 @@ def test_the_page_shows_the_payment_and_says_where_it_came_from() -> None:
 def test_without_a_company_the_page_still_reads() -> None:
     page = tfl.receipt_html({"dated_on": "2026-10-05", "amount": -9.9, "description": "TFL"})
     assert "Travel record" in page and "TFL-20261005-0" in page and "of the account named above" not in page
+    assert 'aria-label="Receipt Bridge"' in page               # the logo
     assert "journeys not recorded" in page and "entered by the traveller" not in page
 
 
@@ -54,9 +55,10 @@ def test_the_journey_you_entered_is_on_the_record() -> None:
     assert "King&#x27;s Cross St. Pancras" in page and "Canary Wharf" in page
     assert "4 October 2026" in page and "Client meeting" in page
     assert "entered by the traveller and are not confirmed by Transport for London" in page
-    assert "Single" in page and ">Return<" not in page
+    assert "<dd>Single</dd>" in page and "Back to" not in page
+    assert "Sunday 4 October 2026" in page                    # the day travelled heads the record
     there_and_back = tfl.receipt_html({"dated_on": "2026-10-05", "amount": -9.9}, trip={**trip, "return": True})
-    assert '<span class="kind">Return</span>' in there_and_back and "<td>Return</td>" in there_and_back
+    assert "Back to King&#x27;s Cross St. Pancras" in there_and_back and "<dd>Return</dd>" in there_and_back
     only_start = tfl.receipt_html({"dated_on": "2026-10-05", "amount": -9.9}, trip={"from": "Bank"})
     assert "Bank" in only_start and "Not recorded" in only_start
 

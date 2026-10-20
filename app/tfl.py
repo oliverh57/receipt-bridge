@@ -32,81 +32,90 @@ _SYMBOLS = {"GBP": "£", "EUR": "€", "USD": "$"}
 # TfL's head office
 SUPPLIER_ADDRESS = ("5 Endeavour Square", "London", "E20 1JN")
 
+# Receipt Bridge's icon (build_app.py, ICON_HTML) as a vector, sharp at any size
+LOGO = """<svg class="logo" viewBox="0 0 1024 1024" width="%(size)d" height="%(size)d" aria-label="Receipt Bridge">
+  <defs><linearGradient id="rb-bg" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#1d4ed8"/><stop offset="1" stop-color="#0f2f8f"/></linearGradient></defs>
+  <rect width="1024" height="1024" rx="230" fill="url(#rb-bg)"/>
+  <rect x="212" y="152" width="600" height="720" rx="48" fill="#fff"/>
+  <rect x="278" y="222" width="468" height="34" rx="17" fill="#c9d3e4"/>
+  <rect x="278" y="290" width="384" height="34" rx="17" fill="#c9d3e4"/>
+  <rect x="278" y="358" width="271" height="34" rx="17" fill="#c9d3e4"/>
+  <rect x="278" y="448" width="468" height="8" rx="4" fill="#1f2933"/>
+  <text x="278" y="572" font-family="-apple-system, Helvetica, Arial" font-size="74" font-weight="800" fill="#1f2933">£</text>
+  <text x="746" y="572" text-anchor="end" font-family="-apple-system, Helvetica, Arial" font-size="74" font-weight="800" fill="#1f2933">✓</text>
+</svg>"""
+
 PAGE = """<!doctype html><html><head><meta charset="utf-8"><style>
   * { box-sizing: border-box; }
   body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
          color: #1a2433; font-size: 11.5px; line-height: 1.45; }
   .muted { color: #5b6878; }
   .num { font-variant-numeric: tabular-nums; }
-  .label { font-size: 9px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: #5b6878;
-           margin: 0 0 6px 0; }
-  .head { display: flex; justify-content: space-between; align-items: flex-start;
-          padding-bottom: 14px; border-bottom: 3px solid #1a2433; }
-  .company { font-size: 17px; font-weight: 700; }
-  .title { font-size: 22px; font-weight: 800; letter-spacing: 0.12em; text-align: right; margin: -3px 0 8px 0; }
-  .meta { border-collapse: collapse; margin-left: auto; }
-  .meta td { padding: 1px 0 1px 16px; text-align: right; }
-  .meta td:first-child { color: #5b6878; }
-  .meta td:last-child { font-weight: 600; }
-  .journey { margin: 22px 0 0 0; border: 1px solid #d5dbe2; border-radius: 8px; padding: 18px 22px 16px; }
-  .route { display: flex; align-items: flex-start; margin-top: 4px; }
-  .stop { width: 34%%; }
-  .stop.end { text-align: right; }
-  .stop .name { font-size: 17px; font-weight: 700; line-height: 1.25; }
-  .stop .what { font-size: 9px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: #5b6878; }
-  .line { flex: 1; position: relative; height: 26px; margin: 0 6px; }
-  .kind { position: absolute; left: 0; right: 0; top: -9px; text-align: center; font-size: 9px; font-weight: 700;
-          letter-spacing: 0.09em; text-transform: uppercase; color: #5b6878; }
-  .line::before { content: ""; position: absolute; left: 7px; right: 7px; top: 12px; border-top: 3px solid #1a2433; }
-  .dot { position: absolute; top: 6px; width: 15px; height: 15px; border-radius: 50%%; background: #fff;
-         border: 3.5px solid #1a2433; }
-  .dot.a { left: 0; } .dot.b { right: 0; }
-  .network { font-size: 15px; font-weight: 700; }
-  .grid { display: flex; gap: 22px; margin-top: 18px; }
-  .facts { flex: 1; width: 100%%; border-collapse: collapse; }
-  .facts td { padding: 6px 0; border-bottom: 1px dotted #c3cbd4; vertical-align: top; }
-  .facts td:first-child { color: #5b6878; width: 38%%; padding-right: 12px; }
-  .facts.pay td:first-child { width: 27%%; }
-  .fare { width: 210px; border: 2px solid #1a2433; border-radius: 8px; padding: 12px 14px; align-self: flex-start; }
-  .fare .amount { font-size: 26px; font-weight: 800; margin: 2px 0 8px 0; }
-  .fare table { width: 100%%; border-collapse: collapse; }
-  .fare td { padding: 3px 0; border-top: 1px solid #d5dbe2; }
-  .fare td:last-child { text-align: right; }
-  h2 { font-size: 9px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: #5b6878;
-       margin: 24px 0 4px 0; padding-bottom: 5px; border-bottom: 1.5px solid #1a2433; }
-  .basis { margin-top: 24px; padding: 11px 14px; background: #f3f5f8; border-left: 3px solid #1a2433;
-           font-size: 10px; color: #3e4a59; }
-  .basis p { margin: 0 0 5px 0; } .basis p:last-child { margin: 0; }
-  .foot { margin-top: 20px; padding-top: 8px; border-top: 1px solid #d5dbe2; font-size: 9px; color: #5b6878;
-          display: flex; justify-content: space-between; }
+  .label { font-size: 9px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #5b6878; }
+  .brand { display: flex; justify-content: space-between; align-items: center; padding-bottom: 12px;
+           border-bottom: 1px solid #d5dbe2; }
+  .brand .who { display: flex; align-items: center; gap: 10px; }
+  .brand .name { font-size: 13px; font-weight: 700; }
+  .brand .meta { text-align: right; font-size: 10.5px; color: #5b6878; }
+  .brand .meta b { color: #1a2433; font-weight: 600; }
+  .title { margin: 22px 0 2px 0; font-size: 26px; font-weight: 800; letter-spacing: -0.01em; }
+  .when { font-size: 13px; color: #3e4a59; }
+  .trip { display: flex; gap: 0; margin-top: 18px; border: 1px solid #d5dbe2; border-radius: 10px; overflow: hidden; }
+  .route { flex: 1.25; padding: 20px 22px 18px; }
+  .details { flex: 1; padding: 20px 22px 18px; background: #f5f7fa; border-left: 1px solid #d5dbe2; }
+  .stops { margin-top: 10px; }
+  .stop { display: flex; gap: 14px; }
+  .rail { width: 18px; display: flex; flex-direction: column; align-items: center; flex: none; }
+  .dot { width: 18px; height: 18px; border-radius: 50%%; border: 4px solid #1d4ed8; background: #fff; flex: none; }
+  .dot.end { background: #1d4ed8; }
+  .dot.back { border-color: #9fb3e6; }
+  .seg { width: 4px; flex: 1; min-height: 40px; background: #1d4ed8; margin: 2px 0; }
+  .seg.back { background: repeating-linear-gradient(#9fb3e6 0 6px, transparent 6px 11px); }
+  .stop .text { padding-bottom: 14px; }
+  .stop .what { font-size: 9px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #5b6878; }
+  .stop .place { font-size: 16px; font-weight: 700; line-height: 1.25; }
+  .stop .note { color: #5b6878; margin-top: 2px; }
+  .stop.faint .place { color: #5b6878; font-weight: 600; font-size: 13px; }
+  .unrecorded .place { font-size: 15px; font-weight: 700; }
+  dl { margin: 10px 0 0 0; }
+  dt { font-size: 9px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #5b6878; margin-top: 10px; }
+  dt:first-child { margin-top: 0; }
+  dd { margin: 2px 0 0 0; font-size: 12.5px; }
+  .cost { display: flex; margin-top: 18px; border: 1px solid #d5dbe2; border-radius: 10px; }
+  .cost > div { flex: 1; padding: 12px 16px; border-left: 1px solid #d5dbe2; }
+  .cost > div:first-child { border-left: 0; }
+  .cost .v { font-size: 15px; font-weight: 700; margin-top: 3px; }
+  .cost .s { color: #5b6878; font-size: 10.5px; }
+  .evidence { margin-top: 18px; }
+  .evidence table { width: 100%%; border-collapse: collapse; margin-top: 6px; }
+  .evidence td { padding: 5px 0; border-bottom: 1px dotted #c3cbd4; }
+  .evidence td:first-child { color: #5b6878; width: 30%%; }
+  .about { margin-top: 20px; padding: 11px 14px; background: #f5f7fa; border-radius: 8px; font-size: 10px; color: #3e4a59; }
+  .about p { margin: 4px 0 0 0; }
+  .foot { margin-top: 18px; padding-top: 8px; border-top: 1px solid #d5dbe2; font-size: 9px; color: #5b6878;
+          display: flex; justify-content: space-between; align-items: center; }
+  .foot .who { display: flex; align-items: center; gap: 6px; }
 </style></head><body>
-  <div class="head">
-    <div><div class="company">%(company)s</div><div class="muted">Travel expense record</div></div>
-    <div><div class="title">TRAVEL RECORD</div>
-      <table class="meta">
-        <tr><td>Record no.</td><td class="num">%(number)s</td></tr>
-        <tr><td>Date charged</td><td>%(paid_on)s</td></tr>
-        <tr><td>Date issued</td><td>%(issued_on)s</td></tr>
-      </table></div>
+  <div class="brand">
+    <div class="who">%(logo)s<div><div class="name">Receipt Bridge</div><div class="muted">Travel expense records</div></div></div>
+    <div class="meta">Record <b class="num">%(number)s</b><br>Prepared %(issued_on)s</div>
   </div>
-  <div class="journey"><div class="label">Journey</div>%(journey)s</div>
-  <div class="grid">
-    <table class="facts">%(facts)s</table>
-    <div class="fare"><div class="label">Fare paid</div><div class="amount num">%(total)s</div>
-      <table><tr><td>Net</td><td class="num">%(total)s</td></tr>
-        <tr><td>VAT 0%% (zero-rated)</td><td class="num">%(zero)s</td></tr></table></div>
+  <div class="title">Travel record</div>
+  <div class="when">%(when)s</div>
+  <div class="trip">
+    <div class="route"><div class="label">Journey</div>%(journey)s</div>
+    <div class="details"><div class="label">Trip</div><dl>%(facts)s</dl></div>
   </div>
-  <h2>Payment</h2>
-  <table class="facts pay">%(payment)s</table>
-  <div class="basis"><div class="label">Basis of preparation</div>%(basis)s</div>
-  <div class="foot"><span>Record no. %(number)s · Prepared by Receipt Bridge on %(issued_on)s</span><span>Page 1 of 1</span></div>
+  <div class="cost">
+    <div><div class="label">Fare</div><div class="v num">%(total)s</div><div class="s">Contactless pay as you go</div></div>
+    <div><div class="label">VAT</div><div class="v num">%(zero)s</div><div class="s">0%% (zero-rated)</div></div>
+    <div><div class="label">Charged</div><div class="v">%(paid_on_short)s</div><div class="s">%(account)s</div></div>
+  </div>
+  <div class="evidence"><div class="label">Payment evidence</div><table>%(payment)s</table></div>
+  <div class="about"><div class="label">About this record</div>%(basis)s</div>
+  <div class="foot"><span class="who">%(small_logo)s Prepared with Receipt Bridge · Record %(number)s</span><span>Page 1 of 1</span></div>
 </body></html>"""
-
-ROUTE = """<div class="route">
-  <div class="stop"><div class="what">Journey start</div><div class="name">%(start)s</div></div>
-  <div class="line">%(kind)s<span class="dot a"></span><span class="dot b"></span></div>
-  <div class="stop end"><div class="what">Journey end</div><div class="name">%(end)s</div></div>
-</div>"""
 
 FIELD_LENGTH = {"from": 80, "to": 80, "reason": 200}
 
@@ -128,6 +137,15 @@ def short_date(day: str) -> str:
         return f"{date.fromisoformat(day[:10]):%d %b %Y}"
     except ValueError:
         return day
+
+
+def weekday_date(day: str) -> str:
+    """Monday 19 October 2026."""
+    try:
+        d = date.fromisoformat(day[:10])
+    except ValueError:
+        return day
+    return f"{d:%A} {d.day} {d:%B %Y}"
 
 
 def long_date(day: str) -> str:
@@ -185,7 +203,7 @@ def stations() -> list[str]:
 def receipt_html(payment: dict[str, Any], account_name: str = "", company: str = "",
                  trip: dict[str, str] | None = None, made_on: date | None = None) -> str:
     """The travel record for one bank payment to TfL, with the journey
-    you entered (`trip`: from, to, date, reason; any of them)."""
+    you entered (`trip`: from, to, date, reason, return; any of them)."""
     esc = html_lib.escape
     trip = journey(trip)
     amount = abs(float(payment["amount"]))
@@ -194,27 +212,41 @@ def receipt_html(payment: dict[str, Any], account_name: str = "", company: str =
     paid_on = payment["dated_on"][:10]
     issued_on = long_date((made_on or date.today()).isoformat())
     number = receipt_number(payment)
+    travelled = trip.get("date")
+    when = " · ".join(filter(None, [company, weekday_date(travelled) if travelled else f"Charged {long_date(paid_on)}",
+                                    "Transport for London"]))
+
+    def stop(kind: str, what: str, place: str, note: str = "", last: bool = False, cls: str = "") -> str:
+        rail = f'<span class="dot {kind}"></span>' + ("" if last else f'<span class="seg {cls}"></span>')
+        return (f'<div class="stop {cls}"><div class="rail">{rail}</div><div class="text"><div class="what">{esc(what)}</div>'
+                f'<div class="place">{esc(place)}</div>{f"<div class=note>{esc(note)}</div>" if note else ""}</div></div>')
+
     if trip.get("from") or trip.get("to"):
-        route = ROUTE % {"start": esc(trip.get("from") or "Not recorded"), "end": esc(trip.get("to") or "Not recorded"),
-                         "kind": '<span class="kind">Return</span>' if trip.get("return") else ""}
+        start, end = trip.get("from") or "Not recorded", trip.get("to") or "Not recorded"
+        stops = stop("start", "From", start, "TfL · contactless pay as you go")
+        if trip.get("return"):
+            stops += stop("end", "To", end, "", False, "back")
+            stops += stop("back", "Return", f"Back to {start}", "", True, "faint")
+        else:
+            stops += stop("end", "To", end, "", True)
+        route = f'<div class="stops">{stops}</div>'
     else:
-        route = ('<div class="network">Travel on TfL services</div>'
-                 '<div class="muted">Contactless pay as you go · journeys not recorded</div>')
+        route = ('<div class="stops unrecorded"><div class="place">Travel on TfL services</div>'
+                 '<div class="muted">Contactless pay as you go · journeys not recorded</div></div>')
     facts = [
-        ("Date of travel", long_date(trip["date"]) if trip.get("date") else ""),
+        ("Date of travel", long_date(travelled) if travelled else ""),
         ("Journey type", ("Return" if trip.get("return") else "Single") if trip.get("from") or trip.get("to")
          else "Return" if trip.get("return") else ""),
-        ("Reason for travel", trip.get("reason", "")),
-        ("Network", "Transport for London, contactless pay as you go"),
-        ("Supplier", f"{SUPPLIER}, {', '.join(SUPPLIER_ADDRESS)}"),
+        ("Purpose", trip.get("reason", "")),
+        ("Network", "Transport for London"),
+        ("Traveller", company),
     ]
     payment_rows = [
-        ("Paid by", company),
-        ("Paid from", account_name),
-        ("Payment method", "Contactless card"),
-        ("Bank statement reference", statement_line),
+        ("Paid from", f"{account_name} (contactless card)" if account_name else "Contactless card"),
+        ("Bank statement shows", statement_line),
         ("Bank transaction", number.rsplit("-", 1)[-1] if payment.get("url") else ""),
-        ("Amount debited", money(amount, currency)),
+        ("Amount debited", f"{money(amount, currency)} on {long_date(paid_on)}"),
+        ("Supplier", f"{SUPPLIER}, {', '.join(SUPPLIER_ADDRESS)}"),
     ]
     basis = [
         "Transport for London does not issue receipts for contactless pay as you go fares. This record "
@@ -226,17 +258,19 @@ def receipt_html(payment: dict[str, Any], account_name: str = "", company: str =
     if trip:
         basis.append("The journey details above were entered by the traveller and are not confirmed by "
                      "Transport for London.")
-    rows = lambda pairs: "".join(f"<tr><td>{esc(k)}</td><td>{esc(v)}</td></tr>" for k, v in pairs if v)  # noqa: E731
     return PAGE % {
-        "company": esc(company or "Travel record"),
+        "logo": LOGO % {"size": 34},
+        "small_logo": LOGO.replace('id="rb-bg"', 'id="rb-bg2"').replace("url(#rb-bg)", "url(#rb-bg2)") % {"size": 12},
         "number": esc(number),
-        "paid_on": esc(long_date(paid_on)),
         "issued_on": esc(issued_on),
+        "when": esc(when),
         "journey": route,
-        "facts": rows(facts),
-        "payment": rows(payment_rows),
+        "facts": "".join(f"<dt>{esc(k)}</dt><dd>{esc(v)}</dd>" for k, v in facts if v),
+        "payment": "".join(f"<tr><td>{esc(k)}</td><td>{esc(v)}</td></tr>" for k, v in payment_rows if v),
         "total": esc(money(amount, currency)),
         "zero": esc(money(0, currency)),
+        "paid_on_short": esc(short_date(paid_on)),
+        "account": esc(account_name or "Contactless card"),
         "basis": "".join(f"<p>{esc(text)}</p>" for text in basis),
     }
 
