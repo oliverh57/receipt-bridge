@@ -2929,11 +2929,13 @@ class ReceiptService:
                 self.db.delete_state(key)
         self._bump()
 
-    def make_tfl_receipt(self, transaction_url: str, journey: dict[str, str] | None = None) -> bool:
+    def make_tfl_receipt(self, transaction_url: str, journey: dict[str, str] | None = None,
+                         link: bool = False) -> bool:
         """"Make TfL receipt" on one Statement line (queued; read `outcome`).
-        `journey`: {from, to, date, reason, return} to show on it (blank: none); None: the usual one."""
+        `journey`: {from, to, date, reason, return} to show on it (blank: none); None: the usual one.
+        `link`: then link it, as Approve does (the dialog: you've seen the record)."""
         return self._enqueue(f"tfl:{transaction_url}",
-                             lambda: self._run_make_tfl_receipts([transaction_url], journey))
+                             lambda: self._run_make_tfl_receipts([transaction_url], journey, link))
 
     def tfl_preview(self, transaction_url: str, journey: dict[str, Any] | None = None) -> bytes:
         """The travel record "Make TfL receipt" would make for this payment,
@@ -2961,7 +2963,8 @@ class ReceiptService:
         """One for every TfL payment with no receipt (queued, quietly)."""
         return self._enqueue("tfl-receipts", lambda: self._run_make_tfl_receipts(None))
 
-    def _run_make_tfl_receipts(self, urls: list[str] | None, journey: dict[str, str] | None = None) -> None:
+    def _run_make_tfl_receipts(self, urls: list[str] | None, journey: dict[str, str] | None = None,
+                               link: bool = False) -> None:
         """`urls`: the payments asked for, each reported; None: every TfL
         payment still missing its receipt, reported only when some were made.
         `journey`: where, when and why you travelled ({from, to, date, reason, return}); None:
@@ -2986,21 +2989,29 @@ class ReceiptService:
         from .browser import BrowserPool
 
         accounts = {a["url"]: a for a in self._freeagent_reference().get("bank_accounts", [])}
-        made = 0
+        made: list[int] = []
         pool = BrowserPool(headless=self.config.headless)
         try:
             for t in sorted(chosen, key=lambda t: t["dated_on"]):
-                made += bool(self._make_tfl_receipt(pool, t, accounts.get(t["bank_account"], {}).get("name", ""),
-                                                    asked=urls is not None, journey=journey))
+                receipt_id = self._make_tfl_receipt(pool, t, accounts.get(t["bank_account"], {}).get("name", ""),
+                                                    asked=urls is not None, journey=journey)
+                if receipt_id:
+                    made.append(receipt_id)
         except Exception as exc:
             log.exception("TfL receipt")
             self._finish("tfl", False, f"Couldn't make the TfL receipt: {exc}")
             return
         finally:
             pool.close()
-        if made:
+        if made and link and urls is not None:
+            if self._freeagent_connected():
+                self._run_file(made)                 # as Approve: its own outcome says how it went
+            else:
+                self._finish("tfl", False, "Made the TfL receipt, but FreeAgent isn't connected to link it: "
+                             "it's in Match, paired with this payment.")
+        elif made:
             self._finish("tfl", True, "Made the TfL receipt and put it in Match, paired with this payment."
-                         if urls is not None else f"Made {made} TfL receipt{'s' if made > 1 else ''} for Match.")
+                         if urls is not None else f"Made {len(made)} TfL receipt{'s' if len(made) > 1 else ''} for Match.")
         elif urls is not None:
             self._finish("tfl", False, "That payment already has a TfL receipt.")
 

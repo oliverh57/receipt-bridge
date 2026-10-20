@@ -1528,7 +1528,7 @@ function tflDialogHtml(t) {
       aria-modal="true" aria-labelledby="tfl-dialog-title" data-url="${esc(t.url)}">
     <div class="e-dform">
       <h2 id="tfl-dialog-title">Make TfL receipt</h2>
-      <p class="sub">TfL doesn't send receipts for contactless travel. This makes a travel record from the payment, paired with it in Match. The journey is optional.</p>
+      <p class="sub">TfL doesn't send receipts for contactless travel. This makes a travel record from the payment and links it in FreeAgent. The journey is optional.</p>
       <div class="e-dlabel" style="margin-top:0">Bank payment</div>
       <div class="m-pay e-paycard">${bankBadge(accountName())}
         <div class="who"><div class="desc">${esc(t.description)}</div><div class="sub">${esc(accountName())} · ${esc(longDate(t.date))}</div></div>
@@ -1546,7 +1546,7 @@ function tflDialogHtml(t) {
       <div class="m-note e-dnote">The record says the journey was entered by you, not confirmed by TfL.</div>
       <div class="m-dialog-foot">
         <button class="btn" data-action="tfl-close">Cancel</button>
-        <button class="btn primary" data-action="st-tfl" data-url="${esc(t.url)}" data-trip="1">Make TfL receipt</button></div>
+        <button class="btn primary" data-action="st-tfl" data-url="${esc(t.url)}" data-trip="1">Make and link</button></div>
     </div>
     <div class="e-dpreview">
       <div class="e-dphead"><div class="e-dlabel">Travel record</div><span class="muted tfl-updating" hidden>Updating…</span></div>
@@ -2030,7 +2030,8 @@ document.addEventListener("click", async (e) => {
       return closeTflDialog();
     case "st-tfl": {
       // from the dialog: with the journey typed there
-      const body = { url: target.dataset.url, ...(target.dataset.trip ? tflTrip(target.dataset.url) : {}) };
+      // you've seen the record: made and linked, as Approve does
+      const body = { url: target.dataset.url, ...(target.dataset.trip ? tflTrip(target.dataset.url) : {}), link: true };
       closeTflDialog();
       // the status line shows it being made; the outcome toast says how it went
       return act(async () => {

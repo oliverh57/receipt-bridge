@@ -59,8 +59,8 @@ New versions arrive inside the app (**Update now**).
    or **No receipt needed** (tax payment, transfer, bank fee…).
    TfL sends no receipt for contactless travel, so a TfL payment has
    **Make TfL receipt…**: a dialog, with a preview of the record as you
-   type, makes a travel record from the bank payment, which goes to
-   Match, paired with it (Transport for London, Travel, VAT £0, marked as
+   type; **Make and link** makes a travel record from the bank payment
+   and links it to the payment, as Approve does (Transport for London, Travel, VAT £0, marked as
    prepared by Receipt Bridge, not TfL). Add the journey if you like, all
    optional: start and end, return, date of travel and reason. Start and
    end suggest stations as you type (TfL's own first, then National Rail;

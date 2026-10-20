@@ -651,7 +651,8 @@ def create_app(service: ReceiptService) -> FastAPI:
     def statement_tfl_receipt(body: dict[str, Any]) -> dict[str, Any]:
         """"Make TfL receipt": one made from the payment, into Match; read `outcome`.
         `from`, `to`, `date` (YYYY-MM-DD), `reason`, `return` (true / false): the
-        journey, shown on it (all left out: the usual journey)."""
+        journey, shown on it (all left out: the usual journey). `link`: true
+        links it straight away, as Approve does."""
         if not isinstance(body.get("url"), str):
             raise HTTPException(400, "url is required")
         keys = ("from", "to", "date", "reason")
@@ -659,7 +660,7 @@ def create_app(service: ReceiptService) -> FastAPI:
             raise HTTPException(400, "from, to, date and reason are text; return is true or false")
         journey = {**{k: body.get(k) or "" for k in keys}, "return": body.get("return", False)} \
             if any(k in body for k in (*keys, "return")) else None
-        return {"queued": service.make_tfl_receipt(body["url"], journey)}
+        return {"queued": service.make_tfl_receipt(body["url"], journey, link=body.get("link") is True)}
 
     @app.get("/api/statement/tfl-preview")
     def statement_tfl_preview(url: str, start: str = "", end: str = "", date: str = "", reason: str = "",

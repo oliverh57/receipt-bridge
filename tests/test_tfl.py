@@ -221,7 +221,7 @@ def test_the_api_takes_the_journey_and_lists_stations() -> None:
     service, printed, tmp = make(("tx/tfl", -9.9, "TFL // CARD_PURCHASE///"))
     with tmp:
         asked = []
-        service.make_tfl_receipt = lambda url, journey=None: asked.append((url, journey)) or True  # type: ignore
+        service.make_tfl_receipt = lambda url, journey=None, link=False: asked.append((url, journey)) or True  # type: ignore
         app = create_app(service)
         client = TestClient(app, base_url="http://127.0.0.1")
         headers = {"x-receipt-bridge": app.state.token}
@@ -259,6 +259,25 @@ def test_the_dialog_previews_the_record_without_keeping_anything() -> None:
         assert service.receipts("pending") == [], "a preview makes no receipt"
         assert not any((service.config.pdf_dir / "previews").glob("*")), "nor leaves a file"
         assert client.get("/api/statement/tfl-preview", params={"url": "tx/gone", "t": app.state.token}).status_code == 404
+
+
+def test_made_from_the_dialog_it_is_linked_too() -> None:
+    service, printed, tmp = make(("tx/a", -9.9, "TFL // CARD_PURCHASE///"), ("tx/b", -4.6, "TFL // CARD_PURCHASE///"))
+    with tmp:
+        filed: list[list[int]] = []
+        service._run_file = lambda ids, only_single_part=False: filed.append(ids)  # type: ignore[method-assign]
+        service._freeagent_connected = lambda: False                             # type: ignore[method-assign]
+        service._run_make_tfl_receipts(["tx/a"], {"from": "Bank"}, link=True)
+        assert filed == [] and "isn't connected" in service.snapshot()["outcome"]["message"]
+        assert row(service, "tx/a")["status"] == "in_match", "left in Match to link later"
+
+        service._freeagent_connected = lambda: True                              # type: ignore[method-assign]
+        service._run_make_tfl_receipts(["tx/b"], {"from": "Bank"}, link=True)
+        made = next(r["id"] for r in service.receipts("pending") if r["pinned_payment"] == "tx/b")
+        assert filed == [[made]], "linked as Approve does"
+
+        service._run_make_tfl_receipts(None)                                  # by itself: never linked
+        assert len(filed) == 1
 
 
 def test_a_category_you_chose_for_tfl_before_is_kept() -> None:
