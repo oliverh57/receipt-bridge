@@ -33,6 +33,9 @@ New versions arrive inside the app (**Update now**).
    in **Match** within a minute. Email receipts (the optional email tool,
    Settings → Email) arrive every 6 hours. **Check now** in the top
    bar reads the inbox, FreeAgent and email straight away.
+   Or drop a photo or PDF anywhere on the window: on **Files** it's a
+   business receipt; on any other page it waits in Files, unsorted, asking
+   business account or personally.
    Photos are tidied (cut to the receipt, squared up, grey with the
    contrast lifted) only when the tidied copy reads back with the same
    total, date, VAT and amounts; otherwise the plain photo is used.

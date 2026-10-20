@@ -440,6 +440,18 @@ def test_a_dropped_file_goes_into_the_inbox_ready_to_read() -> None:
         assert client.post("/api/files/upload?name=a.jpg", content=b"x").status_code == 403   # no token
 
 
+def test_a_file_dropped_on_another_page_waits_unsorted() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        service = _service(Path(tmp))
+        client, token = _client(service)
+        h = {"X-Receipt-Bridge": token}
+        r = client.post("/api/files/upload?name=Taxi.pdf&paid_by=unsorted", content=b"%PDF-1.4", headers=h)
+        assert r.status_code == 200, r.text
+        from app.photo_inbox import pending_files
+        assert [(p.parent, who) for p, who in pending_files(service.photo_inbox)] == [(service.photo_inbox, None)]
+        assert client.post("/api/files/upload?name=a.pdf&paid_by=someone", content=b"%PDF", headers=h).status_code == 400
+
+
 
 def test_an_email_missing_a_field_is_staged_like_a_photo() -> None:
     """A supplier rule that can't find the total no longer sets the email

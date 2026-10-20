@@ -2641,8 +2641,10 @@ class ReceiptService:
     UPLOAD_MAX_BYTES = 30 * 1024 * 1024
 
     def upload_file(self, name: str, data: bytes, paid_by: str | None = "business") -> str:
-        """A file dropped on Files (or Expenses): into the receipt inbox, read
-        straight away like a phone photo."""
+        """A file dropped on the window: into the receipt inbox, read straight
+        away like a phone photo. `paid_by` "business" / "personal" puts it in
+        Bank/ or Expense/; anything else ("unsorted") in the inbox itself, so
+        Files asks which."""
         suffix = Path(name or "").suffix.lower()
         if suffix not in self.UPLOAD_TYPES:
             raise ValueError("Only photos (JPEG, PNG, HEIC, WebP) and PDFs can be added")

@@ -66,7 +66,7 @@ Each receipt:
 
 | Call | Body | Does |
 |---|---|---|
-| `POST /api/files/upload?name=&paid_by=business|personal` | the file's bytes | a file dropped on Files or Expenses: into the receipt inbox, read at once. Photos (JPEG, PNG, HEIC, WebP) and PDFs, up to 30 MB |
+| `POST /api/files/upload?name=&paid_by=business|personal|unsorted` | the file's bytes | a file dropped on the window: into the receipt inbox, read at once. `unsorted` (dropped on any page but Files) waits in Files asking business or personal. Photos (JPEG, PNG, HEIC, WebP) and PDFs, up to 30 MB |
 | `POST /api/receipts/{id}/fields` | `checked: true` ("Looks right": settles the file's doubts, except a total, currency or payer that's still blank), or any of `vendor`, `purchased_on` (YYYY-MM-DD), `total`, `currency` (3 letters), `category` (URL), `paid_by`, `vat_treatment`, `auto_file` (bool: the supplier's "link automatically" approval), `rebill` | correct a receipt. Clears that field's flags; remembers category, VAT treatment and the auto-link approval per supplier, and supplier name per VAT number. 400 with a reason if invalid |
 | `POST /api/receipts/file` | `{ids: [..]}` | queue filing. Read results from `filing` and `outcome` |
 | `POST /api/receipts/{id}/unfile` | — | queue undo: deletes only what the app created (or removes only the attachment it added) |

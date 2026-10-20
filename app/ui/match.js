@@ -1613,6 +1613,8 @@ function fileAllHtml() {
 
 // ---- drag and drop -----------------------------------------------------------------------
 
+// Files takes a dropped file as a business receipt. Every other page takes it
+// too, unsorted: it waits in Files, asking business account or personally.
 const DROP_VIEWS = ["pending"];
 
 async function uploadFiles(files, paidBy) {
@@ -1626,7 +1628,10 @@ async function uploadFiles(files, paidBy) {
     if (res.ok) added += 1;
     else problems.push(`${f.name}: ${((await res.json().catch(() => ({}))).detail) || res.statusText}`);
   }
-  if (added) toast(`Added ${added} file${added === 1 ? "" : "s"}. Reading ${added === 1 ? "it" : "them"} now…`);
+  const them = added === 1 ? "it" : "them";
+  if (added) toast(paidBy === "unsorted"
+    ? `Added ${added} file${added === 1 ? "" : "s"} to Files. Reading ${them} now; choose business or personal there.`
+    : `Added ${added} file${added === 1 ? "" : "s"}. Reading ${them} now…`);
   if (problems.length) toast(`<b>Not added.</b> ${esc(problems.join(" · "))}`, 9000);
   refresh(true);
 }
@@ -1634,7 +1639,14 @@ async function uploadFiles(files, paidBy) {
 function setDragging(on) {
   if (m.dragging === on) return;
   m.dragging = on;
-  document.querySelector(".m-wrap")?.classList.toggle("dragging", on);
+  const files = DROP_VIEWS.includes(state.view);
+  document.querySelector(".m-wrap")?.classList.toggle("dragging", on && files);
+  // anywhere else: over the whole window
+  const anywhere = $("#drop-anywhere");
+  if (on && !files && !anywhere.innerHTML) {
+    anywhere.innerHTML = `<div>${ICON.upload}<b>Drop receipts here</b><span>Photos and PDFs, added to Files to sort</span></div>`;
+  }
+  anywhere.hidden = !(on && !files);
 }
 
 // A drag that starts inside the app (a receipt photo, a link) is never a
@@ -1652,10 +1664,8 @@ document.addEventListener("dragover", (e) => {
   if (dragFromPage) { e.preventDefault(); e.dataTransfer.dropEffect = "none"; return; }
   if (!outsideFiles(e)) return;
   e.preventDefault();
-  // a licence file can be dropped on any screen while the keys are missing
-  const ok = DROP_VIEWS.includes(state.view) || !!state.snap?.needs_licence;
-  e.dataTransfer.dropEffect = ok ? "copy" : "none";
-  setDragging(ok);
+  e.dataTransfer.dropEffect = "copy";            // any page (see DROP_VIEWS)
+  setDragging(true);
 });
 document.addEventListener("dragleave", (e) => { if (!e.relatedTarget) setDragging(false); });
 document.addEventListener("drop", (e) => {
@@ -1669,7 +1679,7 @@ document.addEventListener("drop", (e) => {
   const rules = files.filter((f) => f.name.toLowerCase().endsWith(".rbrules"));
   if (rules.length) importRulesFile(rules[0]);              // recurring receipts, on any screen too
   const rest = files.filter((f) => !licences.includes(f) && !rules.includes(f));
-  if (rest.length && DROP_VIEWS.includes(state.view)) uploadFiles(rest, "business");
+  if (rest.length) uploadFiles(rest, DROP_VIEWS.includes(state.view) ? "business" : "unsorted");
 });
 
 // ---- events ------------------------------------------------------------------------------

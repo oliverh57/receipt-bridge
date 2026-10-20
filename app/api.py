@@ -627,9 +627,10 @@ def create_app(service: ReceiptService) -> FastAPI:
 
     @app.post("/api/files/upload")
     async def files_upload(request: Request, name: str, paid_by: str = "business") -> dict[str, Any]:
-        """A dropped file, as the raw request body (`?name=receipt.jpg&paid_by=business|personal`)."""
-        if paid_by not in ("business", "personal"):
-            raise HTTPException(400, "paid_by is business or personal")
+        """A dropped file, as the raw request body (`?name=receipt.jpg&paid_by=business|personal|unsorted`).
+        Unsorted: dropped on a page other than Files, it asks business or personal there."""
+        if paid_by not in ("business", "personal", "unsorted"):
+            raise HTTPException(400, "paid_by is business, personal or unsorted")
         data = await request.body()
         try:
             path = service.upload_file(name, data, paid_by)

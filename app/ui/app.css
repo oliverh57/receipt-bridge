@@ -648,6 +648,8 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
 .f-drop b { font-size: 17px; }
 .f-drop span { color: var(--muted); }
 .m-wrap.dragging .f-drop { display: flex; }
+#drop-anywhere { position: fixed; inset: 12px; z-index: 1000; }
+#drop-anywhere:not([hidden]) { display: flex; }
 
 /* Statement with its linking panel */
 .st-split { flex: 1; min-width: 0; min-height: 0; display: flex; }
