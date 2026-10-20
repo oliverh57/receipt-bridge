@@ -54,6 +54,9 @@ def test_the_journey_you_entered_is_on_the_record() -> None:
     assert "King&#x27;s Cross St. Pancras" in page and "Canary Wharf" in page
     assert "4 October 2026" in page and "Client meeting" in page
     assert "entered by the traveller and are not confirmed by Transport for London" in page
+    assert "Single" in page and ">Return<" not in page
+    there_and_back = tfl.receipt_html({"dated_on": "2026-10-05", "amount": -9.9}, trip={**trip, "return": True})
+    assert '<span class="kind">Return</span>' in there_and_back and "<td>Return</td>" in there_and_back
     only_start = tfl.receipt_html({"dated_on": "2026-10-05", "amount": -9.9}, trip={"from": "Bank"})
     assert "Bank" in only_start and "Not recorded" in only_start
 
@@ -65,6 +68,9 @@ def test_journeys_are_tidied() -> None:
     assert tfl.journey(None) == {}
     assert tfl.describe({"from": "Bank", "to": "Angel"}) == "TfL travel: Bank to Angel"
     assert tfl.describe({"to": "Angel"}) == "TfL travel: to Angel"
+    assert tfl.describe({"from": "Bank", "to": "Angel", "return": True}) == "TfL travel: Bank to Angel and back"
+    assert tfl.journey({"return": True}) == {"return": True}
+    assert tfl.journey({"return": "yes", "from": "Bank"}) == {"from": "Bank"}      # only a real true
     assert tfl.describe({}) == "Contactless travel"
 
 
@@ -73,7 +79,10 @@ def test_stations_are_offered_for_start_and_end() -> None:
     assert len(names) > 300 and not any(n.startswith("#") for n in names)
     for name in ("Oxford Circus", "Canary Wharf", "Stratford", "Clapham Junction", "Abbey Wood", "Wimbledon"):
         assert name in names, name
-    assert not any(n.endswith(("Underground Station", "DLR Station", "Rail Station")) for n in names)
+    assert not any(n.endswith(("Underground Station", "DLR Station", "Rail Station", " LL")) for n in names)
+    # National Rail too (contactless works there), after TfL's own: ranked behind on an equal match
+    assert "London St Pancras International" in names and "Gatwick Airport" in names
+    assert names.index("Abbey Wood") < names.index("King's Cross St. Pancras") < names.index("London St Pancras International")
 
 
 # ---- through the app --------------------------------------------------------------
@@ -183,7 +192,7 @@ def test_the_journey_typed_is_used_else_the_usual_one() -> None:
     service, printed, tmp = make(("tx/a", -2.3, "TFL // CARD_PURCHASE///"), ("tx/b", -7.2, "TFL // CARD_PURCHASE///"))
     with tmp:
         service.set_tfl_journey("  Bank ", "Angel", "Office")
-        assert service.snapshot()["tfl_journey"] == {"from": "Bank", "to": "Angel", "reason": "Office"}
+        assert service.snapshot()["tfl_journey"] == {"from": "Bank", "to": "Angel", "reason": "Office", "return": False}
 
         service._run_make_tfl_receipts(["tx/a"], {"from": "Oxford Circus", "to": "", "date": "2026-10-04",
                                                   "reason": "Client meeting"})
@@ -196,8 +205,12 @@ def test_the_journey_typed_is_used_else_the_usual_one() -> None:
         assert printed[-1]["payment"]["url"] == "tx/b"
         assert printed[-1]["journey"] == {"from": "Bank", "to": "Angel", "reason": "Office"}
 
-        service.set_tfl_journey("", None, "")                 # cleared; "to" left as it was
-        assert service.tfl_journey == {"from": "", "to": "Angel", "reason": ""}
+        service.set_tfl_journey("", None, "", True)           # cleared; "to" left as it was
+        assert service.tfl_journey == {"from": "", "to": "Angel", "reason": "", "return": True}
+        service.db.set_status(next(r["id"] for r in service.receipts("pending") if r["pinned_payment"] == "tx/b"),
+                              "ignored")
+        service._run_make_tfl_receipts(["tx/b"])               # asked again, no journey given: the usual one
+        assert printed[-1]["journey"] == {"to": "Angel", "return": True}
 
 
 def test_the_api_takes_the_journey_and_lists_stations() -> None:
@@ -215,11 +228,16 @@ def test_the_api_takes_the_journey_and_lists_stations() -> None:
         client.post("/api/statement/tfl-receipt", json={"url": "tx/tfl"}, headers=headers)
         client.post("/api/statement/tfl-receipt", json={"url": "tx/tfl", "from": "Bank", "reason": "Meeting"},
                     headers=headers)
-        assert asked == [("tx/tfl", None), ("tx/tfl", {"from": "Bank", "to": "", "date": "", "reason": "Meeting"})]
-        assert client.post("/api/statement/tfl-receipt", json={"url": "tx/tfl", "from": 3},
-                           headers=headers).status_code == 400
-        client.post("/api/settings", json={"tfl_from": "Bank", "tfl_reason": "Office"}, headers=headers)
-        assert service.tfl_journey == {"from": "Bank", "to": "", "reason": "Office"}
+        client.post("/api/statement/tfl-receipt", json={"url": "tx/tfl", "return": True}, headers=headers)
+        assert asked == [("tx/tfl", None),
+                         ("tx/tfl", {"from": "Bank", "to": "", "date": "", "reason": "Meeting", "return": False}),
+                         ("tx/tfl", {"from": "", "to": "", "date": "", "reason": "", "return": True})]
+        for bad in ({"from": 3}, {"return": "yes"}):
+            assert client.post("/api/statement/tfl-receipt", json={"url": "tx/tfl", **bad},
+                               headers=headers).status_code == 400
+        client.post("/api/settings", json={"tfl_from": "Bank", "tfl_reason": "Office", "tfl_return": True},
+                    headers=headers)
+        assert service.tfl_journey == {"from": "Bank", "to": "", "reason": "Office", "return": True}
         stations = client.get(f"/api/tfl/stations?t={app.state.token}").json()
         assert "Oxford Circus" in stations
 

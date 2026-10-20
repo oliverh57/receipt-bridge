@@ -55,6 +55,8 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8"><style>
   .stop .name { font-size: 17px; font-weight: 700; line-height: 1.25; }
   .stop .what { font-size: 9px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: #5b6878; }
   .line { flex: 1; position: relative; height: 26px; margin: 0 6px; }
+  .kind { position: absolute; left: 0; right: 0; top: -9px; text-align: center; font-size: 9px; font-weight: 700;
+          letter-spacing: 0.09em; text-transform: uppercase; color: #5b6878; }
   .line::before { content: ""; position: absolute; left: 7px; right: 7px; top: 12px; border-top: 3px solid #1a2433; }
   .dot { position: absolute; top: 6px; width: 15px; height: 15px; border-radius: 50%%; background: #fff;
          border: 3.5px solid #1a2433; }
@@ -102,7 +104,7 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8"><style>
 
 ROUTE = """<div class="route">
   <div class="stop"><div class="what">Journey start</div><div class="name">%(start)s</div></div>
-  <div class="line"><span class="dot a"></span><span class="dot b"></span></div>
+  <div class="line">%(kind)s<span class="dot a"></span><span class="dot b"></span></div>
   <div class="stop end"><div class="what">Journey end</div><div class="name">%(end)s</div></div>
 </div>"""
 
@@ -149,13 +151,15 @@ def place(text: Any, limit: int = 80) -> str:
 
 def journey(fields: dict[str, Any] | None) -> dict[str, str]:
     """Where and why you travelled, as kept on the receipt: from, to,
-    date (YYYY-MM-DD) and reason, each only when given."""
+    date (YYYY-MM-DD), reason and return (True: there and back), each only
+    when given."""
     fields = fields or {}
-    out = {key: place(fields.get(key), limit) for key, limit in FIELD_LENGTH.items()}
+    out: dict[str, Any] = {key: place(fields.get(key), limit) for key, limit in FIELD_LENGTH.items()}
     try:
         out["date"] = date.fromisoformat(str(fields.get("date") or "")[:10]).isoformat()
     except ValueError:
         out["date"] = ""
+    out["return"] = fields.get("return") is True        # there and back
     return {key: value for key, value in out.items() if value}
 
 
@@ -163,7 +167,7 @@ def describe(trip: dict[str, str] | None) -> str:
     """The receipt's description: the journey, when there is one."""
     trip = trip or {}
     if trip.get("from") and trip.get("to"):
-        return f"TfL travel: {trip['from']} to {trip['to']}"
+        return f"TfL travel: {trip['from']} to {trip['to']}{' and back' if trip.get('return') else ''}"
     if trip.get("from") or trip.get("to"):
         return f"TfL travel: {'from ' + trip['from'] if trip.get('from') else 'to ' + trip['to']}"
     return "Contactless travel"
@@ -191,12 +195,15 @@ def receipt_html(payment: dict[str, Any], account_name: str = "", company: str =
     issued_on = long_date((made_on or date.today()).isoformat())
     number = receipt_number(payment)
     if trip.get("from") or trip.get("to"):
-        route = ROUTE % {"start": esc(trip.get("from") or "Not recorded"), "end": esc(trip.get("to") or "Not recorded")}
+        route = ROUTE % {"start": esc(trip.get("from") or "Not recorded"), "end": esc(trip.get("to") or "Not recorded"),
+                         "kind": '<span class="kind">Return</span>' if trip.get("return") else ""}
     else:
         route = ('<div class="network">Travel on TfL services</div>'
                  '<div class="muted">Contactless pay as you go · journeys not recorded</div>')
     facts = [
         ("Date of travel", long_date(trip["date"]) if trip.get("date") else ""),
+        ("Journey type", ("Return" if trip.get("return") else "Single") if trip.get("from") or trip.get("to")
+         else "Return" if trip.get("return") else ""),
         ("Reason for travel", trip.get("reason", "")),
         ("Network", "Transport for London, contactless pay as you go"),
         ("Supplier", f"{SUPPLIER}, {', '.join(SUPPLIER_ADDRESS)}"),

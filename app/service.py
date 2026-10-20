@@ -2902,12 +2902,17 @@ class ReceiptService:
             self.make_tfl_receipts()
 
     @property
-    def tfl_journey(self) -> dict[str, str]:
+    def tfl_journey(self) -> dict[str, Any]:
         """Settings → "Usual journey": put on receipts made by themselves,
         and offered when you make one."""
-        return {key: self.db.get_state(f"pref:tfl_{key}") or "" for key in ("from", "to", "reason")}
+        usual: dict[str, Any] = {key: self.db.get_state(f"pref:tfl_{key}") or "" for key in ("from", "to", "reason")}
+        usual["return"] = self.db.get_state("pref:tfl_return") == "1"
+        return usual
 
-    def set_tfl_journey(self, start: str | None = None, end: str | None = None, reason: str | None = None) -> None:
+    def set_tfl_journey(self, start: str | None = None, end: str | None = None, reason: str | None = None,
+                        there_and_back: bool | None = None) -> None:
+        if there_and_back is not None:
+            self.db.set_state("pref:tfl_return", "1" if there_and_back else "0")
         for key, value in (("from", start), ("to", end), ("reason", reason)):
             if value is None:
                 continue
@@ -2920,7 +2925,7 @@ class ReceiptService:
 
     def make_tfl_receipt(self, transaction_url: str, journey: dict[str, str] | None = None) -> bool:
         """"Make TfL receipt" on one Statement line (queued; read `outcome`).
-        `journey`: {from, to, date, reason} to show on it (blank: none); None: the usual one."""
+        `journey`: {from, to, date, reason, return} to show on it (blank: none); None: the usual one."""
         return self._enqueue(f"tfl:{transaction_url}",
                              lambda: self._run_make_tfl_receipts([transaction_url], journey))
 
@@ -2931,7 +2936,7 @@ class ReceiptService:
     def _run_make_tfl_receipts(self, urls: list[str] | None, journey: dict[str, str] | None = None) -> None:
         """`urls`: the payments asked for, each reported; None: every TfL
         payment still missing its receipt, reported only when some were made.
-        `journey`: where, when and why you travelled ({from, to, date, reason}); None:
+        `journey`: where, when and why you travelled ({from, to, date, reason, return}); None:
         the usual journey (Settings)."""
         journey = tfl.journey(journey if journey is not None else self.tfl_journey)
         # asked for: any payment in the statement; by itself: the last weeks, as Gmail is searched

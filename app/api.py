@@ -75,6 +75,7 @@ class Settings(BaseModel):
     tfl_from: str | None = None
     tfl_to: str | None = None
     tfl_reason: str | None = None
+    tfl_return: bool | None = None
     theme: str | None = None
     waiting_days: int | None = None
     archive_delete_days: int | None = None
@@ -648,14 +649,15 @@ def create_app(service: ReceiptService) -> FastAPI:
     @app.post("/api/statement/tfl-receipt")
     def statement_tfl_receipt(body: dict[str, Any]) -> dict[str, Any]:
         """"Make TfL receipt": one made from the payment, into Match; read `outcome`.
-        `from`, `to`, `date` (YYYY-MM-DD), `reason`: the journey, shown on it (all
-        left out: the usual journey)."""
+        `from`, `to`, `date` (YYYY-MM-DD), `reason`, `return` (true / false): the
+        journey, shown on it (all left out: the usual journey)."""
         if not isinstance(body.get("url"), str):
             raise HTTPException(400, "url is required")
         keys = ("from", "to", "date", "reason")
-        if any(not isinstance(body.get(k) or "", str) for k in keys):
-            raise HTTPException(400, "from, to, date and reason are text")
-        journey = {k: body.get(k) or "" for k in keys} if any(k in body for k in keys) else None
+        if any(not isinstance(body.get(k) or "", str) for k in keys) or not isinstance(body.get("return", False), bool):
+            raise HTTPException(400, "from, to, date and reason are text; return is true or false")
+        journey = {**{k: body.get(k) or "" for k in keys}, "return": body.get("return", False)} \
+            if any(k in body for k in (*keys, "return")) else None
         return {"queued": service.make_tfl_receipt(body["url"], journey)}
 
     @app.get("/api/tfl/stations")
@@ -906,8 +908,8 @@ def create_app(service: ReceiptService) -> FastAPI:
             service.set_label_filed(body.label_filed)
         if body.tfl_receipts is not None:
             service.set_tfl_receipts(body.tfl_receipts)
-        if body.tfl_from is not None or body.tfl_to is not None or body.tfl_reason is not None:
-            service.set_tfl_journey(body.tfl_from, body.tfl_to, body.tfl_reason)
+        if any(v is not None for v in (body.tfl_from, body.tfl_to, body.tfl_reason, body.tfl_return)):
+            service.set_tfl_journey(body.tfl_from, body.tfl_to, body.tfl_reason, body.tfl_return)
         if body.waiting_days is not None:
             try:
                 service.set_waiting_days(body.waiting_days)

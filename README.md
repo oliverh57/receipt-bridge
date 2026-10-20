@@ -60,8 +60,9 @@ New versions arrive inside the app (**Update now**).
    **Make TfL receipt**: a travel record made from the bank payment goes to
    Match, paired with it (Transport for London, Travel, VAT £0, marked as
    prepared by Receipt Bridge, not TfL). Add the journey if you like, all
-   optional: start and end (TfL stations are suggested as you type), date
-   of travel and reason. **Settings → FreeAgent → Make TfL receipts
+   optional: start and end, return, date of travel and reason. Start and
+   end suggest stations as you type (TfL's own first, then National Rail;
+   any word matches, so "pancras" finds King's Cross St. Pancras). **Settings → FreeAgent → Make TfL receipts
    automatically** does this for every TfL payment as it arrives, with the
    *usual journey* set there. The station list is TfL Open Data, refreshed
    with `tools/fetch_tfl_stations.py`.

@@ -1008,7 +1008,6 @@ function freeagentCard(fa) {
 /** TfL sends no receipt for contactless travel: a travel record made from the payment. */
 function tflCard(on, usual) {
   usual = usual || {};
-  loadTflStations();
   const field = (key, label, sub, attrs) => `<div class="card-row"><div class="grow">${label}<div class="sub">${sub}</div></div>
         <input class="text-input" data-action="tfl-usual" data-key="${key}" value="${esc(usual[key] || "")}" ${attrs} aria-label="${label}"></div>`;
   return `<div class="card m-keep">
@@ -1017,8 +1016,10 @@ function tflCard(on, usual) {
           <div class="sub">TfL doesn't issue receipts for contactless travel. Each TfL payment without one gets a travel record made from the bank payment (VAT £0), waiting in Match for you to link. Without this, use <b>Make TfL receipt</b> on the payment in Bank Feed.</div></div>
         <label class="switch"><input type="checkbox" data-action="tfl-receipts" ${on ? "checked" : ""} aria-label="Make TfL receipts automatically"><span></span></label></div>
       <div class="card-note">Usual journey: put on automatic travel records, and filled in when you make one. All optional.</div>
-      ${field("from", "Journey start", "Where you usually set off", `list="tfl-stations" placeholder="Station or stop" autocomplete="off"`)}
-      ${field("to", "Journey end", "Where you usually go", `list="tfl-stations" placeholder="Station or stop" autocomplete="off"`)}
+      ${field("from", "Journey start", "Where you usually set off", `data-stations placeholder="Station or stop" autocomplete="off"`)}
+      ${field("to", "Journey end", "Where you usually go", `data-stations placeholder="Station or stop" autocomplete="off"`)}
+      <div class="card-row"><div class="grow">Return journey</div>
+        <label class="switch"><input type="checkbox" data-action="tfl-usual-return" ${usual.return ? "checked" : ""} aria-label="Return journey"><span></span></label></div>
       ${field("reason", "Reason for travel", "e.g. Travel to client site", `placeholder="Reason" maxlength="200"`)}
     </div>`;
 }
@@ -1219,6 +1220,106 @@ const SETTINGS_TABS = [
   ["email", "Email", "Optional. Finds receipts from these suppliers in Gmail and adds them to Files.", "Connections"],
   ["about", "About", "Version, updates, licence, terms, and the software Receipt Bridge is built on.", "foot"],
 ];
+
+// ---- station search (TfL travel records) ---------------------------------
+// Any input with data-stations suggests stations as you type, from TfL's list
+// (TfL's own network first, then National Rail). Forgiving: any word, in any
+// order, from its start ("pancras" finds King's Cross St. Pancras), and
+// punctuation, "&"/"and" and "St"/"Saint" don't matter.
+
+function stationKey(text) {
+  return String(text || "").toLowerCase().replace(/&/g, " and ").replace(/['’`.]/g, "")
+    .replace(/\bsaint\b/g, "st").replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+async function loadTflStations() {
+  if (state.tflStations) return state.tflStationsLoading;
+  state.tflStations = [];
+  state.tflStationsLoading = api("/api/tfl/stations").then((names) => {
+    state.tflStations = names.map((name, i) => {
+      const key = stationKey(name);
+      return { name, key, flat: key.replace(/ /g, ""), words: key.split(" "), i };
+    });
+  }).catch(() => { state.tflStations = null; });
+  return state.tflStationsLoading;
+}
+
+/** The best few stations for what's typed: starting with it, then every
+ * word typed starting a word of the name, then anywhere in it. */
+function findStations(text, limit = 8) {
+  const key = stationKey(text);
+  if (!key || !state.tflStations?.length) return [];
+  const typed = key.split(" ");
+  const flat = key.replace(/ /g, "");
+  const found = [];
+  for (const s of state.tflStations) {
+    let score;
+    if (s.key.startsWith(key)) score = 0;
+    else if (typed.every((w) => s.words.some((x) => x.startsWith(w)))) score = s.words[0].startsWith(typed[0]) ? 1 : 2;
+    else if (s.flat.includes(flat)) score = 3;
+    else continue;
+    found.push([score, s.i, s.name]);
+  }
+  return found.sort((a, b) => a[0] - b[0] || a[1] - b[1]).slice(0, limit).map((f) => f[2]);
+}
+
+let stationInput = null;
+let stationActive = -1;
+
+async function showStations(input) {
+  await loadTflStations();
+  if (document.activeElement !== input) return;
+  const found = findStations(input.value);
+  if (!found.length || (found.length === 1 && found[0] === input.value)) return hideStations();
+  const menu = $("#station-menu");
+  stationInput = input;
+  stationActive = -1;
+  menu.innerHTML = found.map((n, i) => `<div class="station-opt" role="option" data-i="${i}">${esc(n)}</div>`).join("");
+  const r = input.getBoundingClientRect();
+  const width = Math.max(r.width, 240);
+  Object.assign(menu.style, { left: `${Math.min(r.left, window.innerWidth - width - 8)}px`, top: `${r.bottom + 3}px`, width: `${width}px` });
+  menu.hidden = false;
+}
+
+function hideStations() {
+  $("#station-menu").hidden = true;
+  stationInput = null;
+}
+
+function pickStation(name) {
+  const input = stationInput;
+  hideStations();
+  if (!input) return;
+  input.value = name;
+  // as if typed: Bank Feed keeps it, Settings saves it
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+document.addEventListener("input", (e) => { if (e.target.matches?.("input[data-stations]")) showStations(e.target); });
+document.addEventListener("focusout", (e) => { if (e.target === stationInput) setTimeout(hideStations, 120); });
+document.addEventListener("scroll", () => { if (stationInput) hideStations(); }, true);
+document.addEventListener("keydown", (e) => {
+  if (e.target !== stationInput || $("#station-menu").hidden) return;
+  const opts = [...document.querySelectorAll(".station-opt")];
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    stationActive = (stationActive + (e.key === "ArrowDown" ? 1 : -1) + opts.length) % opts.length;
+    opts.forEach((o, i) => o.classList.toggle("active", i === stationActive));
+  } else if (e.key === "Enter" && stationActive >= 0) {
+    e.preventDefault();
+    pickStation(opts[stationActive].textContent);
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    hideStations();
+  }
+}, true);
+document.addEventListener("mousedown", (e) => {
+  const opt = e.target.closest?.(".station-opt");
+  if (!opt) return;
+  e.preventDefault();                       // keep the input focused
+  pickStation(opt.textContent);
+});
 
 // ---- Settings → About ----------------------------------------------------
 
@@ -1813,6 +1914,10 @@ document.addEventListener("change", (e) => {
   }
   if (e.target.dataset.action === "notify-category") {
     act(() => api("/api/settings", { method: "POST", body: { notify_categories: { [e.target.dataset.category]: e.target.checked } } }));
+    return;
+  }
+  if (e.target.dataset.action === "tfl-usual-return") {
+    act(() => api("/api/settings", { method: "POST", body: { tfl_return: e.target.checked } }));
     return;
   }
   if (e.target.dataset.action === "tfl-usual") {

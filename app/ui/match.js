@@ -1504,18 +1504,21 @@ function panelHtml(t) {
 }
 
 /** "Make TfL receipt", with the journey to put on it: all optional, the
- * usual journey (Settings) filled in. Start and end suggest TfL stations. */
+ * usual journey (Settings) filled in. Start and end suggest stations as you
+ * type (app.js, findStations). */
 function tflHintHtml(t) {
   const trip = tflTrip(t.url);
-  loadTflStations();
   const field = (key, label, attrs) => `<span class="k">${label}</span>
       <input class="edit-input" data-action="tfl-field" data-url="${esc(t.url)}" data-key="${key}"
         value="${esc(trip[key] || "")}" ${attrs} aria-label="${label}">`;
   return `<div class="m-issue"><div class="t">TfL doesn't send receipts</div>
       <div class="b">Make a travel record from this payment: ${esc(money(-t.amount, "GBP"))} to Transport for London, VAT £0. It goes to Match, paired with this payment. The journey is optional.</div>
       <div class="m-kv tfl-trip">
-        ${field("from", "Journey start", `list="tfl-stations" placeholder="Station or stop" autocomplete="off"`)}
-        ${field("to", "Journey end", `list="tfl-stations" placeholder="Station or stop" autocomplete="off"`)}
+        ${field("from", "Journey start", `data-stations placeholder="Station or stop" autocomplete="off"`)}
+        ${field("to", "Journey end", `data-stations placeholder="Station or stop" autocomplete="off"`)}
+        <span class="k">Return</span>
+        <label class="tfl-return"><input type="checkbox" data-action="tfl-field" data-url="${esc(t.url)}" data-key="return"
+          ${trip.return ? "checked" : ""} aria-label="Return journey"></label>
         ${field("date", "Date of travel", `type="date" max="${esc(t.date.slice(0, 10))}"`)}
         ${field("reason", "Reason", `placeholder="e.g. Client meeting" maxlength="200"`)}
       </div>
@@ -1527,20 +1530,10 @@ function tflHintHtml(t) {
 function tflTrip(url) {
   if (!m.tflTrip[url]) {
     const usual = state.snap.tfl_journey || {};
-    m.tflTrip[url] = { from: usual.from || "", to: usual.to || "", date: "", reason: usual.reason || "" };
+    m.tflTrip[url] = { from: usual.from || "", to: usual.to || "", date: "", reason: usual.reason || "",
+                       return: !!usual.return };
   }
   return m.tflTrip[url];
-}
-
-/** TfL's stations into <datalist id="tfl-stations">, once. */
-async function loadTflStations() {
-  if (state.tflStations) return;
-  state.tflStations = "loading";
-  try {
-    const names = await api("/api/tfl/stations");
-    $("#tfl-stations").innerHTML = names.map((n) => `<option value="${esc(n)}"></option>`).join("");
-    state.tflStations = "loaded";
-  } catch { state.tflStations = null; }
 }
 
 // ---- dialogs: "Link all" / "Save all" ---------------------------------------------------
@@ -2004,7 +1997,7 @@ document.addEventListener("focusout", (e) => {
 
 document.addEventListener("input", (e) => {
   if (e.target.dataset.action === "tfl-field") {
-    tflTrip(e.target.dataset.url)[e.target.dataset.key] = e.target.value;
+    tflTrip(e.target.dataset.url)[e.target.dataset.key] = e.target.type === "checkbox" ? e.target.checked : e.target.value;
     return;
   }
   if (e.target.dataset.action === "st-pick-search") {
@@ -2027,6 +2020,10 @@ document.addEventListener("input", (e) => {
 
 document.addEventListener("change", (e) => {
   const a = e.target.dataset.action;
+  if (a === "tfl-field" && e.target.type === "checkbox") {      // the Return tick box
+    tflTrip(e.target.dataset.url).return = e.target.checked;
+    return;
+  }
   if (a === "m-learn") {
     const on = e.target.checked;
     const r = findReceipt(Number(e.target.dataset.id));
