@@ -1524,7 +1524,7 @@ function tflDialogHtml(t) {
   const field = (key, label, attrs) => `<span class="k">${label}</span>
       <input class="edit-input" data-action="tfl-field" data-url="${esc(t.url)}" data-key="${key}"
         value="${esc(trip[key] || "")}" ${attrs} aria-label="${label}">`;
-  return `<div class="m-overlay tfl-overlay" data-action="tfl-close"><section class="m-dialog e-dialog tfl-dialog m-keep" role="dialog"
+  return `<div class="m-overlay tfl-overlay" data-action="st-tfl-close"><section class="m-dialog e-dialog tfl-dialog m-keep" role="dialog"
       aria-modal="true" aria-labelledby="tfl-dialog-title" data-url="${esc(t.url)}">
     <div class="e-dform">
       <h2 id="tfl-dialog-title">Make TfL receipt</h2>
@@ -1545,7 +1545,7 @@ function tflDialogHtml(t) {
       </div>
       <div class="m-note e-dnote">The record says the journey was entered by you, not confirmed by TfL.</div>
       <div class="m-dialog-foot">
-        <button class="btn" data-action="tfl-close">Cancel</button>
+        <button class="btn" data-action="st-tfl-close">Cancel</button>
         <button class="btn primary" data-action="st-tfl" data-url="${esc(t.url)}" data-trip="1">Make and link</button></div>
     </div>
     <div class="e-dpreview">
@@ -2025,7 +2025,7 @@ document.addEventListener("click", async (e) => {
       m.tflDialog = target.dataset.url;
       if (m.stSel !== target.dataset.url) { m.stSel = target.dataset.url; render(); }
       return renderMatchModal();
-    case "tfl-close":
+    case "st-tfl-close":
       if (e.target !== target && target.classList.contains("m-overlay")) return;   // a click inside, not on the backdrop
       return closeTflDialog();
     case "st-tfl": {
