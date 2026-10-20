@@ -31,6 +31,7 @@ const state = {
   // Expenses' period, as Bank Feed's (chosen separately)
   xPeriod: /^(all|\d{4}-\d{2}|\d{4}-\d{2}-\d{2}\.\.\d{4}-\d{2}-\d{2})$/.test(pref("xPeriod", "")) ? pref("xPeriod", "") : "all",
   stPage: 0,                                     // …which page, newest first
+  stQuery: "",                                   // Bank Feed's search (filtered by the server)
   statement: null,
   filedToday: [],
   snap: null,
@@ -215,10 +216,10 @@ async function refresh(force = false) {
   if (state.view === "statement") {
     const paged = !isMonthPeriod(state.stPeriod);          // a month is shown whole
     const show = ["todo", "done"].includes(state.stFilter) ? state.stFilter : "all";   // the pill: filtered before paging
-    const key = `statement:${state.stPeriod}:${show}:${paged ? `${state.stLimit}:${state.stPage}` : ""}:${snap.version}`;
+    const key = `statement:${state.stPeriod}:${show}:${paged ? `${state.stLimit}:${state.stPage}` : ""}:${state.stQuery}:${snap.version}`;
     if (force || key !== state.receiptsKey) {
       // the payments, and the unlinked files that could be their receipts
-      const query = `month=${encodeURIComponent(state.stPeriod)}&show=${show}`
+      const query = `month=${encodeURIComponent(state.stPeriod)}&show=${show}&q=${encodeURIComponent(state.stQuery)}`
         + (paged ? `&limit=${state.stLimit}&offset=${state.stPage * state.stLimit}` : "");
       try { state.statement = await api(`/api/statement?${query}`); }
       catch (err) { state.statement = { error: err.message, rows: [], summary: {} }; }

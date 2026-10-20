@@ -53,7 +53,8 @@ New versions arrive inside the app (**Update now**).
    The one exception is a supplier you've ticked *Link {supplier}
    automatically from now on* for: its exact matches link themselves.
 4. **Statement** shows every payment in a month and whether it has a
-   receipt: filed, in Match, or missing. For a missing one: **Use that
+   receipt: filed, in Match, or missing. The search box finds payments by
+   what the statement says, the receipt's supplier, the amount or the date. For a missing one: **Use that
    email** (an email showing that amount was found in Gmail), **Add photo**,
    or **No receipt needed** (tax payment, transfer, bank fee…).
    TfL sends no receipt for contactless travel, so a TfL payment has

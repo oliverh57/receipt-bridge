@@ -1090,6 +1090,8 @@ function renderStatement() {
       <div class="m-title"><span>${esc(st.account_name || "Bank")} statement</span>
         <span class="sub">Match each payment to a receipt · synced ${esc(ago(st.last_sync))}</span></div>
       ${linkAll}
+      <label class="m-search st-search">${ICON.search}<input type="search" placeholder="Search payments" aria-label="Search payments"
+        data-action="st-search" value="${esc(state.stQuery)}"></label>
       ${stViewHtml(st)}
     </header>
     <div class="st-body">
@@ -1109,7 +1111,8 @@ function renderStatement() {
         ${pill("done", "Done", done, "seg-done")}</div>
       <div class="st-table-box"><table class="st-table">
         <thead><tr><th scope="col">Date</th><th scope="col">On the statement</th><th scope="col" class="r">Amount</th><th scope="col">Receipt</th></tr></thead>
-        <tbody>${rows.map(statementRow).join("") || `<tr><td colspan="4" class="m-none">Nothing to show${periodWord}.</td></tr>`}</tbody>
+        <tbody>${rows.map(statementRow).join("") || `<tr><td colspan="4" class="m-none">${state.stQuery
+          ? `No payments match “${esc(state.stQuery)}”${periodWord}.` : `Nothing to show${periodWord}.`}</td></tr>`}</tbody>
       </table></div>
       ${stMoreHtml(st)}
     </div></div>
@@ -1995,7 +1998,29 @@ document.addEventListener("focusout", (e) => {
   act(() => api(`/api/receipts/${el.dataset.id}/fields`, { method: "POST", body: { [field]: value } }));
 });
 
+/** Bank Feed's search: asks the server again a moment after you stop typing,
+ * from the first page, keeping the box focused through the redraw. */
+let stSearchTimer = null;
+async function stSearch(text) {
+  state.stQuery = text.trim();
+  state.stPage = 0;
+  m.stSel = null;
+  await refresh(true);
+  const box = document.querySelector('input[data-action="st-search"]');
+  const typing = !!box && box === document.activeElement;
+  const at = box?.selectionStart ?? text.length;
+  render();
+  const again = document.querySelector('input[data-action="st-search"]');
+  if (again && typing) { again.focus(); again.setSelectionRange(at, at); }
+}
+
 document.addEventListener("input", (e) => {
+  if (e.target.dataset.action === "st-search") {
+    clearTimeout(stSearchTimer);
+    const text = e.target.value;
+    stSearchTimer = setTimeout(() => stSearch(text), 250);
+    return;
+  }
   if (e.target.dataset.action === "tfl-field") {
     tflTrip(e.target.dataset.url)[e.target.dataset.key] = e.target.type === "checkbox" ? e.target.checked : e.target.value;
     return;

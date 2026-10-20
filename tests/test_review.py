@@ -747,6 +747,22 @@ def test_bank_feed_pills_filter_before_the_page_is_cut() -> None:
         assert service.statement(None, "all", limit=1)["total_payments"] == 3
 
 
+def test_bank_feed_search_finds_payments_before_counting_and_paging() -> None:
+    service, _flagged, tmp = make()
+    with tmp:
+        connected(service, Path(tmp.name))
+        email_receipt(service, 1, "Railco Tickets", "2026-03-04", 21.5)    # in Match: its supplier is searched too
+        urls = lambda q, **kw: [r["url"] for r in service.statement(None, "2026-03", search=q, **kw)["rows"]]  # noqa: E731
+        assert urls("cafe") == ["tx/2", "tx/3"]
+        assert urls("tickets") == ["tx/1"]                                 # the receipt's supplier
+        assert urls("£21.50") == urls("21.5") == urls("-21.50") == ["tx/1"]
+        assert urls("2026-03-07") == ["tx/3"] and urls("cafe 03-06") == ["tx/2"]   # every word must match
+        assert urls("nothing like it") == [] and urls("  ") == ["tx/1", "tx/2", "tx/3"]
+        found = service.statement(None, "all", limit=1, search="cafe")
+        assert found["total_payments"] == 2 and len(found["rows"]) == 1 and found["shown"]["all"] == 2
+        assert found["search"] == "cafe"
+
+
 def test_the_statement_can_show_every_month_newest_first() -> None:
     service, _flagged, tmp = make()
     with tmp:

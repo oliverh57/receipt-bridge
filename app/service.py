@@ -2046,14 +2046,16 @@ class ReceiptService:
     # ---- Statement (PLAN.md §11): one month of a bank account ---------------
 
     def statement(self, account: str | None, month: str | None, limit: int | None = None,
-                  offset: int = 0, show: str = "all") -> dict[str, Any]:
+                  offset: int = 0, show: str = "all", search: str = "") -> dict[str, Any]:
         """Every payment in a month of the cached statement, and whether it
         has a receipt: filed, in Match, missing, or no receipt needed.
         `month="all"`: every month, newest first, a page of `limit` of them
         from `offset` (all when None). `month="YYYY-MM-DD..YYYY-MM-DD"`: the
         same, between those days (an accounting year). `show`: Bank Feed's
         pill, "todo" (needs approval), "done" or "all"; `shown` counts each
-        across the whole period, and the page is cut from those shown."""
+        across the whole period, and the page is cut from those shown.
+        `search`: only payments matching it (_payment_matches), before
+        anything is counted."""
         chosen = self._freeagent_accounts()
         accounts = {a["url"]: a for a in self._freeagent_reference().get("bank_accounts", [])}
         account = account or (chosen[0] if chosen else None)
@@ -2081,6 +2083,9 @@ class ReceiptService:
             if state.get("transaction"):
                 filed_by_app[state["transaction"]] = row
 
+        if search.strip():
+            transactions = [t for t in transactions if _payment_matches(
+                t, search, (filed_by_app.get(t["url"]) or (in_match.get(t["url"]) or (None,))[0]))]
         # Every payment in the period is sorted first, so the pills count
         # them all and `show` filters before a page is cut, not after.
         sorted_as: dict[str, tuple[str, bool, str | None]] = {}
@@ -2169,6 +2174,7 @@ class ReceiptService:
             "offset": offset if every and limit else 0,
             "total_payments": total_payments,       # all of them shown by `show`, however many are on this page
             "show": show,
+            "search": search.strip(),
             "shown": shown,                         # the pills: all, todo, done, in the whole period
             # Bank Feed's period menu: every month with payments, and every accounting year
             "periods": _periods([t["dated_on"][:10] for t in outgoing], self._freeagent_reference().get("year_end")),
@@ -4165,6 +4171,17 @@ def _has_better_source(watcher: Any) -> bool:
         or step == "attachment"
         for step in watcher.pdf
     )
+
+
+def _payment_matches(t: dict[str, Any], search: str, receipt: Any = None) -> bool:
+    """Bank Feed's search: every word typed is somewhere in the statement
+    line, the receipt's supplier, the amount (10.5, 10.50, £10.50) or the
+    date (2026-10-14)."""
+    amount = abs(float(t["amount"]))
+    seen = " ".join([t.get("description") or "", (receipt["vendor"] if receipt is not None else "") or "",
+                     f"{amount:.2f}", f"{amount:,.2f}", t.get("dated_on") or ""]).lower()
+    words = [w.lstrip("£-+").lower() for w in search.split()]
+    return all(w in seen for w in words if w)
 
 
 # A row as the UI wants it: plain types, and the document's provenance in

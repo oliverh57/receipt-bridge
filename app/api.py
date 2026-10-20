@@ -553,17 +553,18 @@ def create_app(service: ReceiptService) -> FastAPI:
 
     @app.get("/api/statement")
     def statement(account: str = "", month: str = "", limit: int = 0, offset: int = 0,
-                  show: str = "all") -> dict[str, Any]:
+                  show: str = "all", q: str = "") -> dict[str, Any]:
         """A month (YYYY-MM), or month=all: every month, newest first, a page
         of `limit` payments from `offset` (limit 0: all of them). `show`:
-        all, todo (needs approval) or done, filtered before the page is cut."""
+        all, todo (needs approval) or done, filtered before the page is cut.
+        `q`: only payments matching it (statement line, supplier, amount, date)."""
         if month and month != "all" and not re.fullmatch(r"\d{4}-\d{2}|\d{4}-\d{2}-\d{2}\.\.\d{4}-\d{2}-\d{2}", month):
             raise HTTPException(400, "month must be YYYY-MM, YYYY-MM-DD..YYYY-MM-DD or all")
         if limit < 0 or offset < 0:
             raise HTTPException(400, "limit and offset can't be negative")
         if show not in ("all", "todo", "done"):
             raise HTTPException(400, "show must be all, todo or done")
-        return service.statement(account or None, month or None, limit or None, offset, show)
+        return service.statement(account or None, month or None, limit or None, offset, show, q[:200])
 
     @app.post("/api/statement/payment")
     def statement_payment(body: dict[str, Any]) -> dict[str, Any]:
