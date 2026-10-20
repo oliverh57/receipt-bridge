@@ -453,6 +453,40 @@ def test_a_chosen_bigger_payment_files_the_tip_separately() -> None:
         assert "tip" in p.parts[1]["description"]
 
 
+def test_a_chosen_smaller_payment_files_your_share_of_a_split_bill() -> None:
+    db, rid, tmp = env(vendor="White Kitchen", description="Dinner", total=42.24)
+    half = dict(TX, amount=-21.12)
+    with tmp:
+        assert any("doesn't equal" in p for p in plan(db, rid, transaction=half).problems), "not without your say-so"
+        p = plan(db, rid, transaction=half, allow_difference=True)
+        assert not p.problems, p.problems
+        assert [(b["gross_value"], b["sales_tax_rate"]) for b in p.parts] == [("-21.12", "0.0")]
+        assert p.parts[0]["description"] == "White Kitchen: Dinner: your share, £21.12 of £42.24"
+        assert p.attachment, "the whole receipt is attached"
+
+        db.update_receipt(rid, {"vat": 7.04})                         # 20% VAT on the bill: half of it is yours
+        p = plan(db, rid, transaction=half, allow_difference=True)
+        assert [(b["gross_value"], b["sales_tax_rate"]) for b in p.parts] == [("-21.12", "20.0")]
+
+        third = plan(db, rid, transaction=dict(TX, amount=-14.08), allow_difference=True)
+        assert sum(-float(b["gross_value"]) for b in third.parts) == 14.08    # the parts add up to what you paid
+
+        explained = dict(half, unexplained_amount=0, explanation_url="https://fa.test/e/7")
+        assert any("doesn't equal" in p for p in plan(db, rid, transaction=explained).problems)
+        assert not plan(db, rid, transaction=explained, allow_difference=True).problems   # attached to it as it is
+
+
+def test_a_share_scales_each_vat_part_and_a_typed_amount() -> None:
+    from decimal import Decimal
+
+    from app.filer import MANUAL, share_of
+    parts = [(Decimal("30.00"), "20.0"), (Decimal("12.24"), f"{MANUAL}1.04")]
+    half = share_of(parts, Decimal("21.12"), Decimal("42.24"))
+    assert half == [(Decimal("15.00"), "20.0"), (Decimal("6.12"), f"{MANUAL}0.52")]
+    third = share_of(parts, Decimal("14.08"), Decimal("42.24"))
+    assert sum(g for g, _ in third) == Decimal("14.08")
+
+
 def test_a_foreign_expense_carries_the_pounds_charged() -> None:
     db, rid, tmp = env(paid_by="personal", currency="EUR", total=19.34, native_gross=16.71)
     with tmp:

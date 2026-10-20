@@ -162,6 +162,23 @@ def vat_parts(row: Any, gross: Decimal, vat_registered: bool
     return [(gross, f"{MANUAL}{_pennies(vat)}")], None
 
 
+def share_of(parts: list[tuple[Decimal, str | None]], paid: Decimal, total: Decimal
+             ) -> list[tuple[Decimal, str | None]]:
+    """A split bill's parts scaled to the share you paid: each part, and a
+    VAT amount typed in, in proportion; the pennies rounding loses go on the
+    last part, so the parts add up to exactly what you paid."""
+    ratio = paid / total
+    scaled = []
+    for gross, rate in parts:
+        if rate and rate.startswith(MANUAL):
+            rate = f"{MANUAL}{_pennies(Decimal(rate[len(MANUAL):]) * ratio)}"
+        scaled.append((_pennies(gross * ratio), rate))
+    if scaled:
+        gross, rate = scaled[-1]
+        scaled[-1] = (gross + paid - sum(g for g, _ in scaled), rate)
+    return scaled
+
+
 def vat_rate(row: Any, gross: Decimal, vat_registered: bool) -> tuple[str | None, str | None]:
     """The single rate, when there is one (a mixed-rate receipt has none)."""
     parts, problem = vat_parts(row, gross, vat_registered)
@@ -204,9 +221,11 @@ def plan_for(row: Any, *, transaction: dict[str, Any] | None, category_url: str 
     and its £15 went into boxes 6 and 7. A receipt that shows UK VAT isn't
     reverse charged: it stops instead.
 
-    `allow_difference`: you chose a payment bigger than the receipt (a tip
-    added after the bill was printed). The receipt files as printed and the
-    difference as its own explanation at 0%.
+    `allow_difference`: you chose a payment that isn't the receipt's total.
+    Bigger (a tip added after the bill was printed): the receipt files as
+    printed and the difference as its own explanation at 0%. Smaller (you
+    paid your share of a split bill): the payment files as that share of
+    the receipt, each VAT part scaled to it, with the whole receipt attached.
 
     `rebill`: {project, type, factor} to re-bill a client's project: at
     cost, with a markup (factor in percent; FreeAgent takes a fraction), or
@@ -276,7 +295,7 @@ def plan_for(row: Any, *, transaction: dict[str, Any] | None, category_url: str 
         # accepted guess) and it has no receipt: attach ours. Its category
         # and VAT stay as they are; re-billing, if you chose it, is added.
         problems = [p for p in problems if p != "Choose a category"]
-        if total is not None and _pennies(Decimal(str(-transaction["amount"]))) != total:
+        if total is not None and _pennies(Decimal(str(-transaction["amount"]))) != total and not allow_difference:
             problems.append("The bank payment's amount doesn't equal the receipt total")
         if not attachment:
             problems.append("Nothing to attach")
@@ -292,12 +311,15 @@ def plan_for(row: Any, *, transaction: dict[str, Any] | None, category_url: str 
         return Plan("attach", body, attachment, transaction["url"], problems, [body])
 
     difference = Decimal(0)
+    share: Decimal | None = None                  # paid your share of a split bill: this much of it
     if transaction is None:
         problems.append("No bank payment matched yet")
     elif total is not None and _pennies(Decimal(str(-transaction["amount"]))) != total:
         paid = _pennies(Decimal(str(-transaction["amount"])))
         if allow_difference and paid > total:
             difference = paid - total
+        elif allow_difference and Decimal(0) < paid < total:
+            share = paid
         else:
             problems.append("The bank payment's amount doesn't equal the receipt total")
     split, problem = (([(total or Decimal(0), "0.0")], None) if reverse
@@ -305,6 +327,8 @@ def plan_for(row: Any, *, transaction: dict[str, Any] | None, category_url: str 
     if problem:
         problems.append(problem)
     split = list(split or [(total or Decimal(0), None)])
+    if share is not None and total:
+        split = share_of(split, share, total)
     if difference:
         split.append((difference, "0.0" if vat_registered else None))
     parts = []
@@ -319,6 +343,8 @@ def plan_for(row: Any, *, transaction: dict[str, Any] | None, category_url: str 
         }
         if difference and n == len(split):
             body["description"] = f"{description}: difference from the receipt (tip or service)"[:200]
+        elif share is not None:
+            body["description"] = f"{body['description']}: your share, £{share} of £{total}"[:200]
         body.update(tax_fields(rate))
         if reverse and not (difference and n == len(split)):
             body["ec_status"] = "Reverse Charge"            # not a tip added on top

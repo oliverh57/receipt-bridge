@@ -52,6 +52,10 @@ New versions arrive inside the app (**Update now**).
    **Link N ready** for all the clean suggestions at once, with **Undo all**.
    The one exception is a supplier you've ticked *Link {supplier}
    automatically from now on* for: its exact matches link themselves.
+   A payment you choose that isn't the receipt's total still links: more
+   (a tip) files the difference separately; less (your half of a split
+   bill) files as your share, any VAT scaled to it, with the whole receipt
+   attached.
 4. **Statement** shows every payment in a month and whether it has a
    receipt: filed, in Match, or missing. The search box finds payments by
    what the statement says, the receipt's supplier, the amount or the date. For a missing one: **Use that

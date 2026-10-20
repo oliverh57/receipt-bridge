@@ -589,6 +589,18 @@ def test_a_payment_you_chose_far_from_the_receipt_date_is_marked() -> None:
         assert payment["pinned"] and payment["far"] and payment["chips"][-1] == "+21 days"
 
 
+def test_a_smaller_payment_you_chose_files_as_your_share() -> None:
+    service, _flagged, tmp = make()
+    with tmp:
+        connected(service, Path(tmp.name))
+        dinner = email_receipt(service, 6, "White Kitchen", "2026-03-05", 43.0)
+        service.set_receipt_fields(dinner, {"category": CATEGORY})
+        service.set_payment(dinner, "tx/1")                                # £21.50: half the bill
+        item = by_id(service)[dinner]
+        assert item["will_file"]["type"].endswith("your share, £21.50 of £43.00"), item["will_file"]
+        assert item["will_file"]["vat"] == "£0 (none shown)"
+
+
 def test_groups_and_reasons() -> None:
     service, _flagged, tmp = make()
     with tmp:

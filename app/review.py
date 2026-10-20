@@ -16,7 +16,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 
-from .filer import EXEMPT, MANUAL, OUT_OF_SCOPE, vat_parts
+from .filer import EXEMPT, MANUAL, OUT_OF_SCOPE, _pennies, share_of, vat_parts
 from .matcher import DAYS_AFTER, DAYS_BEFORE, Match
 
 CURRENCY_WORDS = {"EUR": "euros", "USD": "dollars", "AUD": "dollars", "CAD": "dollars",
@@ -230,6 +230,9 @@ def review(row: Any, match: Match | None, ctx: Context, *, overdue: bool) -> dic
         kind = "Expense claim"
     else:
         kind = "Bank explanation"
+    # a payment you chose for less than the receipt: your share of a split bill
+    if payment and payment["pinned"] and total is not None and 0 < -payment["amount"] < float(total) - 0.005:
+        kind += f" · your share, {_money(-payment['amount'])} of {_money(total)}"
     vat_text = _vat_text(row, ctx, match)
     attachment = {"photo": "Photo", "supplier": "Supplier PDF", "generated": "Made from the bank payment",
                   "freeagent": "The receipt FreeAgent had"}.get(
@@ -303,6 +306,9 @@ def _vat_text(row: Any, ctx: Context, match: Match | None) -> str:
     parts, problem = vat_parts(row, Decimal(str(row["total"])), True)
     if problem:
         return "Check the VAT"
+    paid = _pennies(Decimal(str(-match.transaction["amount"]))) if match and match.transaction is not None else None
+    if match and match.pinned and paid is not None and 0 < paid < Decimal(str(row["total"])):
+        parts = share_of(parts, paid, Decimal(str(row["total"])))      # your share of a split bill
     texts = []
     for gross, rate in parts:
         if rate in (EXEMPT, OUT_OF_SCOPE):
