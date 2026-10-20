@@ -36,6 +36,7 @@ const m = {
   stPending: null,                   // Statement: receipt whose payment to open once loaded
   linkFile: null,                    // Statement: receipt id being linked from Files ("Link to other payment")
   tflTrip: {},                       // Statement: the journey typed for a TfL payment, by its URL
+  tflDialog: null,                   // Statement: the TfL payment whose Make TfL receipt dialog is open
   curOpen: null,                     // whose currency list is open: a receipt id, or "email" (Convert to receipt)
   asel: null,                        // Archived: selected receipt id
   multi: [],                         // Files: ids picked with shift- or ⌘-click (2 or more = bulk)
@@ -1162,7 +1163,7 @@ function statementRow(t) {
     detail = t.suggestion.kind === "email" ? "An email may be the receipt" : "An ignored file may be the receipt";
   } else if (t.status === "missing" && t.tfl) {
     detail = "TfL sends none: make one";
-    action = `<button class="btn small" data-action="st-tfl" data-url="${esc(t.url)}"
+    action = `<button class="btn small" data-action="st-tfl-open" data-url="${esc(t.url)}"
       ${state.snap.queued.includes(`tfl:${t.url}`) ? "disabled" : ""}>Make receipt</button>`;
   }
   // a suggested file shows its receipt on hover, as in the candidate list
@@ -1506,16 +1507,33 @@ function panelHtml(t) {
       ${noReceiptButton(t)}</div></div>`;
 }
 
-/** "Make TfL receipt", with the journey to put on it: all optional, the
- * usual journey (Settings) filled in. Start and end suggest stations as you
- * type (app.js, findStations). */
+/** A TfL payment with no receipt: Make TfL receipt opens the dialog. */
 function tflHintHtml(t) {
+  return `<div class="m-issue"><div class="t">TfL doesn't send receipts</div>
+      <div class="b">Make a travel record from this payment: ${esc(money(-t.amount, "GBP"))} to Transport for London, VAT £0, with the journey if you like. It goes to Match, paired with this payment.</div>
+      <div class="m-iss-ctl"><button class="btn small primary" data-action="st-tfl-open" data-url="${esc(t.url)}"
+        ${state.snap.queued.includes(`tfl:${t.url}`) ? "disabled" : ""}>Make TfL receipt…</button></div></div>`;
+}
+
+/** The Make TfL receipt dialog, like Convert to receipt: the journey (all
+ * optional, the usual journey filled in) and the travel record it makes,
+ * printed as you type (tflPreview). Start and end suggest stations
+ * (app.js, findStations). Built once per payment; only the preview changes. */
+function tflDialogHtml(t) {
   const trip = tflTrip(t.url);
   const field = (key, label, attrs) => `<span class="k">${label}</span>
       <input class="edit-input" data-action="tfl-field" data-url="${esc(t.url)}" data-key="${key}"
         value="${esc(trip[key] || "")}" ${attrs} aria-label="${label}">`;
-  return `<div class="m-issue"><div class="t">TfL doesn't send receipts</div>
-      <div class="b">Make a travel record from this payment: ${esc(money(-t.amount, "GBP"))} to Transport for London, VAT £0. It goes to Match, paired with this payment. The journey is optional.</div>
+  return `<div class="m-overlay tfl-overlay" data-action="tfl-close"><section class="m-dialog e-dialog tfl-dialog m-keep" role="dialog"
+      aria-modal="true" aria-labelledby="tfl-dialog-title" data-url="${esc(t.url)}">
+    <div class="e-dform">
+      <h2 id="tfl-dialog-title">Make TfL receipt</h2>
+      <p class="sub">TfL doesn't send receipts for contactless travel. This makes a travel record from the payment, paired with it in Match. The journey is optional.</p>
+      <div class="e-dlabel" style="margin-top:0">Bank payment</div>
+      <div class="m-pay e-paycard">${bankBadge(accountName())}
+        <div class="who"><div class="desc">${esc(t.description)}</div><div class="sub">${esc(accountName())} · ${esc(longDate(t.date))}</div></div>
+        <span class="amt">${esc(money(t.amount, "GBP"))}</span></div>
+      <div class="e-dlabel">Journey</div>
       <div class="m-kv tfl-trip">
         ${field("from", "Journey start", `data-stations placeholder="Station or stop" autocomplete="off"`)}
         ${field("to", "Journey end", `data-stations placeholder="Station or stop" autocomplete="off"`)}
@@ -1525,8 +1543,43 @@ function tflHintHtml(t) {
         ${field("date", "Date of travel", `type="date" max="${esc(t.date.slice(0, 10))}"`)}
         ${field("reason", "Reason", `placeholder="e.g. Client meeting" maxlength="200"`)}
       </div>
-      <div class="m-iss-ctl"><button class="btn small primary" data-action="st-tfl" data-url="${esc(t.url)}" data-trip="1"
-        ${state.snap.queued.includes(`tfl:${t.url}`) ? "disabled" : ""}>Make TfL receipt</button></div></div>`;
+      <div class="m-note e-dnote">The record says the journey was entered by you, not confirmed by TfL.</div>
+      <div class="m-dialog-foot">
+        <button class="btn" data-action="tfl-close">Cancel</button>
+        <button class="btn primary" data-action="st-tfl" data-url="${esc(t.url)}" data-trip="1">Make TfL receipt</button></div>
+    </div>
+    <div class="e-dpreview">
+      <div class="e-dphead"><div class="e-dlabel">Travel record</div><span class="muted tfl-updating" hidden>Updating…</span></div>
+      <iframe class="e-pdf tfl-pdf" title="Travel record preview" src="${esc(tflPreviewUrl(t.url))}"></iframe>
+    </div></section></div>`;
+}
+
+function tflPreviewUrl(url) {
+  const trip = tflTrip(url);
+  return `/api/statement/tfl-preview?${new URLSearchParams({ url, start: trip.from || "", end: trip.to || "",
+    date: trip.date || "", reason: trip.reason || "", back: trip.return ? "true" : "false", t: TOKEN })}`
+    + "#toolbar=0&navpanes=0&view=FitH";      // just the page, where the viewer allows
+}
+
+/** The preview again, a moment after the journey stops changing. */
+let tflPreviewTimer = null;
+function tflPreview() {
+  clearTimeout(tflPreviewTimer);
+  tflPreviewTimer = setTimeout(() => {
+    const frame = document.querySelector(".tfl-pdf");
+    if (!frame || !m.tflDialog) return;
+    const src = tflPreviewUrl(m.tflDialog);
+    if (frame.getAttribute("src") === src) return;
+    document.querySelector(".tfl-updating")?.removeAttribute("hidden");
+    frame.onload = () => document.querySelector(".tfl-updating")?.setAttribute("hidden", "");
+    frame.setAttribute("src", src);
+  }, 700);
+}
+
+function closeTflDialog() {
+  m.tflDialog = null;
+  clearTimeout(tflPreviewTimer);
+  $("#modal").innerHTML = "";
 }
 
 /** What's typed for this payment, else the usual journey. */
@@ -1544,6 +1597,15 @@ function tflTrip(url) {
 function renderMatchModal() {
   const host = $("#modal");
   if (m.fileAll) { host.innerHTML = fileAllHtml(); return; }
+  if (m.tflDialog) {
+    const t = stPayment(m.tflDialog);
+    if (!t || t.status !== "missing") { closeTflDialog(); return; }       // made, or gone
+    if (host.querySelector(".tfl-dialog")?.dataset.url !== t.url) {
+      host.innerHTML = tflDialogHtml(t);
+      host.querySelector('[data-key="from"]')?.focus();
+    }
+    return;
+  }
   if (m.stPick) {
     // built once per payment, so a search typed in it survives the app's refreshes
     const open = host.querySelector(".pk-dialog");
@@ -1959,9 +2021,17 @@ document.addEventListener("click", async (e) => {
       // the status line shows the fetch; the outcome toast says how it went
       return act(() => api("/api/statement/use-suggestion", { method: "POST", body: { url: target.dataset.url } }));
     }
+    case "st-tfl-open":
+      m.tflDialog = target.dataset.url;
+      if (m.stSel !== target.dataset.url) { m.stSel = target.dataset.url; render(); }
+      return renderMatchModal();
+    case "tfl-close":
+      if (e.target !== target && target.classList.contains("m-overlay")) return;   // a click inside, not on the backdrop
+      return closeTflDialog();
     case "st-tfl": {
-      // from the panel: with the journey typed there; from the row: the usual journey
+      // from the dialog: with the journey typed there
       const body = { url: target.dataset.url, ...(target.dataset.trip ? tflTrip(target.dataset.url) : {}) };
+      closeTflDialog();
       // the status line shows it being made; the outcome toast says how it went
       return act(async () => {
         await api("/api/statement/tfl-receipt", { method: "POST", body });
@@ -2023,6 +2093,7 @@ document.addEventListener("input", (e) => {
   }
   if (e.target.dataset.action === "tfl-field") {
     tflTrip(e.target.dataset.url)[e.target.dataset.key] = e.target.type === "checkbox" ? e.target.checked : e.target.value;
+    tflPreview();
     return;
   }
   if (e.target.dataset.action === "st-pick-search") {
@@ -2045,8 +2116,9 @@ document.addEventListener("input", (e) => {
 
 document.addEventListener("change", (e) => {
   const a = e.target.dataset.action;
-  if (a === "tfl-field" && e.target.type === "checkbox") {      // the Return tick box
-    tflTrip(e.target.dataset.url).return = e.target.checked;
+  if (a === "tfl-field") {                  // the Return tick box, and a station picked from the list
+    tflTrip(e.target.dataset.url)[e.target.dataset.key] = e.target.type === "checkbox" ? e.target.checked : e.target.value;
+    tflPreview();
     return;
   }
   if (a === "m-learn") {
@@ -2194,6 +2266,10 @@ document.addEventListener("keydown", (e) => {
   }
   if (m.stPick) {
     if (e.key === "Escape") { e.preventDefault(); m.stPick = null; $("#modal").innerHTML = ""; }
+    return;
+  }
+  if (m.tflDialog) {
+    if (e.key === "Escape" && $("#station-menu").hidden) { e.preventDefault(); closeTflDialog(); }
     return;
   }
   if (m.fileAll?.phase === "confirm" && e.key === "Enter") { e.preventDefault(); document.querySelector('[data-action="m-fa-confirm"]')?.click(); return; }

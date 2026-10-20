@@ -242,6 +242,25 @@ def test_the_api_takes_the_journey_and_lists_stations() -> None:
         assert "Oxford Circus" in stations
 
 
+def test_the_dialog_previews_the_record_without_keeping_anything() -> None:
+    from fastapi.testclient import TestClient
+
+    from app.api import create_app
+
+    service, printed, tmp = make(("tx/tfl", -9.9, "TFL // CARD_PURCHASE///"))
+    with tmp:
+        app = create_app(service)
+        client = TestClient(app, base_url="http://127.0.0.1")
+        r = client.get("/api/statement/tfl-preview", params={"url": "tx/tfl", "start": "Bank", "end": "Angel",
+                                                             "back": "true", "t": app.state.token})
+        assert r.status_code == 200 and r.headers["content-type"] == "application/pdf" and r.content.startswith(b"%PDF")
+        assert printed[-1]["journey"] == {"from": "Bank", "to": "Angel", "return": True}
+        assert printed[-1]["account"] == "Business" and printed[-1]["company"] == "Example Ltd"
+        assert service.receipts("pending") == [], "a preview makes no receipt"
+        assert not any((service.config.pdf_dir / "previews").glob("*")), "nor leaves a file"
+        assert client.get("/api/statement/tfl-preview", params={"url": "tx/gone", "t": app.state.token}).status_code == 404
+
+
 def test_a_category_you_chose_for_tfl_before_is_kept() -> None:
     service, printed, tmp = make(("tx/tfl", -9.9, "TFL // CARD_PURCHASE///"))
     with tmp:

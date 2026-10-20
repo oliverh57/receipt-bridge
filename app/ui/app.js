@@ -1312,6 +1312,7 @@ document.addEventListener("keydown", (e) => {
     pickStation(opts[stationActive].textContent);
   } else if (e.key === "Escape") {
     e.preventDefault();
+    e.stopPropagation();                    // closes the list, not the dialog it's in
     hideStations();
   }
 }, true);

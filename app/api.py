@@ -661,6 +661,18 @@ def create_app(service: ReceiptService) -> FastAPI:
             if any(k in body for k in (*keys, "return")) else None
         return {"queued": service.make_tfl_receipt(body["url"], journey)}
 
+    @app.get("/api/statement/tfl-preview")
+    def statement_tfl_preview(url: str, start: str = "", end: str = "", date: str = "", reason: str = "",
+                              back: bool = False) -> Response:
+        """The travel record Make TfL receipt would make, with this journey,
+        as a PDF for the dialog's preview (an <iframe>, so the token comes
+        as ?t=). `start`, `end`, `back`: from, to, return."""
+        try:
+            pdf = service.tfl_preview(url, {"from": start, "to": end, "date": date, "reason": reason, "return": back})
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return Response(pdf, media_type="application/pdf", headers={"Content-Disposition": "inline"})
+
     @app.get("/api/tfl/stations")
     def tfl_stations() -> list[str]:
         """TfL's stations, for the journey start / end suggestions."""

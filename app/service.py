@@ -2935,6 +2935,28 @@ class ReceiptService:
         return self._enqueue(f"tfl:{transaction_url}",
                              lambda: self._run_make_tfl_receipts([transaction_url], journey))
 
+    def tfl_preview(self, transaction_url: str, journey: dict[str, Any] | None = None) -> bytes:
+        """The travel record "Make TfL receipt" would make for this payment,
+        printed now, for the preview beside its fields. Nothing is kept."""
+        from .browser import BrowserPool
+
+        t = next((dict(t) for t in self.db.bank_transactions(self._freeagent_accounts())
+                  if t["url"] == transaction_url), None)
+        if t is None:
+            raise ValueError("That payment is no longer in the statement.")
+        reference = self._freeagent_reference()
+        accounts = {a["url"]: a for a in reference.get("bank_accounts", [])}
+        t["currency"] = accounts.get(t["bank_account"], {}).get("currency", "GBP")
+        out = self.config.pdf_dir / "previews" / f"tfl-preview-{secrets.token_hex(6)}.pdf"
+        pool = BrowserPool(headless=self.config.headless)
+        try:
+            tfl.render(pool, t, out, accounts.get(t["bank_account"], {}).get("name", ""), self.config.pdf,
+                       company=(reference.get("vat") or {}).get("company") or "", journey=tfl.journey(journey))
+            return out.read_bytes()
+        finally:
+            pool.close()
+            out.unlink(missing_ok=True)
+
     def make_tfl_receipts(self) -> bool:
         """One for every TfL payment with no receipt (queued, quietly)."""
         return self._enqueue("tfl-receipts", lambda: self._run_make_tfl_receipts(None))
