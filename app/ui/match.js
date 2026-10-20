@@ -35,6 +35,7 @@ const m = {
   stPick: null,                      // Statement: { url, sel } while picking from all files not yet linked
   stPending: null,                   // Statement: receipt whose payment to open once loaded
   linkFile: null,                    // Statement: receipt id being linked from Files ("Link to other payment")
+  tflTrip: {},                       // Statement: the journey typed for a TfL payment, by its URL
   curOpen: null,                     // whose currency list is open: a receipt id, or "email" (Convert to receipt)
   asel: null,                        // Archived: selected receipt id
   multi: [],                         // Files: ids picked with shift- or ⌘-click (2 or more = bulk)
@@ -1485,11 +1486,8 @@ function panelHtml(t) {
       <div class="b">${esc(s.label)}</div>
       ${s.kind === "email" && s.message_id ? hintMailHtml(s) : ""}
       <div class="m-iss-ctl"><button class="btn small primary" data-action="st-use" data-url="${esc(t.url)}">${s.kind === "email" ? "Use that email" : "Use that file"}</button></div></div>` : "";
-  // TfL sends no receipt for contactless travel: make one from the payment
-  const tflHint = t.tfl && !hint ? `<div class="m-issue"><div class="t">TfL doesn't send receipts</div>
-      <div class="b">Make one from this payment: ${esc(money(-t.amount, "GBP"))} to Transport for London, VAT £0. It goes to Match, paired with this payment.</div>
-      <div class="m-iss-ctl"><button class="btn small primary" data-action="st-tfl" data-url="${esc(t.url)}"
-        ${state.snap.queued.includes(`tfl:${t.url}`) ? "disabled" : ""}>Make TfL receipt</button></div></div>` : "";
+  // TfL sends no receipt for contactless travel: make a travel record from the payment
+  const tflHint = t.tfl && !hint ? tflHintHtml(t) : "";
   const approvedNote = t.approved && t.status !== "filed"
     ? `<div class="m-wait"><div class="t">Approved in FreeAgent</div><div class="b">Nothing to do. You can still attach a receipt below.</div></div>` : "";
   return `${head}<div class="st-pbody">
@@ -1503,6 +1501,46 @@ function panelHtml(t) {
       ${r ? `<button class="btn" data-action="st-other">Back to the suggestion</button>` : ""}
       <button class="btn" data-action="m-add" data-paid="business">Add a file…</button>
       ${noReceiptButton(t)}</div></div>`;
+}
+
+/** "Make TfL receipt", with the journey to put on it: all optional, the
+ * usual journey (Settings) filled in. Start and end suggest TfL stations. */
+function tflHintHtml(t) {
+  const trip = tflTrip(t.url);
+  loadTflStations();
+  const field = (key, label, attrs) => `<span class="k">${label}</span>
+      <input class="edit-input" data-action="tfl-field" data-url="${esc(t.url)}" data-key="${key}"
+        value="${esc(trip[key] || "")}" ${attrs} aria-label="${label}">`;
+  return `<div class="m-issue"><div class="t">TfL doesn't send receipts</div>
+      <div class="b">Make a travel record from this payment: ${esc(money(-t.amount, "GBP"))} to Transport for London, VAT £0. It goes to Match, paired with this payment. The journey is optional.</div>
+      <div class="m-kv tfl-trip">
+        ${field("from", "Journey start", `list="tfl-stations" placeholder="Station or stop" autocomplete="off"`)}
+        ${field("to", "Journey end", `list="tfl-stations" placeholder="Station or stop" autocomplete="off"`)}
+        ${field("date", "Date of travel", `type="date" max="${esc(t.date.slice(0, 10))}"`)}
+        ${field("reason", "Reason", `placeholder="e.g. Client meeting" maxlength="200"`)}
+      </div>
+      <div class="m-iss-ctl"><button class="btn small primary" data-action="st-tfl" data-url="${esc(t.url)}" data-trip="1"
+        ${state.snap.queued.includes(`tfl:${t.url}`) ? "disabled" : ""}>Make TfL receipt</button></div></div>`;
+}
+
+/** What's typed for this payment, else the usual journey. */
+function tflTrip(url) {
+  if (!m.tflTrip[url]) {
+    const usual = state.snap.tfl_journey || {};
+    m.tflTrip[url] = { from: usual.from || "", to: usual.to || "", date: "", reason: usual.reason || "" };
+  }
+  return m.tflTrip[url];
+}
+
+/** TfL's stations into <datalist id="tfl-stations">, once. */
+async function loadTflStations() {
+  if (state.tflStations) return;
+  state.tflStations = "loading";
+  try {
+    const names = await api("/api/tfl/stations");
+    $("#tfl-stations").innerHTML = names.map((n) => `<option value="${esc(n)}"></option>`).join("");
+    state.tflStations = "loaded";
+  } catch { state.tflStations = null; }
 }
 
 // ---- dialogs: "Link all" / "Save all" ---------------------------------------------------
@@ -1915,9 +1953,15 @@ document.addEventListener("click", async (e) => {
       // the status line shows the fetch; the outcome toast says how it went
       return act(() => api("/api/statement/use-suggestion", { method: "POST", body: { url: target.dataset.url } }));
     }
-    case "st-tfl":
+    case "st-tfl": {
+      // from the panel: with the journey typed there; from the row: the usual journey
+      const body = { url: target.dataset.url, ...(target.dataset.trip ? tflTrip(target.dataset.url) : {}) };
       // the status line shows it being made; the outcome toast says how it went
-      return act(() => api("/api/statement/tfl-receipt", { method: "POST", body: { url: target.dataset.url } }));
+      return act(async () => {
+        await api("/api/statement/tfl-receipt", { method: "POST", body });
+        delete m.tflTrip[target.dataset.url];
+      });
+    }
     case "st-open":
       m.sel = id;
       m.reveal = true;
@@ -1949,6 +1993,10 @@ document.addEventListener("focusout", (e) => {
 });
 
 document.addEventListener("input", (e) => {
+  if (e.target.dataset.action === "tfl-field") {
+    tflTrip(e.target.dataset.url)[e.target.dataset.key] = e.target.value;
+    return;
+  }
   if (e.target.dataset.action === "st-pick-search") {
     const q = e.target.value.trim().toLowerCase();
     for (const o of document.querySelectorAll(".pk-row")) o.hidden = !!q && !o.dataset.search.includes(q);

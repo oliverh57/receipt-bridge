@@ -54,10 +54,14 @@ New versions arrive inside the app (**Update now**).
    email** (an email showing that amount was found in Gmail), **Add photo**,
    or **No receipt needed** (tax payment, transfer, bank fee…).
    TfL sends no receipt for contactless travel, so a TfL payment has
-   **Make TfL receipt**: a receipt made from the bank payment (Transport for
-   London, Travel, VAT £0, marked as made by Receipt Bridge) goes to Match,
-   paired with it. **Settings → FreeAgent → Make TfL receipts
-   automatically** does this for every TfL payment as it arrives.
+   **Make TfL receipt**: a travel record made from the bank payment goes to
+   Match, paired with it (Transport for London, Travel, VAT £0, marked as
+   prepared by Receipt Bridge, not TfL). Add the journey if you like, all
+   optional: start and end (TfL stations are suggested as you type), date
+   of travel and reason. **Settings → FreeAgent → Make TfL receipts
+   automatically** does this for every TfL payment as it arrives, with the
+   *usual journey* set there. The station list is TfL Open Data, refreshed
+   with `tools/fetch_tfl_stations.py`.
 
 5. **Expenses paid personally** stay in **Files** like everything else:
    switch *Paid with* to Expense, set the category, VAT and re-billing by

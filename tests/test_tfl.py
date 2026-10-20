@@ -44,7 +44,36 @@ def test_the_page_shows_the_payment_and_says_where_it_came_from() -> None:
 
 def test_without_a_company_the_page_still_reads() -> None:
     page = tfl.receipt_html({"dated_on": "2026-10-05", "amount": -9.9, "description": "TFL"})
-    assert "Expense record" in page and "TFL-20261005-0" in page and "of the account named above" not in page
+    assert "Travel record" in page and "TFL-20261005-0" in page and "of the account named above" not in page
+    assert "journeys not recorded" in page and "entered by the traveller" not in page
+
+
+def test_the_journey_you_entered_is_on_the_record() -> None:
+    trip = {"from": "King's Cross St. Pancras", "to": "Canary Wharf", "date": "2026-10-04", "reason": "Client meeting"}
+    page = tfl.receipt_html({"dated_on": "2026-10-05", "amount": -9.9, "description": "TFL"}, trip=trip)
+    assert "King&#x27;s Cross St. Pancras" in page and "Canary Wharf" in page
+    assert "4 October 2026" in page and "Client meeting" in page
+    assert "entered by the traveller and are not confirmed by Transport for London" in page
+    only_start = tfl.receipt_html({"dated_on": "2026-10-05", "amount": -9.9}, trip={"from": "Bank"})
+    assert "Bank" in only_start and "Not recorded" in only_start
+
+
+def test_journeys_are_tidied() -> None:
+    assert tfl.journey({"from": "  Oxford   Circus ", "to": "", "date": "4 Oct", "reason": "x" * 300}) == \
+        {"from": "Oxford Circus", "reason": "x" * 200}
+    assert tfl.journey({"date": "2026-10-04"}) == {"date": "2026-10-04"}
+    assert tfl.journey(None) == {}
+    assert tfl.describe({"from": "Bank", "to": "Angel"}) == "TfL travel: Bank to Angel"
+    assert tfl.describe({"to": "Angel"}) == "TfL travel: to Angel"
+    assert tfl.describe({}) == "Contactless travel"
+
+
+def test_stations_are_offered_for_start_and_end() -> None:
+    names = tfl.stations()
+    assert len(names) > 300 and not any(n.startswith("#") for n in names)
+    for name in ("Oxford Circus", "Canary Wharf", "Stratford", "Clapham Junction", "Abbey Wood", "Wimbledon"):
+        assert name in names, name
+    assert not any(n.endswith(("Underground Station", "DLR Station", "Rail Station")) for n in names)
 
 
 # ---- through the app --------------------------------------------------------------
@@ -68,8 +97,8 @@ def make(*payments: tuple[str, float, str]) -> tuple[ReceiptService, list[dict],
         for url, amount, description in payments])
     printed: list[dict] = []
 
-    def render(pool, payment, out_path, account_name="", pdf_config=None, company=""):   # no Chromium in tests
-        printed.append({"payment": payment, "account": account_name, "company": company})
+    def render(pool, payment, out_path, account_name="", pdf_config=None, company="", journey=None):  # no Chromium
+        printed.append({"payment": payment, "account": account_name, "company": company, "journey": journey})
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_bytes(b"%PDF-1.4 tfl")
         return out_path
@@ -148,6 +177,51 @@ def test_automatically_only_tfl_payments_and_only_when_switched_on() -> None:
         service._run_make_tfl_receipts(None)
         assert sorted(p["payment"]["url"] for p in printed) == ["tx/a", "tx/b"]
         assert "Made 2 TfL receipts" in service.snapshot()["outcome"]["message"]
+
+
+def test_the_journey_typed_is_used_else_the_usual_one() -> None:
+    service, printed, tmp = make(("tx/a", -2.3, "TFL // CARD_PURCHASE///"), ("tx/b", -7.2, "TFL // CARD_PURCHASE///"))
+    with tmp:
+        service.set_tfl_journey("  Bank ", "Angel", "Office")
+        assert service.snapshot()["tfl_journey"] == {"from": "Bank", "to": "Angel", "reason": "Office"}
+
+        service._run_make_tfl_receipts(["tx/a"], {"from": "Oxford Circus", "to": "", "date": "2026-10-04",
+                                                  "reason": "Client meeting"})
+        assert printed[-1]["journey"] == {"from": "Oxford Circus", "date": "2026-10-04", "reason": "Client meeting"}
+        saved = service.db.get_receipt(next(r["id"] for r in service.receipts("pending")))
+        assert saved["description"] == "TfL travel: from Oxford Circus"
+        assert json.loads(saved["extra_json"])["journey"]["reason"] == "Client meeting"
+
+        service._run_make_tfl_receipts(None)                  # by itself: the usual journey
+        assert printed[-1]["payment"]["url"] == "tx/b"
+        assert printed[-1]["journey"] == {"from": "Bank", "to": "Angel", "reason": "Office"}
+
+        service.set_tfl_journey("", None, "")                 # cleared; "to" left as it was
+        assert service.tfl_journey == {"from": "", "to": "Angel", "reason": ""}
+
+
+def test_the_api_takes_the_journey_and_lists_stations() -> None:
+    from fastapi.testclient import TestClient
+
+    from app.api import create_app
+
+    service, printed, tmp = make(("tx/tfl", -9.9, "TFL // CARD_PURCHASE///"))
+    with tmp:
+        asked = []
+        service.make_tfl_receipt = lambda url, journey=None: asked.append((url, journey)) or True  # type: ignore
+        app = create_app(service)
+        client = TestClient(app, base_url="http://127.0.0.1")
+        headers = {"x-receipt-bridge": app.state.token}
+        client.post("/api/statement/tfl-receipt", json={"url": "tx/tfl"}, headers=headers)
+        client.post("/api/statement/tfl-receipt", json={"url": "tx/tfl", "from": "Bank", "reason": "Meeting"},
+                    headers=headers)
+        assert asked == [("tx/tfl", None), ("tx/tfl", {"from": "Bank", "to": "", "date": "", "reason": "Meeting"})]
+        assert client.post("/api/statement/tfl-receipt", json={"url": "tx/tfl", "from": 3},
+                           headers=headers).status_code == 400
+        client.post("/api/settings", json={"tfl_from": "Bank", "tfl_reason": "Office"}, headers=headers)
+        assert service.tfl_journey == {"from": "Bank", "to": "", "reason": "Office"}
+        stations = client.get(f"/api/tfl/stations?t={app.state.token}").json()
+        assert "Oxford Circus" in stations
 
 
 def test_a_category_you_chose_for_tfl_before_is_kept() -> None:

@@ -1005,13 +1005,21 @@ function freeagentCard(fa) {
     </div>`;
 }
 
-/** TfL sends no receipt for contactless travel: one made from the payment. */
-function tflCard(on) {
-  return `<div class="card">
+/** TfL sends no receipt for contactless travel: a travel record made from the payment. */
+function tflCard(on, usual) {
+  usual = usual || {};
+  loadTflStations();
+  const field = (key, label, sub, attrs) => `<div class="card-row"><div class="grow">${label}<div class="sub">${sub}</div></div>
+        <input class="text-input" data-action="tfl-usual" data-key="${key}" value="${esc(usual[key] || "")}" ${attrs} aria-label="${label}"></div>`;
+  return `<div class="card m-keep">
       <div class="card-head"><h3>TfL travel</h3></div>
       <div class="card-row"><div class="grow">Make TfL receipts automatically
-          <div class="sub">TfL doesn't issue receipts for contactless travel. Each TfL payment without one gets a receipt made from the bank payment (VAT £0), waiting in Match for you to link. Without this, use <b>Make TfL receipt</b> on the payment in Bank Feed.</div></div>
+          <div class="sub">TfL doesn't issue receipts for contactless travel. Each TfL payment without one gets a travel record made from the bank payment (VAT £0), waiting in Match for you to link. Without this, use <b>Make TfL receipt</b> on the payment in Bank Feed.</div></div>
         <label class="switch"><input type="checkbox" data-action="tfl-receipts" ${on ? "checked" : ""} aria-label="Make TfL receipts automatically"><span></span></label></div>
+      <div class="card-note">Usual journey: put on automatic travel records, and filled in when you make one. All optional.</div>
+      ${field("from", "Journey start", "Where you usually set off", `list="tfl-stations" placeholder="Station or stop" autocomplete="off"`)}
+      ${field("to", "Journey end", "Where you usually go", `list="tfl-stations" placeholder="Station or stop" autocomplete="off"`)}
+      ${field("reason", "Reason for travel", "e.g. Travel to client site", `placeholder="Reason" maxlength="200"`)}
     </div>`;
 }
 
@@ -1127,7 +1135,7 @@ function renderSettings() {
 
   const sections = {
     about: state.settingsTab === "about" ? aboutHtml() : "",
-    freeagent: freeagentCard(s.freeagent) + (s.freeagent?.connected ? tflCard(s.tfl_receipts) : ""),
+    freeagent: freeagentCard(s.freeagent) + (s.freeagent?.connected ? tflCard(s.tfl_receipts, s.tfl_journey) : ""),
 
     email: `
       ${gmailCard(s)}
@@ -1805,6 +1813,10 @@ document.addEventListener("change", (e) => {
   }
   if (e.target.dataset.action === "notify-category") {
     act(() => api("/api/settings", { method: "POST", body: { notify_categories: { [e.target.dataset.category]: e.target.checked } } }));
+    return;
+  }
+  if (e.target.dataset.action === "tfl-usual") {
+    act(() => api("/api/settings", { method: "POST", body: { [`tfl_${e.target.dataset.key}`]: e.target.value } }));
     return;
   }
   if (e.target.dataset.action === "tfl-receipts") {

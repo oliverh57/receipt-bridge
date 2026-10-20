@@ -250,6 +250,9 @@ button { font: inherit; color: inherit; }
 .card-row .sub.warn { color: var(--warn); }
 .days-input { width: 64px; height: 28px; margin-right: 6px; padding: 0 6px; border: 1px solid var(--line); border-radius: 6px;
   background: var(--bg); color: var(--ink); font: inherit; text-align: right; }
+.text-input { width: 220px; max-width: 45%; height: 28px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--bg); color: var(--ink); font: inherit; font-size: 13px; }
+.tfl-trip .edit-input { height: 28px; padding: 0 8px; background: var(--bg); color: var(--ink); }
 .setting-select { flex: 0 1 auto; max-width: 45%; height: 28px; padding: 0 6px; border: 1px solid var(--line); border-radius: 6px;
   background: var(--bg); color: var(--ink); font: inherit; }
 .pill { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; }

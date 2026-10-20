@@ -34,7 +34,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import bank_logos
+from . import bank_logos, tfl
 from .db import EXPORTED, FAILED, IGNORED, PENDING
 from .freeagent import VAT_SCHEMES, FreeAgentError
 from .service import ReceiptService
@@ -72,6 +72,9 @@ class Settings(BaseModel):
     auto_update: bool | None = None
     label_filed: bool | None = None
     tfl_receipts: bool | None = None
+    tfl_from: str | None = None
+    tfl_to: str | None = None
+    tfl_reason: str | None = None
     theme: str | None = None
     waiting_days: int | None = None
     archive_delete_days: int | None = None
@@ -643,10 +646,21 @@ def create_app(service: ReceiptService) -> FastAPI:
 
     @app.post("/api/statement/tfl-receipt")
     def statement_tfl_receipt(body: dict[str, Any]) -> dict[str, Any]:
-        """"Make TfL receipt": one made from the payment, into Match; read `outcome`."""
+        """"Make TfL receipt": one made from the payment, into Match; read `outcome`.
+        `from`, `to`, `date` (YYYY-MM-DD), `reason`: the journey, shown on it (all
+        left out: the usual journey)."""
         if not isinstance(body.get("url"), str):
             raise HTTPException(400, "url is required")
-        return {"queued": service.make_tfl_receipt(body["url"])}
+        keys = ("from", "to", "date", "reason")
+        if any(not isinstance(body.get(k) or "", str) for k in keys):
+            raise HTTPException(400, "from, to, date and reason are text")
+        journey = {k: body.get(k) or "" for k in keys} if any(k in body for k in keys) else None
+        return {"queued": service.make_tfl_receipt(body["url"], journey)}
+
+    @app.get("/api/tfl/stations")
+    def tfl_stations() -> list[str]:
+        """TfL's stations, for the journey start / end suggestions."""
+        return tfl.stations()
 
     @app.post("/api/statement/find-emails")
     def statement_find_emails() -> dict[str, Any]:
@@ -891,6 +905,8 @@ def create_app(service: ReceiptService) -> FastAPI:
             service.set_label_filed(body.label_filed)
         if body.tfl_receipts is not None:
             service.set_tfl_receipts(body.tfl_receipts)
+        if body.tfl_from is not None or body.tfl_to is not None or body.tfl_reason is not None:
+            service.set_tfl_journey(body.tfl_from, body.tfl_to, body.tfl_reason)
         if body.waiting_days is not None:
             try:
                 service.set_waiting_days(body.waiting_days)

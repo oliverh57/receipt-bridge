@@ -2899,17 +2899,39 @@ class ReceiptService:
         if enabled:
             self.make_tfl_receipts()
 
-    def make_tfl_receipt(self, transaction_url: str) -> bool:
-        """"Make TfL receipt" on one Statement line (queued; read `outcome`)."""
-        return self._enqueue(f"tfl:{transaction_url}", lambda: self._run_make_tfl_receipts([transaction_url]))
+    @property
+    def tfl_journey(self) -> dict[str, str]:
+        """Settings → "Usual journey": put on receipts made by themselves,
+        and offered when you make one."""
+        return {key: self.db.get_state(f"pref:tfl_{key}") or "" for key in ("from", "to", "reason")}
+
+    def set_tfl_journey(self, start: str | None = None, end: str | None = None, reason: str | None = None) -> None:
+        for key, value in (("from", start), ("to", end), ("reason", reason)):
+            if value is None:
+                continue
+            key, value = f"pref:tfl_{key}", tfl.place(value, tfl.FIELD_LENGTH[key])
+            if value:
+                self.db.set_state(key, value)
+            else:
+                self.db.delete_state(key)
+        self._bump()
+
+    def make_tfl_receipt(self, transaction_url: str, journey: dict[str, str] | None = None) -> bool:
+        """"Make TfL receipt" on one Statement line (queued; read `outcome`).
+        `journey`: {from, to, date, reason} to show on it (blank: none); None: the usual one."""
+        return self._enqueue(f"tfl:{transaction_url}",
+                             lambda: self._run_make_tfl_receipts([transaction_url], journey))
 
     def make_tfl_receipts(self) -> bool:
         """One for every TfL payment with no receipt (queued, quietly)."""
         return self._enqueue("tfl-receipts", lambda: self._run_make_tfl_receipts(None))
 
-    def _run_make_tfl_receipts(self, urls: list[str] | None) -> None:
+    def _run_make_tfl_receipts(self, urls: list[str] | None, journey: dict[str, str] | None = None) -> None:
         """`urls`: the payments asked for, each reported; None: every TfL
-        payment still missing its receipt, reported only when some were made."""
+        payment still missing its receipt, reported only when some were made.
+        `journey`: where, when and why you travelled ({from, to, date, reason}); None:
+        the usual journey (Settings)."""
+        journey = tfl.journey(journey if journey is not None else self.tfl_journey)
         # asked for: any payment in the statement; by itself: the last weeks, as Gmail is searched
         payments = {t["url"]: t for t in self._missing_payments(days=FREEAGENT_HISTORY_DAYS if urls else EMAIL_HINT_DAYS)}
         if urls is None:
@@ -2934,7 +2956,7 @@ class ReceiptService:
         try:
             for t in sorted(chosen, key=lambda t: t["dated_on"]):
                 made += bool(self._make_tfl_receipt(pool, t, accounts.get(t["bank_account"], {}).get("name", ""),
-                                                    asked=urls is not None))
+                                                    asked=urls is not None, journey=journey))
         except Exception as exc:
             log.exception("TfL receipt")
             self._finish("tfl", False, f"Couldn't make the TfL receipt: {exc}")
@@ -2947,7 +2969,8 @@ class ReceiptService:
         elif urls is not None:
             self._finish("tfl", False, "That payment already has a TfL receipt.")
 
-    def _make_tfl_receipt(self, pool: Any, t: dict[str, Any], account_name: str, asked: bool = False) -> int:
+    def _make_tfl_receipt(self, pool: Any, t: dict[str, Any], account_name: str, asked: bool = False,
+                          journey: dict[str, str] | None = None) -> int:
         """Print the receipt for one payment and stage it. Its id, or 0 when
         it has one already. One made before and since removed from the
         payment, ignored or deleted: by itself, left alone (you didn't want
@@ -2969,20 +2992,21 @@ class ReceiptService:
         amount = round(-float(t["amount"]), 2)
         out = self.config.pdf_dir / f"tfl-{_safe_stem(t['url'].rstrip('/').rsplit('/', 1)[-1])}.pdf"
         company = (self._freeagent_reference().get("vat") or {}).get("company") or ""
-        tfl.render(pool, t, out, account_name, self.config.pdf, company=company)
+        tfl.render(pool, t, out, account_name, self.config.pdf, company=company, journey=journey)
         travel = next((c["url"] for c in self._freeagent_reference().get("categories", [])
                        if c.get("description", "").strip().lower() == tfl.CATEGORY.lower()), None)
         remembered = self.db.get_state(f"category_for:{self._supplier_key(tfl.SUPPLIER)}")
         return self.db.insert_receipt({
             "watcher_id": "tfl", "source": "tfl", "source_id": source_id,
             "vendor": tfl.SUPPLIER, "purchased_on": day, "total": amount, "currency": t.get("currency") or "GBP",
-            "vat": 0.0, "description": "Contactless travel", "paid_by": "business",
+            "vat": 0.0, "description": tfl.describe(journey), "paid_by": "business",
             "category": None if remembered else travel,
             "pdf_path": str(out), "pdf_source": "generated",
             "filename": f"{day} {tfl.SUPPLIER} {t.get('currency') or 'GBP'}{amount:.2f}.pdf",
             "transaction_url": t["url"], "status": PENDING,
             # fares are zero-rated: 0% VAT, not "none shown"
-            "extra_json": {"made_for_payment": t["url"], "vat_choice": "0.0"},
+            "extra_json": {"made_for_payment": t["url"], "vat_choice": "0.0",
+                           **({"journey": journey} if journey else {})},
         })
 
     # ---- receipts FreeAgent attached itself --------------------------------
@@ -3638,6 +3662,7 @@ class ReceiptService:
             "has_credentials": self.config.credentials_file.exists(),
             "label_filed": self.config.label_filed,
             "tfl_receipts": self.tfl_receipts,
+            "tfl_journey": self.tfl_journey,
             # the app keys come in a licence file dropped on the app (app/licence.py)
             "needs_licence": not (self.config.credentials_file.exists()
                                   and self.config.freeagent_credentials_file.exists()),
