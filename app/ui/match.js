@@ -36,7 +36,7 @@ const m = {
   stPending: null,                   // Statement: receipt whose payment to open once loaded
   linkFile: null,                    // Statement: receipt id being linked from Files ("Link to other payment")
   tflTrip: {},                       // Statement: the journey typed for a TfL payment, by its URL
-  tflDialog: null,                   // Statement: the TfL payment whose Make TfL receipt dialog is open
+  tflDialog: null,                   // Statement: the TfL payment whose Generate travel record dialog is open
   curOpen: null,                     // whose currency list is open: a receipt id, or "email" (Convert to receipt)
   asel: null,                        // Archived: selected receipt id
   multi: [],                         // Files: ids picked with shift- or ⌘-click (2 or more = bulk)
@@ -1162,9 +1162,9 @@ function statementRow(t) {
   } else if (t.status === "missing" && t.suggestion) {
     detail = t.suggestion.kind === "email" ? "An email may be the receipt" : "An ignored file may be the receipt";
   } else if (t.status === "missing" && t.tfl) {
-    detail = "TfL sends none: make one";
+    detail = "Add a travel record";
     action = `<button class="btn small" data-action="st-tfl-open" data-url="${esc(t.url)}"
-      ${state.snap.queued.includes(`tfl:${t.url}`) ? "disabled" : ""}>Make receipt</button>`;
+      ${state.snap.queued.includes(`tfl:${t.url}`) ? "disabled" : ""}>Travel record</button>`;
   }
   // a suggested file shows its receipt on hover, as in the candidate list
   const thumb = t.status === "in_match" && r ? thumbUrl(r) : "";
@@ -1507,15 +1507,15 @@ function panelHtml(t) {
       ${noReceiptButton(t)}</div></div>`;
 }
 
-/** A TfL payment with no receipt: Make TfL receipt opens the dialog. */
+/** A TfL payment with nothing yet: Generate travel record opens the dialog. */
 function tflHintHtml(t) {
-  return `<div class="m-issue"><div class="t">TfL doesn't send receipts</div>
-      <div class="b">Make a travel record from this payment: ${esc(money(-t.amount, "GBP"))} to Transport for London, VAT £0, with the journey if you like. It goes to Match, paired with this payment.</div>
+  return `<div class="m-issue"><div class="t">Travel record</div>
+      <div class="b">Record where you went for this ${esc(money(-t.amount, "GBP"))} TfL journey: where from, where to, when and why.</div>
       <div class="m-iss-ctl"><button class="btn small primary" data-action="st-tfl-open" data-url="${esc(t.url)}"
-        ${state.snap.queued.includes(`tfl:${t.url}`) ? "disabled" : ""}>Make TfL receipt…</button></div></div>`;
+        ${state.snap.queued.includes(`tfl:${t.url}`) ? "disabled" : ""}>Generate travel record…</button></div></div>`;
 }
 
-/** The Make TfL receipt dialog, like Convert to receipt: the journey (all
+/** The Generate travel record dialog, like Convert to receipt: the journey (all
  * optional, the usual journey filled in) and the travel record it makes,
  * printed as you type (tflPreview). Start and end suggest stations
  * (app.js, findStations). Built once per payment; only the preview changes. */
@@ -1527,8 +1527,8 @@ function tflDialogHtml(t) {
   return `<div class="m-overlay tfl-overlay" data-action="st-tfl-close"><section class="m-dialog e-dialog tfl-dialog m-keep" role="dialog"
       aria-modal="true" aria-labelledby="tfl-dialog-title" data-url="${esc(t.url)}">
     <div class="e-dform">
-      <h2 id="tfl-dialog-title">Make TfL receipt</h2>
-      <p class="sub">TfL doesn't send receipts for contactless travel. This makes a travel record from the payment and links it in FreeAgent. The journey is optional.</p>
+      <h2 id="tfl-dialog-title">Generate travel record</h2>
+      <p class="sub">Record where you went: a travel record for this payment, linked to it in FreeAgent. Every field is optional.</p>
       <div class="e-dlabel" style="margin-top:0">Bank payment</div>
       <div class="m-pay e-paycard">${bankBadge(accountName())}
         <div class="who"><div class="desc">${esc(t.description)}</div><div class="sub">${esc(accountName())} · ${esc(longDate(t.date))}</div></div>
@@ -1546,7 +1546,7 @@ function tflDialogHtml(t) {
       <div class="m-note e-dnote">The record says the journey was entered by you, not confirmed by TfL.</div>
       <div class="m-dialog-foot">
         <button class="btn" data-action="st-tfl-close">Cancel</button>
-        <button class="btn primary" data-action="st-tfl" data-url="${esc(t.url)}" data-trip="1">Make and link</button></div>
+        <button class="btn primary" data-action="st-tfl" data-url="${esc(t.url)}" data-trip="1">Generate and link</button></div>
     </div>
     <div class="e-dpreview">
       <div class="e-dphead"><div class="e-dlabel">Travel record</div><span class="muted tfl-updating" hidden>Updating…</span></div>

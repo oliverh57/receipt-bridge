@@ -61,15 +61,15 @@ New versions arrive inside the app (**Update now**).
    what the statement says, the receipt's supplier, the amount or the date. For a missing one: **Use that
    email** (an email showing that amount was found in Gmail), **Add photo**,
    or **No receipt needed** (tax payment, transfer, bank fee…).
-   TfL sends no receipt for contactless travel, so a TfL payment has
-   **Make TfL receipt…**: a dialog, with a preview of the record as you
-   type; **Make and link** makes a travel record from the bank payment
-   and links it to the payment, as Approve does (Transport for London, Travel, VAT £0, marked as
-   prepared by Receipt Bridge, not TfL). Add the journey if you like, all
-   optional: start and end, return, date of travel and reason. Start and
-   end suggest stations as you type (TfL's own first, then National Rail;
-   any word matches, so "pancras" finds King's Cross St. Pancras). **Settings → FreeAgent → Make TfL receipts
-   automatically** does this for every TfL payment as it arrives, with the
+   A TfL payment has **Generate travel record…**: record where you went
+   (start and end, return, date of travel and reason, all optional) with a
+   preview of the record as you type; **Generate and link** makes it
+   (Transport for London, Travel, VAT £0, marked as prepared by Receipt
+   Bridge, not TfL) and links it to the payment. Start and end suggest
+   stations as you type (TfL's own first, then National Rail; any word
+   matches, so "pancras" finds King's Cross St. Pancras). **Settings →
+   FreeAgent → Generate travel records automatically** does this for every
+   TfL payment as it arrives, waiting in Match to link, with the
    *usual journey* set there. The station list is TfL Open Data, refreshed
    with `tools/fetch_tfl_stations.py`.
 

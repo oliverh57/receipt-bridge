@@ -249,8 +249,7 @@ def receipt_html(payment: dict[str, Any], account_name: str = "", company: str =
         ("Supplier", f"{SUPPLIER}, {', '.join(SUPPLIER_ADDRESS)}"),
     ]
     basis = [
-        "Transport for London does not issue receipts for contactless pay as you go fares. This record "
-        f"shows the payment as it appears on the bank statement{' of the account named above' * bool(account_name)}, "
+        f"This record of travel shows the payment as it appears on the bank statement{' of the account named above' * bool(account_name)}, "
         f"and was prepared by Receipt Bridge on {issued_on}. It is not issued by Transport for London.",
         "Fares for travel on TfL services are zero-rated for VAT. TfL normally charges a day's contactless "
         "journeys together, the following day, so one charge can cover several journeys.",

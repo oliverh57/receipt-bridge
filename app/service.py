@@ -2898,7 +2898,7 @@ class ReceiptService:
 
     @property
     def tfl_receipts(self) -> bool:
-        """Settings → FreeAgent → "Make TfL receipts automatically"."""
+        """Settings → FreeAgent → "Generate travel records automatically"."""
         return self.db.get_state("pref:tfl_receipts") == "1"
 
     def set_tfl_receipts(self, enabled: bool) -> None:
@@ -2985,7 +2985,7 @@ class ReceiptService:
                 return
         if not chosen:
             return
-        self._set_activity(busy=True, kind="tfl", label="Making TfL receipts", started_at=_now(), log=[])
+        self._set_activity(busy=True, kind="tfl", label="Generating travel records", started_at=_now(), log=[])
         from .browser import BrowserPool
 
         accounts = {a["url"]: a for a in self._freeagent_reference().get("bank_accounts", [])}
@@ -2999,7 +2999,7 @@ class ReceiptService:
                     made.append(receipt_id)
         except Exception as exc:
             log.exception("TfL receipt")
-            self._finish("tfl", False, f"Couldn't make the TfL receipt: {exc}")
+            self._finish("tfl", False, f"Couldn't generate the travel record: {exc}")
             return
         finally:
             pool.close()
@@ -3007,13 +3007,13 @@ class ReceiptService:
             if self._freeagent_connected():
                 self._run_file(made)                 # as Approve: its own outcome says how it went
             else:
-                self._finish("tfl", False, "Made the TfL receipt, but FreeAgent isn't connected to link it: "
+                self._finish("tfl", False, "Generated the travel record, but FreeAgent isn't connected to link it: "
                              "it's in Match, paired with this payment.")
         elif made:
-            self._finish("tfl", True, "Made the TfL receipt and put it in Match, paired with this payment."
-                         if urls is not None else f"Made {len(made)} TfL receipt{'s' if len(made) > 1 else ''} for Match.")
+            self._finish("tfl", True, "Generated the travel record and put it in Match, paired with this payment."
+                         if urls is not None else f"Generated {len(made)} travel record{'s' if len(made) > 1 else ''} for Match.")
         elif urls is not None:
-            self._finish("tfl", False, "That payment already has a TfL receipt.")
+            self._finish("tfl", False, "That payment already has a travel record.")
 
     def _make_tfl_receipt(self, pool: Any, t: dict[str, Any], account_name: str, asked: bool = False,
                           journey: dict[str, str] | None = None) -> int:

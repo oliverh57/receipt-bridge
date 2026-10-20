@@ -187,7 +187,7 @@ def test_automatically_only_tfl_payments_and_only_when_switched_on() -> None:
         assert service.snapshot()["tfl_receipts"] is True
         service._run_make_tfl_receipts(None)
         assert sorted(p["payment"]["url"] for p in printed) == ["tx/a", "tx/b"]
-        assert "Made 2 TfL receipts" in service.snapshot()["outcome"]["message"]
+        assert "Generated 2 travel records" in service.snapshot()["outcome"]["message"]
 
 
 def test_the_journey_typed_is_used_else_the_usual_one() -> None:
