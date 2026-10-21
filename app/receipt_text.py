@@ -33,11 +33,13 @@ from decimal import Decimal
 
 # A trailing amount on a row. ",dd"/".dd" is decimals, ",ddd"/".ddd" is
 # thousands (`11,60`, `15,300`); yen has no decimals. Masked card digits
-# ("xxxx6335", "****2685") are never amounts.
+# ("xxxx6335", "****2685") are never amounts. The currency code can follow
+# the amount: "20,35 GBP" was skipped and Radisson's TOTAL took the VAT
+# (3,08) from the row above.
 _AMOUNT = re.compile(
     r'(-?)\s*(?:[£€$¥·]|EUR|GBP|DKK|AUD|USD|JPY)?\s*'
     r'(?<![xX*#\d])(\d{1,3}(?:[,.]\d{3})+|\d+)(?:[.,](\d{2}))?(?!\d)'
-    r'\s*(?:€|EUR|DKK|円)?\s*(?:\d|[A-Z<])?\s*$'
+    r'\s*(?:€|EUR|GBP|DKK|AUD|USD|JPY|円)?\s*(?:\d|[A-Z<])?\s*$'
 )
 # Something that looks like money rather than an ID: a currency symbol or
 # two decimals. "A0000000041010" (a card chip ID) is not €41,010.
@@ -272,8 +274,9 @@ def find_vat_lines(rows: list[str], currency: str | None, total: Decimal | None
     for i, row in enumerate(rows):
         if not _VAT_LINE.search(row) or _VAT_ID_LINE.search(row):
             continue
-        rate_m = re.search(r'(\d+(?:\.\d+)?)\s*%', row)
-        tail = re.sub(r'\d+(?:\.\d+)?\s*%', '', row)              # drop "20.0%"
+        # "20,00%" is 20%, not 0% (Radisson)
+        rate_m = re.search(r'(\d+(?:[.,]\d+)?)\s*%', row)
+        tail = re.sub(r'\d+(?:[.,]\d+)?\s*%', '', row)           # drop "20.0%"
         if not re.search(r'\d[.,]\d{2}', tail):
             for j in (i + 1, i + 2):                                # table numbers below the header
                 if j < len(rows) and re.search(r'\d[.,]\d{2}', rows[j]) and not _LETTERS.search(rows[j]):
@@ -285,13 +288,14 @@ def find_vat_lines(rows: list[str], currency: str | None, total: Decimal | None
             tail += '   ' + rows[i + 1]
         money = [Decimal(x.replace(',', '.')) for x in re.findall(r'\d+[.,]\d{2}', tail)]
         vat = None
-        line_rate: Decimal | None = Decimal(rate_m.group(1)) if rate_m else None
+        rate = Decimal(rate_m.group(1).replace(',', '.')) if rate_m else None
+        line_rate: Decimal | None = rate
         line_gross: Decimal | None = None
         if len(money) >= 2:
             # "0.52 VAT 20% 3.10" (Pret) or "£2.58 £0.52" (Sandwi): VAT is the
             # amount that is the rate's share of another amount on the line.
             # Costa's OCR dropped the rate, so try the UK standard and reduced.
-            rates = [Decimal(rate_m.group(1))] if rate_m else [Decimal(20), Decimal(5)]
+            rates = [rate] if rate is not None else [Decimal(20), Decimal(5)]
             for r in rates:
                 for v in money:
                     for base in money:

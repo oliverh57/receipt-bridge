@@ -168,6 +168,16 @@ def test_a_card_chip_id_is_not_money() -> None:
     assert got.total == Decimal("19.34")
 
 
+def test_a_currency_code_after_the_total_is_still_the_total() -> None:
+    """Radisson: "20,35 GBP" was skipped, so TOTAL took the VAT (3,08) from
+    the row above, and "20,00%" was read as a 0% rate."""
+    got = read_text("SERVICE CHARGE\n1,85\nNET TOTAL\nVAT   20,00%\n3,08\nTOTAL\n20,35 GBP\n"
+                    "Tip:\nTOTAL:\nRoom:")
+    assert got.total == Decimal("20.35")
+    assert got.vat == Decimal("3.08")
+    assert got.vat_lines == [(Decimal("20.00"), Decimal("3.08"), None)]
+
+
 def test_masked_card_digits_are_not_amounts() -> None:
     got = read_text("Total   $13.76\nVisa DEBIT   xxxxxxxx6335")
     assert got.total == Decimal("13.76")
