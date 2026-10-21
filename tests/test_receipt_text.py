@@ -178,6 +178,30 @@ def test_a_currency_code_after_the_total_is_still_the_total() -> None:
     assert got.vat_lines == [(Decimal("20.00"), Decimal("3.08"), None)]
 
 
+def test_a_pound_sign_read_as_a_six_is_not_another_total() -> None:
+    """iD Mobile: "£9.27" read as "69.27" made it look like a split bill."""
+    got = read_text("Total charges for this month   69.27\nTotal charges   £9.27\n"
+                    "Total amount due   €9.27")
+    assert got.total == Decimal("9.27")
+    assert got.candidate_totals == [Decimal("9.27")]
+
+
+def test_a_number_in_a_sentence_is_not_money_because_the_row_has_some() -> None:
+    """iD Mobile: "...this month of £9.27 ... immediately after 21" gave £21.00."""
+    got = read_text("Total charges   £9.27\nThe amount due this month of £9.27 will be taken "
+                    "automatically from your account by Direct Debit on or immediately after 21\n"
+                    "August 2026, you do not need to do anything.")
+    assert got.total == Decimal("9.27")
+
+
+def test_the_date_printed_first_wins_over_a_call_log() -> None:
+    """iD Mobile: page 3's call log ("07/07/2026") beat "Invoice date: 07-Aug-2026"."""
+    got = read_text("Invoice date: 07-Aug-2026\nTotal amount due   £9.27\n"
+                    "Calls\n07/07/2026   11:47:10   00:00:03   £0.00")
+    assert got.date == date(2026, 8, 7)
+    assert got.other_dates == [date(2026, 7, 7)]
+
+
 def test_masked_card_digits_are_not_amounts() -> None:
     got = read_text("Total   $13.76\nVisa DEBIT   xxxxxxxx6335")
     assert got.total == Decimal("13.76")

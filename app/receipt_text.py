@@ -50,15 +50,21 @@ _LETTERS = re.compile('[A-Za-z぀-ヿ一-鿿]{3}')
 _ZERO_DECIMAL = {'JPY', 'KRW'}
 
 
-def amount(row: str) -> Decimal | None:
-    """The amount at the end of a row, or None."""
+def _read_amount(row: str) -> tuple[Decimal, str] | None:
+    """The amount at the end of a row and the text it was read from, or None."""
     row = row.replace('）', '').replace(')', '')
     row = re.sub(r'(\d)[.,]\s+(\d{3})\b', r'\1,\2', row)    # OCR spacing: "15.   300"
     m = _AMOUNT.search(row)
     if not m:
         return None
     whole = re.sub(r'[,.]', '', m.group(2))
-    return Decimal(f"{int(whole)}.{m.group(3) or '00'}")
+    return Decimal(f"{int(whole)}.{m.group(3) or '00'}"), m.group(0)
+
+
+def amount(row: str) -> Decimal | None:
+    """The amount at the end of a row, or None."""
+    got = _read_amount(row)
+    return got[0] if got else None
 
 
 # ---- labels: generic, several languages --------------------------------------
@@ -81,8 +87,9 @@ _NOT_PAYMENT = re.compile(
     r'お預かり|お釣り|つり銭|RÜCKGELD|CHANGE|GEGEBEN|TROCO|CAMBIO|MONNAIE|'
     r'SURCHARGE|GEBÜHR|CARD\s*(?:NO|NUMBER)|CARD:\s*[\dX*]{6,}', re.I)
 _CHANGE_GIVEN = re.compile(r'^\s*(CHANGE|RÜCKGELD|TROCO|CAMBIO|お釣り|つり銭)\b', re.I)
-# OCR reads "£" as one of these: "£6.99" → "86.99", "26.99", "E6.99", "C6.99".
-_POUND_MISREADS = '82EC€'
+# OCR reads "£" as one of these: "£6.99" → "86.99", "26.99", "E6.99", "C6.99",
+# and "£9.27" → "69.27" (iD Mobile).
+_POUND_MISREADS = '826EC€'
 
 
 def _neighbour(rows: list[str], i: int) -> Decimal | None:
@@ -146,9 +153,13 @@ def find_total(rows: list[str], currency: str | None) -> tuple[Decimal | None, s
                 change += c      # cash tendered minus change = amount paid (Nomad)
         if _NOT_PAYMENT.search(row) and not _TOTAL.search(row):
             continue
-        a = amount(row) if re.search(r'\d', row) else None
-        if a is not None and currency not in _ZERO_DECIMAL and not _MONEY_LOOKING.search(row):
-            a = None             # an ID, not money (Christiani's card chip ID)
+        got = _read_amount(row) if re.search(r'\d', row) else None
+        a = got[0] if got else None
+        # An ID, not money (Christiani's card chip ID). Judged on the amount
+        # read, not the whole row: iD Mobile's "amount due this month of
+        # £9.27 … immediately after 21" gave £21.00.
+        if got and currency not in _ZERO_DECIMAL and not _MONEY_LOOKING.search(got[1]):
+            a = None
         a = a if a is not None else _neighbour(rows, i)
         if not a:
             continue
@@ -168,6 +179,9 @@ def find_total(rows: list[str], currency: str | None) -> tuple[Decimal | None, s
                 return t
         return p
 
+    # The same goes for a total: iD Mobile's "Total charges for this month
+    # £9.27" read as 69.27 beside two other totals of £9.27.
+    candidates = [t for t in candidates if unmisread(t) == t]
     payments = [unmisread(p) for p in payments]
     if len(payments) > 1 and len(set(payments)) == 1:
         paid = payments[0]       # one payment printed twice ("MasterCard", "Payment")
@@ -335,7 +349,8 @@ _D_NUMERIC = re.compile(r'(?<![\d-])(\d{1,2})[-/.](\d{1,2})[-/.](\d{2}|\d{4})(?!
 _D_MONTH_DAY = re.compile(r'\b([A-Za-z]{3})[A-Za-z]*\.? (\d{1,2}),? (20\d{2})\b')                  # Jul 29, 2025
 # 29MAY2025; the camera reads the O of OCT and NOV as a zero ("050CT2026")
 _D_COMPACT = re.compile(r'\b(\d{1,2})([A-Z0]{3})(20\d{2})\b')
-_D_DAY_MONTH = re.compile(r"\b(\d{1,2}) ([A-Za-z]{3})[A-Za-z]*\.?,?\s*(?:(20\d{2})|'(\d{2}))\b")   # 24 Jul 2025, 11 Jun'25
+# 24 Jul 2025, 11 Jun'25, 07-Aug-2026
+_D_DAY_MONTH = re.compile(r"\b(\d{1,2})[ -]([A-Za-z]{3})[A-Za-z]*\.?,?[\s-]*(?:(20\d{2})|'(\d{2}))\b")
 
 
 def _valid(y: int, m: int, d: int) -> date | None:
@@ -346,7 +361,9 @@ def _valid(y: int, m: int, d: int) -> date | None:
 
 
 def find_dates(text: str, currency: str | None, currency_hint: str = '') -> list[date]:
-    """Every date on the receipt, four-digit-year ones first.
+    """Every date on the receipt, four-digit-year ones first, each kind in
+    the order printed. Printed order, not format: iD Mobile's call log on
+    page 3 ("07/07/2026") came before its "Invoice date: 07-Aug-2026".
 
     Day-first or month-first is decided by the receipt itself: one
     unambiguous date ("29/04/2025", "11/18/24") settles every date on it.
@@ -363,27 +380,28 @@ def find_dates(text: str, currency: str | None, currency_hint: str = '') -> list
     else:
         month_first = currency == 'USD' or currency_hint == '$'
 
-    four: list[date] = []
-    two: list[date] = []
-    for y, m, d in _D_YMD.findall(text):
-        if (v := _valid(int(y), int(m), int(d))):
-            four.append(v)
-    for a, b, y in _D_NUMERIC.findall(text):
-        a, b = int(a), int(b)
+    four: list[tuple[int, date]] = []      # (where it's printed, date)
+    two: list[tuple[int, date]] = []
+    for m in _D_YMD.finditer(text):
+        y, mo, d = m.groups()
+        if (v := _valid(int(y), int(mo), int(d))):
+            four.append((m.start(), v))
+    for m in _D_NUMERIC.finditer(text):
+        a, b, y = int(m[1]), int(m[2]), m[3]
         year = int(y) if len(y) == 4 else 2000 + int(y)
         for month, day in ([(a, b), (b, a)] if month_first else [(b, a), (a, b)]):
             if (v := _valid(year, month, day)):
-                (four if len(y) == 4 else two).append(v)
+                (four if len(y) == 4 else two).append((m.start(), v))
                 break
-    named = (_D_MONTH_DAY.findall(text)
-             + [(m, d, y or '20' + y2) for d, m, y, y2 in _D_DAY_MONTH.findall(text)]
-             + [(m.replace('0', 'O'), d, y) for d, m, y in _D_COMPACT.findall(text)])
-    for mon, d, y in named:
+    named = ([(m.start(), m[1], m[2], m[3]) for m in _D_MONTH_DAY.finditer(text)]
+             + [(m.start(), m[2], m[1], m[3] or '20' + m[4]) for m in _D_DAY_MONTH.finditer(text)]
+             + [(m.start(), m[2].replace('0', 'O'), m[1], m[3]) for m in _D_COMPACT.finditer(text)])
+    for at, mon, d, y in named:
         if mon.lower() in _MONTHS and (v := _valid(int(y), _MONTHS[mon.lower()], int(d))):
-            four.append(v)
+            four.append((at, v))
 
     out: list[date] = []
-    for v in four + two:
+    for _, v in sorted(four, key=lambda f: f[0]) + sorted(two, key=lambda f: f[0]):
         if v not in out:
             out.append(v)
     return out
