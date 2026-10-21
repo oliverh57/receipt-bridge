@@ -418,6 +418,14 @@ function renderBanner() {
       : "Connect FreeAgent to match and file receipts."}</b>${expired
       ? " Reconnect to file receipts. Showing the last synced data." : ""}</div>
       <button class="btn small" data-action="fa-connect">${expired ? "Reconnect" : "Connect FreeAgent"}</button></div>`;
+  } else if (fa.connected && fa.error && fa.problem === "error") {
+    // still signed in, but FreeAgent won't have it (a refused sign-in, lost
+    // access): reconnecting is the fix. Offline or FreeAgent's own trouble
+    // ("offline", "unavailable") fixes itself, so says nothing here.
+    const why = fa.error.replace(/:?\s*reconnect in Settings\.?$/i, "").replace(/^Couldn't read FreeAgent:\s*/, "").replace(/\.$/, "");
+    el.innerHTML = `<div class="banner"><div class="text"><b>FreeAgent connection problem.</b> ${esc(why)}.
+      Receipts can't be filed until you reconnect.${fa.last_sync ? " Showing the last synced data." : ""}</div>
+      <button class="btn small" data-action="fa-connect">Reconnect</button></div>`;
   } else if (needs_attention.length) {
     const a = needs_attention[0];
     el.innerHTML = `<div class="banner"><div class="text"><b>${esc(a.email)} needs reconnecting.</b> Email receipts aren't being checked.</div>
