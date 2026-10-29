@@ -244,9 +244,10 @@ _VAT_NUMBER = re.compile(
     r'((?:GB|G8|C3|CB|GE)?\s*(?:\d\s?){9}(?:(?:\d\s?){3})?)(?!\d)', re.I)
 _VAT_LINE = re.compile(r'\bVAT\b', re.I)
 # A VAT-number line is never a VAT-amount line: "VAT: GB659880474" was read as
-# £659,880,474 of VAT at Greggs (held-out set 1).
+# £659,880,474 of VAT at Greggs (held-out set 1). Nor is Square's hidden note
+# "The letters that follow are VAT IDs…", whose £9.50 below was added to the VAT.
 _VAT_ID_LINE = re.compile(
-    r'\bVAT\s*(?:N[o0]|Number|Reg)|\bVAT\s*[:.]?\s*(?:GB|G8|C3)?\s*\d{3}\s*\d{3,4}|ex\s*VAT|inc\s*VAT', re.I)
+    r'\bVAT\s*(?:N[o0]|Number|Reg|IDs?\b)|\bVAT\s*[:.]?\s*(?:GB|G8|C3)?\s*\d{3}\s*\d{3,4}|ex\s*VAT|inc\s*VAT', re.I)
 # "VAT TOTAL", "Total VAT": the sum of the VAT lines, when those are printed too
 _VAT_TOTAL_LINE = re.compile(r'\bVAT\s*total\b|\btotal\s*VAT\b', re.I)
 _NOT_VAT_RECEIPT = re.compile(r'NOT\s+A\s+(VAT|TAX)\s+(RECEIPT|INVOICE)', re.I)
