@@ -294,7 +294,14 @@ def find_vat_lines(rows: list[str], currency: str | None, total: Decimal | None
         if not re.search(r'\d[.,]\d{2}', tail):
             for j in (i + 1, i + 2):                                # table numbers below the header
                 if j < len(rows) and re.search(r'\d[.,]\d{2}', rows[j]) and not _LETTERS.search(rows[j]):
-                    tail = rows[j]
+                    # a cell a line ("VAT" / "£7.92" / "£1.58" / "£9.50", sons via
+                    # SumUp): the row is every amount that follows, not just the net
+                    cells = [rows[j]]
+                    for k in range(j + 1, min(j + 3, len(rows))):
+                        if not re.search(r'\d[.,]\d{2}', rows[k]) or _LETTERS.search(rows[k]):
+                            break
+                        cells.append(rows[k])
+                    tail = '   '.join(cells)
                     break
         elif rate_m and len(re.findall(r'\d+[.,]\d{2}', tail)) == 1 and i + 1 < len(rows) \
                 and re.search(r'\d[.,]\d{2}', rows[i + 1]) and not _LETTERS.search(rows[i + 1]):

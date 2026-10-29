@@ -136,6 +136,17 @@ def test_a_sumup_tax_table_gives_its_tax_not_its_net() -> None:
     assert unlabelled["vat"] is None, "more than 20% of the total is never VAT"
 
 
+def test_a_tax_table_covering_part_of_the_bill_still_gives_its_tax() -> None:
+    """sons via SumUp: VAT on £9.50 of a £14.00 bill, a cell a line. The
+    tax (£1.58) is read from the row, not lost because the net (£7.92) is
+    too much to be VAT on £14.00."""
+    body = "\n".join(["Iced Latte", "£4.50", "Dairy", "Classic", "£9.50", "A", "Chilli Jam (£1.50)",
+                      "Total", "£14.00", "Tax rate", "Tax Name", "Net", "Tax", "Total",
+                      "A (20%)", "VAT", "£7.92", "£1.58", "£9.50"])
+    draft = email_inbox.draft(email("m10", "Receipt from sons #a2rL", body, sender="sons <no-reply@sumup.com>"))
+    assert (draft["total"], draft["vat"]) == (14.0, 1.58)
+
+
 def test_pictures_inside_the_email_are_shown_in_place() -> None:
     raw = (b'From: Shop <a@shop.test>\nSubject: Receipt\nMIME-Version: 1.0\n'
            b'Content-Type: multipart/related; boundary="X"\n\n--X\nContent-Type: text/html\n\n'
