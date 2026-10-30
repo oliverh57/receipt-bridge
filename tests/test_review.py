@@ -790,6 +790,12 @@ def test_the_statement_can_show_every_month_newest_first() -> None:
         page2 = service.statement(None, "all", limit=2, offset=2)               # Older ›
         assert [r["url"] for r in page2["rows"]] == [r["url"] for r in every["rows"]][2:4] and page2["offset"] == 2
         assert [r["date"] for r in month["rows"]] == sorted(r["date"] for r in month["rows"]), "a month: oldest first, as before"
+        assert month["order"] == "oldest" and every["order"] == "newest"
+        # the Date arrow swaps them, and pages are cut after sorting
+        oldest = service.statement(None, "all", limit=2, order="oldest")
+        assert [r["url"] for r in oldest["rows"]] == [r["url"] for r in every["rows"]][::-1][:2] and oldest["order"] == "oldest"
+        newest = service.statement(None, "2026-03", order="newest")
+        assert [r["url"] for r in newest["rows"]] == [r["url"] for r in month["rows"]][::-1]
 
 
 def test_bank_feed_periods_are_months_and_accounting_years() -> None:

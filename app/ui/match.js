@@ -764,13 +764,16 @@ function allClaims() {
   return (state.filedToday || []).filter(matches);
 }
 
-/** The claims in the period chosen: a month in date order, longer periods
- * newest first (as Bank Feed). */
+/** Expenses' Date arrow, as Bank Feed's: what's chosen, else a month in
+ * date order and longer periods newest first. */
+function xOrder() { return state.xOrder || (isMonthPeriod(state.xPeriod) ? "oldest" : "newest"); }
+
+/** The claims in the period chosen, in xOrder. */
 function xRows() {
   const period = state.xPeriod;
   const rows = allClaims().filter((r) => inPeriod(claimDay(r), period))
     .sort((a, b) => (a.date || "9999").localeCompare(b.date || "9999") || a.id - b.id);
-  return isMonthPeriod(period) ? rows : rows.reverse();
+  return xOrder() === "oldest" ? rows : rows.reverse();
 }
 
 /** Expenses' period menu, as Bank Feed's: the months with claims (and this
@@ -858,7 +861,7 @@ function renderExpenses() {
         <div class="money"><span class="muted">Total</span><b>${esc(money(claimed, "GBP"))}${totalTip}${unpriced ? `<span class="muted small"> + ${unpriced} not in pounds yet</span>` : ""}</b></div>
       </section>
       <div class="st-table-box"><table class="st-table">
-        <thead><tr><th scope="col">Date</th><th scope="col">Supplier</th><th scope="col" class="r">Amount</th><th scope="col">Category</th></tr></thead>
+        <thead><tr>${dateSortTh(xOrder(), "x-order")}<th scope="col">Supplier</th><th scope="col" class="r">Amount</th><th scope="col">Category</th></tr></thead>
         <tbody>${rows.map(claimRow).join("") || `<tr><td colspan="4" class="m-none">${m.query ? `No claims match “${esc(m.query)}”.`
           : period === "all" ? "No expenses claimed yet." : `No expenses claimed in ${esc(when)}.`}</td></tr>`}</tbody>
       </table></div>
@@ -1026,14 +1029,24 @@ function stMoreHtml(st) {
   const total = st.total_payments || 0, size = st.limit || 0;
   if (isMonthPeriod(st.month) || total <= ST_LIMITS[0]) return "";   // a month, or fits on the smallest page
   const page = size ? Math.floor((st.offset || 0) / size) : 0, pages = size ? Math.ceil(total / size) : 1;
+  const [back, on] = st.order === "oldest" ? ["Older", "Newer"] : ["Newer", "Older"];
   const numbers = pages > 1 ? `<span class="muted">Page</span>
-    <button class="btn small" data-action="st-page" data-page="${page - 1}" ${page <= 0 ? "disabled" : ""} aria-label="Newer">‹</button>
+    <button class="btn small" data-action="st-page" data-page="${page - 1}" ${page <= 0 ? "disabled" : ""} aria-label="${back}">‹</button>
     ${pageNumbers(page, pages).map((n) => n === null ? `<span class="muted">…</span>`
       : `<button class="btn small st-pnum ${n === page ? "on" : ""}" data-action="st-page" data-page="${n}" ${n === page ? 'aria-current="page"' : ""}>${n + 1}</button>`).join("")}
-    <button class="btn small" data-action="st-page" data-page="${page + 1}" ${page >= pages - 1 ? "disabled" : ""} aria-label="Older">›</button>` : "";
+    <button class="btn small" data-action="st-page" data-page="${page + 1}" ${page >= pages - 1 ? "disabled" : ""} aria-label="${on}">›</button>` : "";
   const per = `<label class="st-limit">Show <select class="setting-select" data-action="st-limit" aria-label="Payments per page">${ST_LIMITS.map((n) =>
       `<option value="${n}" ${state.stLimit === n ? "selected" : ""}>${n ? `${n} per page` : "All"}</option>`).join("")}</select></label>`;
   return `<div class="st-more st-pager">${numbers}<span class="grow"></span>${per}</div>`;
+}
+
+/** A Date column's header, in Bank Feed and Expenses: an arrow that swaps
+ * newest and oldest first (`action` on click). */
+function dateSortTh(order, action) {
+  const newest = order !== "oldest";
+  return `<th scope="col" aria-sort="${newest ? "descending" : "ascending"}"><button type="button" class="st-sort"
+    data-action="${action}" title="${newest ? "Newest first. Show oldest first" : "Oldest first. Show newest first"}">Date
+    <span aria-hidden="true">${newest ? "↓" : "↑"}</span></button></th>`;
 }
 
 function renderStatement() {
@@ -1111,7 +1124,7 @@ function renderStatement() {
         ${pill("todo", "Needs approval", todo, "seg-miss")}
         ${pill("done", "Done", done, "seg-done")}</div>
       <div class="st-table-box"><table class="st-table">
-        <thead><tr><th scope="col">Date</th><th scope="col">On the statement</th><th scope="col" class="r">Amount</th><th scope="col">Receipt</th></tr></thead>
+        <thead><tr>${dateSortTh(st.order, "st-order")}<th scope="col">On the statement</th><th scope="col" class="r">Amount</th><th scope="col">Receipt</th></tr></thead>
         <tbody>${rows.map(statementRow).join("") || `<tr><td colspan="4" class="m-none">${state.stQuery
           ? `No payments match “${esc(state.stQuery)}”${periodWord}.` : `Nothing to show${periodWord}.`}</td></tr>`}</tbody>
       </table></div>
@@ -1886,6 +1899,11 @@ document.addEventListener("click", async (e) => {
       m.xedit = null;
       return act(() => api(`/api/receipts/${id}/update-claim`, { method: "POST" }));
     case "x-close": m.xsel = null; m.xedit = null; return render();
+    case "x-order":
+      state.xOrder = xOrder() === "oldest" ? "newest" : "oldest";
+      setPref("xOrder", state.xOrder);
+      $("#content").querySelector(".st-wrap")?.scrollTo(0, 0);
+      return render();
     case "x-month": {
       const d = new Date(state.xPeriod + "-15T12:00:00");
       d.setMonth(d.getMonth() + Number(target.dataset.delta));
@@ -1977,6 +1995,12 @@ document.addEventListener("click", async (e) => {
       state.stFilter = target.dataset.filter;
       state.stPage = 0; m.stSel = null;
       render();
+      return refresh(true);
+    case "st-order":                     // sorted by the server before paging: from page 1
+      state.stOrder = state.statement?.order === "oldest" ? "newest" : "oldest";
+      setPref("stOrder", state.stOrder);
+      state.stPage = 0;
+      $("#content").querySelector(".st-wrap")?.scrollTo(0, 0);
       return refresh(true);
     case "st-page":
       state.stPage = Math.max(0, Number(target.dataset.page) || 0);

@@ -2046,7 +2046,7 @@ class ReceiptService:
     # ---- Statement (PLAN.md §11): one month of a bank account ---------------
 
     def statement(self, account: str | None, month: str | None, limit: int | None = None,
-                  offset: int = 0, show: str = "all", search: str = "") -> dict[str, Any]:
+                  offset: int = 0, show: str = "all", search: str = "", order: str = "") -> dict[str, Any]:
         """Every payment in a month of the cached statement, and whether it
         has a receipt: filed, in Match, missing, or no receipt needed.
         `month="all"`: every month, newest first, a page of `limit` of them
@@ -2055,7 +2055,8 @@ class ReceiptService:
         pill, "todo" (needs approval), "done" or "all"; `shown` counts each
         across the whole period, and the page is cut from those shown.
         `search`: only payments matching it (_payment_matches), before
-        anything is counted."""
+        anything is counted. `order`: "newest" or "oldest" first, Bank
+        Feed's Date arrow; "" as before, a month oldest first, else newest."""
         chosen = self._freeagent_accounts()
         accounts = {a["url"]: a for a in self._freeagent_reference().get("bank_accounts", [])}
         account = account or (chosen[0] if chosen else None)
@@ -2123,11 +2124,10 @@ class ReceiptService:
         elif show == "todo":
             transactions = [t for t in transactions if t["url"] not in done]
         total_payments = len(transactions)
+        order = order if order in ("newest", "oldest") else "newest" if every else "oldest"
+        transactions.sort(key=lambda t: (t["dated_on"], t["url"]), reverse=order == "newest")
         if every:
-            transactions.sort(key=lambda t: (t["dated_on"], t["url"]), reverse=True)
             transactions = transactions[offset:offset + limit] if limit else transactions
-        else:
-            transactions.sort(key=lambda t: (t["dated_on"], t["url"]))
 
         rows = []
         out_total = 0.0
@@ -2174,6 +2174,7 @@ class ReceiptService:
             "offset": offset if every and limit else 0,
             "total_payments": total_payments,       # all of them shown by `show`, however many are on this page
             "show": show,
+            "order": order,                         # newest or oldest first, as sorted
             "search": search.strip(),
             "shown": shown,                         # the pills: all, todo, done, in the whole period
             # Bank Feed's period menu: every month with payments, and every accounting year

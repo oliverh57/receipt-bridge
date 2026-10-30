@@ -613,6 +613,9 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
 .st-table { width: 100%; min-width: 760px; border-collapse: collapse; }
 .st-table th { text-align: left; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
   font-weight: 600; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.st-sort { all: unset; cursor: pointer; display: inline-flex; gap: 4px; align-items: center; }
+.st-sort:hover { color: var(--ink); }
+.st-sort:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 .st-table td { padding: 8px 14px; border-bottom: 1px solid var(--line); vertical-align: middle; }
 .st-table .r { text-align: right; }
 .st-table td.d { color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }

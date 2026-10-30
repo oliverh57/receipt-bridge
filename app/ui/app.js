@@ -28,9 +28,12 @@ const state = {
   // Bank Feed's period: "all" (the default), a month "YYYY-MM", or "start..end" (an accounting year)
   stPeriod: /^(all|\d{4}-\d{2}|\d{4}-\d{2}-\d{2}\.\.\d{4}-\d{2}-\d{2})$/.test(pref("stPeriod", "")) ? pref("stPeriod", "") : "all",
   stLimit: Number(pref("stLimit", "100")) || 0,  // …a page of how many (0: all)
-  // Expenses' period, as Bank Feed's (chosen separately)
+  // Expenses' period and Date arrow, as Bank Feed's (chosen separately)
   xPeriod: /^(all|\d{4}-\d{2}|\d{4}-\d{2}-\d{2}\.\.\d{4}-\d{2}-\d{2})$/.test(pref("xPeriod", "")) ? pref("xPeriod", "") : "all",
-  stPage: 0,                                     // …which page, newest first
+  xOrder: ["newest", "oldest"].includes(pref("xOrder", "")) ? pref("xOrder", "") : "",
+  stPage: 0,                                     // …which page, in stOrder
+  // Bank Feed's Date arrow: "newest" or "oldest" first ("": a month oldest, else newest)
+  stOrder: ["newest", "oldest"].includes(pref("stOrder", "")) ? pref("stOrder", "") : "",
   stQuery: "",                                   // Bank Feed's search (filtered by the server)
   statement: null,
   filedToday: [],
@@ -216,10 +219,10 @@ async function refresh(force = false) {
   if (state.view === "statement") {
     const paged = !isMonthPeriod(state.stPeriod);          // a month is shown whole
     const show = ["todo", "done"].includes(state.stFilter) ? state.stFilter : "all";   // the pill: filtered before paging
-    const key = `statement:${state.stPeriod}:${show}:${paged ? `${state.stLimit}:${state.stPage}` : ""}:${state.stQuery}:${snap.version}`;
+    const key = `statement:${state.stPeriod}:${show}:${state.stOrder}:${paged ? `${state.stLimit}:${state.stPage}` : ""}:${state.stQuery}:${snap.version}`;
     if (force || key !== state.receiptsKey) {
       // the payments, and the unlinked files that could be their receipts
-      const query = `month=${encodeURIComponent(state.stPeriod)}&show=${show}&q=${encodeURIComponent(state.stQuery)}`
+      const query = `month=${encodeURIComponent(state.stPeriod)}&show=${show}&order=${state.stOrder}&q=${encodeURIComponent(state.stQuery)}`
         + (paged ? `&limit=${state.stLimit}&offset=${state.stPage * state.stLimit}` : "");
       try { state.statement = await api(`/api/statement?${query}`); }
       catch (err) { state.statement = { error: err.message, rows: [], summary: {} }; }
