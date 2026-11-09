@@ -80,6 +80,7 @@ def cmd_serve(args, config) -> int:
 
     service = ReceiptService(config)
     service.start()
+    service.sync_on_open()
     print(f"Receipt Bridge engine at http://{host}:{port}/  (Ctrl+C to stop)")
     uvicorn.run(create_app(service), host=host, port=port, log_level="warning")
     service.stop()

@@ -264,6 +264,7 @@ class AppDelegate(NSObject):
         self._build_window()
         self._start_server()
         self.service.start()
+        self.service.sync_on_open()
         # After the window is up, so the one-time prompt has context.
         self.notifier.ask()
 
@@ -365,6 +366,9 @@ class AppDelegate(NSObject):
         if self.window is not None:
             self.window.makeKeyAndOrderFront_(None)
         NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+        # Opening the app again (Dock, menu, a notification) syncs too.
+        if self.service is not None:
+            self.service.sync_on_open()
 
     def showWindow_(self, sender):
         self._safely("show window", self._show)

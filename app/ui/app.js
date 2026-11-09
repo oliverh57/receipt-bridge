@@ -1164,7 +1164,7 @@ function renderSettings() {
 
       <div class="card">
         <div class="card-head"><h3>Automatic checks</h3></div>
-        <div class="card-row"><div class="grow">Check Gmail automatically<div class="sub">Every 6 hours</div></div>
+        <div class="card-row"><div class="grow">Check Gmail automatically<div class="sub">When the app opens, and every 6 hours</div></div>
           <label class="switch"><input type="checkbox" data-action="auto-scan" ${s.auto_scan ? "checked" : ""} aria-label="Check Gmail automatically"><span></span></label></div>
       </div>`,
 

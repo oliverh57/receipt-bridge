@@ -71,6 +71,7 @@ DATE_FROM_PAYMENT = "Date taken from the payment you chose. Check it against the
 INBOX_WARN_BYTES = 500 * 1024 * 1024   # warn if this much is stuck in the inbox
 FREEAGENT_SYNC_SECONDS = 3600      # re-read FreeAgent hourly while connected
 FREEAGENT_RETRY_SECONDS = 120      # sooner while it couldn't be reached
+OPEN_SYNC_SECONDS = 300            # opening the app again within this doesn't re-sync
 # "Use that email": payments this recent are looked for in Gmail, each once a
 # day for up to two weeks, and at most this many searches per run.
 EMAIL_HINT_DAYS = 60
@@ -205,6 +206,8 @@ class ReceiptService:
         # what kind of failure it is: "offline" and "unavailable" fix
         # themselves (retried every couple of minutes); "error" needs looking at
         self._freeagent_problem = ""
+        self._freeagent_synced_at = 0.0    # monotonic: when a FreeAgent sync was last queued
+        self._opened_at: float | None = None   # monotonic: the last sync_on_open that ran
         self._review_counts_cache: tuple[Any, dict[str, int]] | None = None
         self._checking_updates = False
         # Quits and reopens the app after an update; the macOS shell sets it.
@@ -306,7 +309,6 @@ class ReceiptService:
     def _schedule(self) -> None:
         """Periodic health checks, automatic scans, and the photo inbox."""
         last_health = time.monotonic()
-        last_freeagent = 0.0
         last_purge = 0.0
         while not self._stop.wait(60):
             self.check_photos()
@@ -317,9 +319,8 @@ class ReceiptService:
             self._inbox_bytes = size
             wait = FREEAGENT_RETRY_SECONDS if self._freeagent_problem in ("offline", "unavailable") \
                 else FREEAGENT_SYNC_SECONDS
-            if time.monotonic() - last_freeagent >= wait and self._freeagent_connected():
+            if time.monotonic() - self._freeagent_synced_at >= wait and self._freeagent_connected():
                 self.sync_freeagent()
-                last_freeagent = time.monotonic()
             with self._lock:
                 offline = any(h.state == "offline" for h in self._health.values())
             # sooner while Google couldn't be reached, so "Offline" clears once it's back
@@ -385,6 +386,26 @@ class ReceiptService:
             queued.append("freeagent")
         if self.accounts.list() and self.scan():
             queued.append("email")
+        return queued
+
+    def sync_on_open(self) -> list[str]:
+        """The app was opened (launched, or its window brought back): read
+        FreeAgent and check email, as "Check now" does. Email only while
+        "Check Gmail automatically" is on. Opening it again within a few
+        minutes does nothing. Returns what was queued."""
+        now = time.monotonic()
+        with self._lock:
+            if self._opened_at is not None and now - self._opened_at < OPEN_SYNC_SECONDS:
+                return []
+            self._opened_at = now
+        queued = []
+        if self._freeagent_connected() and self.sync_freeagent():
+            queued.append("freeagent")
+        if self.db.get_state("pref:auto_scan", "1") == "1" and self.accounts.list() \
+                and self.scan(reason="opened"):
+            queued.append("email")
+        if queued:
+            log.info("opened: syncing %s", " and ".join(queued))
         return queued
 
     def _run_scan(self, reason: str) -> None:
@@ -810,7 +831,11 @@ class ReceiptService:
         self._bump()
 
     def sync_freeagent(self) -> bool:
-        return self._enqueue("freeagent-sync", self._run_freeagent_sync)
+        if not self._enqueue("freeagent-sync", self._run_freeagent_sync):
+            return False
+        # however it was asked for, the hourly re-read counts from now
+        self._freeagent_synced_at = time.monotonic()
+        return True
 
     def _run_freeagent_sync(self) -> None:
         """Refresh the company, categories, bank accounts and the chosen

@@ -423,6 +423,30 @@ def test_check_now_only_queues_what_is_set_up() -> None:
 
 
 
+def test_opening_the_app_syncs_freeagent_and_email_once() -> None:
+    """Opening the app reads FreeAgent and checks Gmail; opening it again a
+    moment later (Dock clicks, notifications) doesn't queue it all again."""
+    with tempfile.TemporaryDirectory() as tmp:
+        service = _service(Path(tmp))
+        service._freeagent_connected = lambda: True                              # type: ignore[method-assign]
+        service.accounts.list = lambda: [Account(email="me@example.com", token_path=Path(tmp) / "t.json")]  # type: ignore[method-assign]
+        assert service.sync_on_open() == ["freeagent", "email"]
+        assert {"freeagent-sync", "scan"} <= service._queued
+        assert service._freeagent_synced_at > 0, "the hourly re-read should count from this sync"
+        assert service.sync_on_open() == []
+        service._opened_at = time.monotonic() - 3600     # opened again much later
+        service._queued.clear()
+        assert service.sync_on_open() == ["freeagent", "email"]
+
+
+def test_opening_the_app_leaves_gmail_alone_when_automatic_checks_are_off() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        service = _service(Path(tmp))
+        service.accounts.list = lambda: [Account(email="me@example.com", token_path=Path(tmp) / "t.json")]  # type: ignore[method-assign]
+        service.set_auto_scan(False)
+        assert service.sync_on_open() == []        # and no FreeAgent connected either
+
+
 def test_a_dropped_file_goes_into_the_inbox_ready_to_read() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         service = _service(Path(tmp))
