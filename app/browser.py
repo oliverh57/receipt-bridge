@@ -7,10 +7,13 @@ of the app still runs if it was never installed.
 
 from __future__ import annotations
 
+import ipaddress
 import logging
+import re
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
+from urllib.parse import urlsplit
 
 log = logging.getLogger(__name__)
 
@@ -38,6 +41,36 @@ TRACKER_HOSTS = (
     "pixel.gif",
     "spacer.gif",
 )
+
+
+# All a printed email may load: what it needs to look like itself. Never a
+# script, a frame, a fetch or a page to navigate to.
+PRINT_RESOURCES = ("image", "stylesheet", "font")
+
+
+def _is_private_host(host: str) -> bool:
+    """This Mac, or an address on its own network: nothing an email's
+    pictures should ever come from."""
+    host = (host or "").strip("[]").lower()
+    if not host or host == "localhost" or host.endswith((".localhost", ".local", ".internal", ".lan", ".home.arpa")):
+        return True
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        # 127.1, 0x7f.0.0.1, 2130706433: forms a browser reads as an address
+        return bool(re.fullmatch(r"[0-9a-fx.]+", host))
+    mapped = getattr(address, "ipv4_mapped", None)
+    return not (mapped or address).is_global
+
+
+def printable_request(url: str, resource_type: str) -> bool:
+    """May a page being printed (an email: untrusted) load this?"""
+    if url.startswith(("data:", "blob:", "about:")):
+        return True
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https") or resource_type not in PRINT_RESOURCES:
+        return False
+    return not _is_private_host(parts.hostname or "")
 
 
 class BrowserUnavailable(RuntimeError):
@@ -73,7 +106,9 @@ class BrowserPool:
 
         try:
             self._playwright = sync_playwright().start()
-            self._browser = self._playwright.chromium.launch(headless=self.headless)
+            # Playwright leaves Chromium's own sandbox off unless asked. It
+            # shows emails from anyone, so it runs sandboxed like any browser.
+            self._browser = self._playwright.chromium.launch(headless=self.headless, chromium_sandbox=True)
         except Exception as exc:
             self.close()
             raise BrowserUnavailable(
@@ -84,11 +119,16 @@ class BrowserPool:
 
     @contextmanager
     def page(
-        self, accept_downloads: bool = False, session: str | None = None
+        self, accept_downloads: bool = False, session: str | None = None, printing: bool = False
     ) -> Iterator[Any]:
         """A browser page.
 
         Without `session`, every call gets a fresh, isolated cookie jar.
+
+        With `printing=True`, a page only for printing HTML we were handed
+        (an email, from anyone): JavaScript is off, so nothing in it runs,
+        and it may load pictures, styles and fonts from the internet and
+        nothing else (see `printable_request`).
 
         With `session="name"`, pages share one context for the life of the
         pool. That matters for sites with consent banners: decline cookies
@@ -111,7 +151,7 @@ class BrowserPool:
                     log.debug("page already closed", exc_info=True)
             return
 
-        context = self._new_context(accept_downloads=accept_downloads)
+        context = self._new_context(accept_downloads=accept_downloads and not printing, printing=printing)
         page = context.new_page()
         try:
             yield page
@@ -121,17 +161,30 @@ class BrowserPool:
             except Exception:
                 log.debug("browser context already closed", exc_info=True)
 
-    def _new_context(self, accept_downloads: bool) -> Any:
+    def _new_context(self, accept_downloads: bool, printing: bool = False) -> Any:
         browser = self._ensure_browser()
         context = browser.new_context(
             accept_downloads=accept_downloads,
             viewport={"width": 1280, "height": 1600},
             locale="en-GB",
             timezone_id="Europe/London",
+            java_script_enabled=not printing,
+            service_workers="block" if printing else "allow",
         )
-        if self.block_trackers:
+        if printing:
+            context.route("**/*", self._print_only)
+        elif self.block_trackers:
             context.route("**/*", self._maybe_block)
         return context
+
+    def _print_only(self, route: Any, request: Any) -> None:
+        url = request.url
+        if not printable_request(url, request.resource_type):
+            route.abort()
+        elif self.block_trackers and any(host in url.lower() for host in TRACKER_HOSTS):
+            route.abort()
+        else:
+            route.continue_()
 
     @staticmethod
     def _maybe_block(route: Any, request: Any) -> None:

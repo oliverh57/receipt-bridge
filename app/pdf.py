@@ -147,7 +147,9 @@ def html_to_pdf(
     page_format = settings.get("format", "A4")
     margin = settings.get("margin", "12mm")
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    with pool.page() as page:
+    # printing=True: the document is usually an email, from anyone. Nothing
+    # in it runs, and it loads pictures and styles only (app/browser.py).
+    with pool.page(printing=True) as page:
         page.set_content(document, wait_until="load")
         try:
             # Give remote logos a moment, but never hang on a dead tracker.
