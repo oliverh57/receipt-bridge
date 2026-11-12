@@ -206,9 +206,17 @@ def test_no_receipt_needed_explains_the_payment_with_its_own_settings() -> None:
         assert row["settings"]["category"] == CATEGORY and row["explained_here"]["state"] == "filed"
 
 
-def test_money_paid_to_user_explains_with_the_user_and_no_category() -> None:
+CAPITAL = "https://fa.test/v2/categories/901"
+SALARY = "https://fa.test/v2/categories/902"
+USER_ACCOUNTS = [{"url": CAPITAL, "description": "Capital Account", "nominal_code": "901", "group": "general_categories"},
+                 {"url": SALARY, "description": "Salary and Bonuses", "nominal_code": "902", "group": "general_categories"}]
+
+
+def test_money_paid_to_user_explains_with_the_user_and_their_account() -> None:
     """Money moved to your own account: "Money paid to user" on its Bank
-    Feed line sends FreeAgent the user, and no category, VAT or re-billing."""
+    Feed line sends FreeAgent the user and their Capital Account (901) as
+    the category, as FreeAgent does itself (with no category it refuses a
+    money-out one: 422), and no VAT or re-billing."""
     service, _rid, tmp = make()
     with tmp:
         acct, url = "https://fa.test/v2/bank_accounts/1", "https://fa.test/v2/bank_transactions/11"
@@ -216,6 +224,7 @@ def test_money_paid_to_user_explains_with_the_user_and_no_category() -> None:
         ref = json.loads(service.db.get_state("freeagent:reference"))
         ref.update({"bank_accounts": [{"url": acct, "name": "Example Bank", "currency": "GBP"}],
                     "vat": {"registered": True}, "users": [{"url": me, "name": "Example Director", "role": "Director"}]})
+        ref["categories"] += USER_ACCOUNTS
         service.db.set_state("freeagent:reference", json.dumps(ref))
         service.db.set_state("freeagent:accounts", json.dumps([acct]))
         service.db.save_bank_transactions([{"url": url, "bank_account": acct, "dated_on": "2026-03-05",
@@ -228,7 +237,12 @@ def test_money_paid_to_user_explains_with_the_user_and_no_category() -> None:
             pass
         service.set_payment_settings(url, {"category": CATEGORY, "vat_rate": "20.0"})
         settings = service.set_payment_settings(url, {"paid_user": me})
-        assert settings == {"category": None, "paid_user": me}, "a user payment has no category or VAT"
+        assert settings == {"category": CAPITAL, "paid_user": me}, "Capital Account, and no VAT"
+        try:
+            service.set_payment_settings(url, {"paid_user": me, "category": CATEGORY})
+            raise AssertionError("a user payment to an expense category was accepted")
+        except ValueError:
+            pass
         sent = []
         service._freeagent = lambda: SimpleNamespace(connected=True)
         service._run_freeagent_sync = lambda: None
@@ -239,7 +253,12 @@ def test_money_paid_to_user_explains_with_the_user_and_no_category() -> None:
         finally:
             filer.explain_without_receipt = original
         assert sent == [{"bank_transaction": url, "dated_on": "2026-03-05", "gross_value": "-500.00",
-                         "paid_user": me, "description": "TO EXAMPLE PERSONAL"}]
+                         "category": CAPITAL, "paid_user": me, "description": "TO EXAMPLE PERSONAL"}]
+        assert service.set_payment_settings(url, {"paid_user": me, "category": SALARY})["category"] == SALARY
+        assert service.set_payment_settings(url, {"paid_user": me})["category"] == SALARY, "another user: same account"
+        service.db.set_state(f"payment:{url}", json.dumps({"paid_user": me, "category": None}))   # saved by 1.2.45
+        assert service._payment_explanation(dict(service._cached_transaction(url)),
+                                            service.payment_settings(url), None)[0]["category"] == CAPITAL
         # a category again: no longer paid to a user
         assert service.set_payment_settings(url, {"category": CATEGORY})["paid_user"] is None
 
@@ -252,6 +271,7 @@ def test_changing_freeagent_explanation_to_and_from_money_paid_to_user() -> None
         ref = json.loads(service.db.get_state("freeagent:reference"))
         ref.update({"bank_accounts": [{"url": acct, "name": "Example Bank", "currency": "GBP"}],
                     "vat": {"registered": True}, "users": [{"url": me, "name": "Example Director"}]})
+        ref["categories"] += USER_ACCOUNTS
         service.db.set_state("freeagent:reference", json.dumps(ref))
         service.db.set_state("freeagent:accounts", json.dumps([acct]))
 
@@ -263,13 +283,15 @@ def test_changing_freeagent_explanation_to_and_from_money_paid_to_user() -> None
         row = lambda: next(r for r in service.statement(acct, "2026-03")["rows"] if r["url"] == url)
         explained({"category": "c/general", "sales_tax_rate": "20.0"})
         service.set_payment_settings(url, {"paid_user": me})
-        assert row()["freeagent"]["changes"] == {"paid_user": me, "category": None}
+        assert row()["freeagent"]["changes"] == {"paid_user": me, "category": CAPITAL}
         service.reset_payment_settings(url)
 
-        explained({"paid_user": me})
+        explained({"category": CAPITAL, "paid_user": me})
         assert row()["freeagent"]["paid_user"] == me and row()["freeagent"]["changes"] == {}
         service.set_payment_settings(url, {"paid_user": me})
         assert row()["freeagent"]["changes"] == {}, "the same user: nothing to send"
+        service.set_payment_settings(url, {"paid_user": me, "category": SALARY})
+        assert row()["freeagent"]["changes"] == {"category": SALARY}
         service.set_payment_settings(url, {"category": CATEGORY})
         assert row()["freeagent"]["changes"] == {"paid_user": None, "category": CATEGORY}
 

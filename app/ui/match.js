@@ -1409,6 +1409,7 @@ function paymentCardHtml(t) {
     <div class="m-kv">
       <span class="k">Category</span><span class="pair">${categorySelect}</span>
       ${userRow}
+      ${userAccountRow(t, own, tag)}
     </div>
     ${changedNote(t)}</div>`;
   }
@@ -1431,6 +1432,25 @@ function changedNote(t) {
   const updated = t.explained_here?.state === "updated";
   return `${changed ? `<div class="m-note">Your changes are sent when you ${t.status === "filed" ? "save" : "approve"}. <button class="link" data-action="st-revert" data-url="${esc(t.url)}">Keep FreeAgent's</button></div>` : ""}
     ${updated ? `<div class="m-note">You changed FreeAgent's explanation here. <button class="link" data-action="st-unexplain" data-url="${esc(t.url)}">Undo</button></div>` : ""}`;
+}
+
+/** FreeAgent's accounts for its users (nominal codes 900 to 910: Capital
+ * Account, Salary and Bonuses…): a payment to a user goes to one. */
+function userAccounts() {
+  return (state.categories || []).filter((c) => { const n = parseInt(c.nominal_code, 10); return n >= 900 && n <= 910; });
+}
+
+/** A payment to a user: which of their accounts, Capital Account (901) unless you choose. */
+function userAccountRow(t, own, tag) {
+  const accounts = userAccounts();
+  if (accounts.length < 2) return "";
+  const urls = accounts.map((c) => c.url);
+  const st = t.settings || {};
+  const chosen = [st.category, own?.category].find((u) => urls.includes(u))
+    || (accounts.find((c) => parseInt(c.nominal_code, 10) === 901) || accounts[0]).url;
+  return `<span class="k">Account</span><span class="pair"><select data-action="pay-user-account" data-url="${esc(t.url)}" data-user="${esc(st.paid_user || own?.paid_user || "")}" aria-label="User's account">${
+    accounts.map((c) => `<option value="${esc(c.url)}" ${c.url === chosen ? "selected" : ""}>${esc(c.description)}</option>`).join("")}</select>${
+    own ? tag("category", chosen) : ""}</span>`;
 }
 
 /** "Money paid to user" picked: the user you are (else FreeAgent's first). */
@@ -2229,6 +2249,11 @@ document.addEventListener("change", (e) => {
     return;
   }
   if (a === "pay-user") { savePayment(e.target.dataset.url, { paid_user: e.target.value }); e.target.blur(); return; }
+  if (a === "pay-user-account") {
+    savePayment(e.target.dataset.url, { paid_user: e.target.dataset.user, category: e.target.value });
+    e.target.blur();
+    return;
+  }
   if (a === "pay-vat") { savePayment(e.target.dataset.url, { vat_rate: e.target.value || null }); e.target.blur(); return; }
 
 });

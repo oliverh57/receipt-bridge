@@ -2340,12 +2340,45 @@ class ReceiptService:
         except ValueError:
             return {}
 
+    def _user_categories(self) -> list[str]:
+        """The categories a "Money paid to user" goes to: FreeAgent's
+        accounts for its users, nominal codes 900 to 910 (Capital Account,
+        Salary and Bonuses, Expense Account…). FreeAgent turns a money-out
+        user payment away without one."""
+        found = []
+        for c in self._freeagent_reference().get("categories", []):
+            code = str(c.get("nominal_code") or "").split("-")[0]
+            if code.isdigit() and 900 <= int(code) <= 910:
+                found.append(c["url"])
+        return found
+
+    def _default_user_category(self) -> str | None:
+        """Capital Account (901): what FreeAgent itself explains a payment
+        to a user as."""
+        accounts = self._user_categories()
+        return next((u for u in accounts if u.rstrip("/").endswith("/901")), accounts[0] if accounts else None)
+
     def set_payment_settings(self, transaction_url: str, changes: dict[str, Any]) -> dict[str, Any]:
         unknown = set(changes) - {"category", "vat_rate", "rebill", "paid_user"}
         if unknown:
             raise ValueError(f"can't change {sorted(unknown)}")
         settings = self.payment_settings(transaction_url)
-        if "category" in changes:
+        if changes.get("paid_user"):
+            # "Money paid to user": the user, and one of their accounts as the
+            # category (Capital Account unless you choose); no VAT or re-billing
+            known = {u["url"] for u in self._freeagent_reference().get("users", [])}
+            if changes["paid_user"] not in known:
+                raise ValueError("unknown user")
+            accounts = self._user_categories()
+            category = changes.get("category") or (settings.get("category") if settings.get("category") in accounts
+                                                   else None) or self._default_user_category()
+            if category not in accounts:
+                raise ValueError("FreeAgent has no account for payments to users")
+            settings.update(paid_user=changes["paid_user"], category=category)
+            settings.pop("vat_rate", None)
+            settings.pop("rebill", None)
+            changes = {k: v for k, v in changes.items() if k not in ("category", "vat_rate", "rebill")}
+        elif "category" in changes:
             known = {c["url"] for c in self._freeagent_reference().get("categories", [])}
             if changes["category"] and changes["category"] not in known:
                 raise ValueError("unknown category")
@@ -2353,16 +2386,6 @@ class ReceiptService:
             # a category instead: not money paid to a user (kept as None, so
             # one FreeAgent explained that way is changed back)
             settings["paid_user"] = None
-        if changes.get("paid_user"):
-            # "Money paid to user": FreeAgent takes the user and no category,
-            # VAT or re-billing
-            known = {u["url"] for u in self._freeagent_reference().get("users", [])}
-            if changes["paid_user"] not in known:
-                raise ValueError("unknown user")
-            settings.update(paid_user=changes["paid_user"], category=None)
-            settings.pop("vat_rate", None)
-            settings.pop("rebill", None)
-            changes = {k: v for k, v in changes.items() if k not in ("category", "vat_rate", "rebill")}
         elif "paid_user" in changes:
             settings["paid_user"] = None
         if "vat_rate" in changes:
@@ -2419,11 +2442,12 @@ class ReceiptService:
             return {}
         changes: dict[str, Any] = {}
         if settings.get("paid_user"):
-            # to "Money paid to user": the user, and no category
+            # to "Money paid to user": the user, and their account as the category
             if settings["paid_user"] != fa.get("paid_user"):
                 changes["paid_user"] = settings["paid_user"]
-                if fa["category"]:
-                    changes["category"] = None
+            account = settings.get("category") or self._default_user_category()
+            if account and account != fa["category"]:
+                changes["category"] = account
             return changes
         if fa.get("paid_user") and "paid_user" in settings and settings.get("category"):
             changes["paid_user"] = None      # from "Money paid to user" to a category
@@ -2484,11 +2508,13 @@ class ReceiptService:
         from .filer import _apply_rebill
         description = (t.get("description") or "").split("//")[0].strip() or "Payment"
         if settings.get("paid_user"):
-            # "Money paid to user" (money moved to your own account, say):
-            # FreeAgent wants the user and no category
+            # "Money paid to user" (money moved to your own account, say): the
+            # user, and their account as the category, as FreeAgent does it
+            account = settings.get("category") or self._default_user_category()
             return {"bank_transaction": t["url"], "dated_on": t["dated_on"],
-                    "gross_value": f"{float(t['amount']):.2f}", "paid_user": settings["paid_user"],
-                    "description": description[:200]}, []
+                    "gross_value": f"{float(t['amount']):.2f}", "category": account,
+                    "paid_user": settings["paid_user"], "description": description[:200]}, \
+                [] if account else ["FreeAgent has no account for payments to users: sync FreeAgent"]
         problems = [] if settings.get("category") else ["Choose a category"]
         body: dict[str, Any] = {
             "bank_transaction": t["url"], "dated_on": t["dated_on"], "gross_value": f"{float(t['amount']):.2f}",
@@ -2555,8 +2581,9 @@ class ReceiptService:
         def make(guess: dict[str, Any]) -> str:
             body = {**restore_body(guess), **changes, "bank_transaction": transaction_url}
             if body.get("paid_user"):
-                # "Money paid to user": none of the guess's category, VAT or re-billing
-                for k in ("category", "sales_tax_rate", "second_sales_tax_rate", "sales_tax_status",
+                # "Money paid to user": none of the guess's VAT or re-billing
+                body["category"] = body.get("category") or self._default_user_category()
+                for k in ("sales_tax_rate", "second_sales_tax_rate", "sales_tax_status",
                           "project", "rebill_type", "rebill_factor"):
                     body.pop(k, None)
             body = {k: v for k, v in body.items() if v is not None}
