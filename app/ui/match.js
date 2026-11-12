@@ -1374,6 +1374,9 @@ function peekMailHtml(mail) {
     ${emailFrame(mail, { fit: true }).replace('class="doc e-frame"', 'class="st-peek-frame"')}`;
 }
 
+/** The Category menu's "Money paid to user" choice (not a FreeAgent category). */
+const PAID_TO_USER = "paid-to-user";
+
 const VAT_RATES = [["20.0", "20% (standard)"], ["5.0", "5% (reduced)"], ["0.0", "0% (zero-rated or none)"]];
 
 /** The payment's own FreeAgent details: category, VAT and re-billing.
@@ -1387,24 +1390,54 @@ function paymentCardHtml(t) {
   const own = t.freeagent?.explained ? t.freeagent : null;      // FreeAgent's explanation
   const pick = (k) => (k in st && st[k] != null) || (k === "rebill" && k in st) ? st[k] : own ? own[k] : null;
   const category = pick("category"), vatRate = pick("vat_rate"), rebill = pick("rebill");
+  // "Money paid to user" (money moved to your own account): a user, no category, VAT or re-billing
+  const paidUser = "paid_user" in st ? st.paid_user : own?.paid_user || null;
   // only what you changed is tagged; the rest is FreeAgent's (said once, in the header)
   const tag = (k, value) => !own || JSON.stringify(value ?? null) === JSON.stringify(own[k] ?? null) ? ""
     : `<span class="ai" title="Sent to FreeAgent when you approve">Changed</span>`;
   const rates = [...VAT_RATES];
   if (vatRate && !rates.some(([v]) => v === vatRate)) rates.push([vatRate, `${parseFloat(vatRate)}%`]);
+  const users = [...(fa.users || [])];
+  if (paidUser && !users.some((u) => u.url === paidUser)) users.push({ url: paidUser, name: "A user not listed" });
+  const userRow = `<span class="k">User</span><span class="pair"><select data-action="pay-user" data-url="${esc(t.url)}" aria-label="Paid to user">${
+      users.map((u) => `<option value="${esc(u.url)}" ${u.url === paidUser ? "selected" : ""}>${esc(u.name)}${u.role ? ` (${esc(u.role)})` : ""}</option>`).join("")}</select>${
+      own ? tag("paid_user", paidUser) : ""}</span>`;
+  const categorySelect = `<select data-action="pay-category" data-url="${esc(t.url)}" aria-label="Category">${
+      categoryOptions(paidUser ? null : category)}<optgroup label="Users"><option value="${PAID_TO_USER}" ${paidUser ? "selected" : ""}>Money paid to user</option></optgroup></select>`;
+  if (paidUser) {
+    return `<div class="m-card"><div class="m-card-head"><span>In FreeAgent</span></div>
+    <div class="m-kv">
+      <span class="k">Category</span><span class="pair">${categorySelect}</span>
+      ${userRow}
+    </div>
+    ${changedNote(t)}</div>`;
+  }
   const vat = fa.vat?.registered ? `<span class="k">VAT</span><span class="pair"><select data-action="pay-vat" data-url="${esc(t.url)}" aria-label="VAT rate">
       <option value="">${own ? "Keep FreeAgent's" : "Choose…"}</option>${rates.map(([v, l]) =>
         `<option value="${v}" ${vatRate === v ? "selected" : ""}>${l}</option>`).join("")}</select>${own && vatRate ? tag("vat_rate", vatRate) : ""}</span>` : "";
-  const changed = own && Object.keys(own.changes || {}).length;
-  const updated = t.explained_here?.state === "updated";
   return `<div class="m-card"><div class="m-card-head"><span>In FreeAgent</span></div>
     <div class="m-kv">
-      <span class="k">Category</span><span class="pair"><select data-action="pay-category" data-url="${esc(t.url)}" aria-label="Category">${categoryOptions(category)}</select>${own ? tag("category", category) : ""}</span>
+      <span class="k">Category</span><span class="pair">${categorySelect}${own ? tag("category", category) : ""}</span>
       ${vat}
       ${rebillFields(rebill || null, `data-url="${esc(t.url)}"`, tag("rebill", rebill || null))}
     </div>
-    ${changed ? `<div class="m-note">Your changes are sent when you ${t.status === "filed" ? "save" : "approve"}. <button class="link" data-action="st-revert" data-url="${esc(t.url)}">Keep FreeAgent's</button></div>` : ""}
-    ${updated ? `<div class="m-note">You changed FreeAgent's explanation here. <button class="link" data-action="st-unexplain" data-url="${esc(t.url)}">Undo</button></div>` : ""}</div>`;
+    ${changedNote(t)}</div>`;
+}
+
+/** Under a payment's FreeAgent card: changes waiting to be sent, or sent. */
+function changedNote(t) {
+  const own = t.freeagent?.explained ? t.freeagent : null;
+  const changed = own && Object.keys(own.changes || {}).length;
+  const updated = t.explained_here?.state === "updated";
+  return `${changed ? `<div class="m-note">Your changes are sent when you ${t.status === "filed" ? "save" : "approve"}. <button class="link" data-action="st-revert" data-url="${esc(t.url)}">Keep FreeAgent's</button></div>` : ""}
+    ${updated ? `<div class="m-note">You changed FreeAgent's explanation here. <button class="link" data-action="st-unexplain" data-url="${esc(t.url)}">Undo</button></div>` : ""}`;
+}
+
+/** "Money paid to user" picked: the user you are (else FreeAgent's first). */
+function defaultPaidUser() {
+  const fa = state.snap.freeagent || {};
+  const users = fa.users || [];
+  return (users.find((u) => u.url === fa.user_url) || users[0])?.url || null;
 }
 
 /** "Approve" with no receipt: explained and approved in FreeAgent, with
@@ -1418,7 +1451,7 @@ function noReceiptButton(t) {
       ? `<button class="btn primary" data-action="st-approve" data-url="${esc(t.url)}" data-changes="1">${t.status === "filed" ? "Save to FreeAgent" : "Approve changes"}</button>` : "";
   }
   if (!fa.connected) return `<button class="btn" data-action="st-none" data-url="${esc(t.url)}">Approve</button>`;
-  if (!(t.settings?.category || t.freeagent?.category)) return `<button class="btn" disabled>Choose a category to approve</button>`;
+  if (!(t.settings?.category || t.settings?.paid_user || t.freeagent?.category || t.freeagent?.paid_user)) return `<button class="btn" disabled>Choose a category to approve</button>`;
   return `<button class="btn primary" data-action="st-approve" data-url="${esc(t.url)}">Approve</button>`;
 }
 
@@ -2188,7 +2221,14 @@ document.addEventListener("change", (e) => {
     refresh(true);
     return;
   }
-  if (a === "pay-category") { savePayment(e.target.dataset.url, { category: e.target.value || null }); e.target.blur(); return; }
+  if (a === "pay-category") {
+    if (e.target.value !== PAID_TO_USER) savePayment(e.target.dataset.url, { category: e.target.value || null });
+    else if (defaultPaidUser()) savePayment(e.target.dataset.url, { paid_user: defaultPaidUser() });
+    else { toast("FreeAgent hasn't shared its users yet: sync FreeAgent in Settings, then try again"); render(); }
+    e.target.blur();
+    return;
+  }
+  if (a === "pay-user") { savePayment(e.target.dataset.url, { paid_user: e.target.value }); e.target.blur(); return; }
   if (a === "pay-vat") { savePayment(e.target.dataset.url, { vat_rate: e.target.value || null }); e.target.blur(); return; }
 
 });

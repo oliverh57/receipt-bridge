@@ -853,6 +853,7 @@ class ReceiptService:
             projects = self._read_projects(client)
             reference = {
                 "projects": projects,
+                "users": self._read_users(client, user),
                 "user_url": user.get("url"),
                 "subdomain": company.get("subdomain", ""),
                 # the first accounting year's last day: Bank Feed's "Accounting Year 2025/26"
@@ -928,6 +929,23 @@ class ReceiptService:
         return [{"url": p["url"], "name": p.get("name", ""), "client": names.get(p.get("contact"), ""),
                  "currency": p.get("currency", "GBP")} for p in projects]
 
+    @staticmethod
+    def _read_users(client: FreeAgent, me: dict[str, Any]) -> list[dict[str, Any]]:
+        """The people a payment can be "Money paid to user" to. A login
+        FreeAgent won't list users to still has itself."""
+        try:
+            users = client.users()
+        except FreeAgentError as exc:
+            log.info("users not read: %s", exc)
+            users = []
+        if me.get("url") and not any(u.get("url") == me["url"] for u in users):
+            users.insert(0, me)
+        named = []
+        for u in users:
+            name = " ".join(x for x in (u.get("first_name"), u.get("last_name")) if x) or u.get("email") or "User"
+            named.append({"url": u["url"], "name": name, "role": u.get("role", "")})
+        return named
+
     def freeagent_snapshot(self) -> dict[str, Any]:
         client = self._freeagent()
         reference = self._freeagent_reference()
@@ -945,6 +963,8 @@ class ReceiptService:
                               if a.get("status") != "hidden"],
             "categories": len(reference.get("categories", [])),
             "projects": reference.get("projects", []),
+            "users": reference.get("users", []),
+            "user_url": reference.get("user_url"),     # you: "Money paid to user" starts with you
             "last_sync": self.db.get_state("freeagent:last_sync"),
             "transactions": len(self.db.bank_transactions(sorted(chosen))),
             # FreeAgent's website for this company ("View in FreeAgent"). Deep
@@ -2321,7 +2341,7 @@ class ReceiptService:
             return {}
 
     def set_payment_settings(self, transaction_url: str, changes: dict[str, Any]) -> dict[str, Any]:
-        unknown = set(changes) - {"category", "vat_rate", "rebill"}
+        unknown = set(changes) - {"category", "vat_rate", "rebill", "paid_user"}
         if unknown:
             raise ValueError(f"can't change {sorted(unknown)}")
         settings = self.payment_settings(transaction_url)
@@ -2330,6 +2350,21 @@ class ReceiptService:
             if changes["category"] and changes["category"] not in known:
                 raise ValueError("unknown category")
             settings["category"] = changes["category"] or None
+            # a category instead: not money paid to a user (kept as None, so
+            # one FreeAgent explained that way is changed back)
+            settings["paid_user"] = None
+        if changes.get("paid_user"):
+            # "Money paid to user": FreeAgent takes the user and no category,
+            # VAT or re-billing
+            known = {u["url"] for u in self._freeagent_reference().get("users", [])}
+            if changes["paid_user"] not in known:
+                raise ValueError("unknown user")
+            settings.update(paid_user=changes["paid_user"], category=None)
+            settings.pop("vat_rate", None)
+            settings.pop("rebill", None)
+            changes = {k: v for k, v in changes.items() if k not in ("category", "vat_rate", "rebill")}
+        elif "paid_user" in changes:
+            settings["paid_user"] = None
         if "vat_rate" in changes:
             if changes["vat_rate"] not in (None, "", *self.PAYMENT_VAT_RATES):
                 raise ValueError("vat_rate must be 20.0, 5.0 or 0.0")
@@ -2365,6 +2400,8 @@ class ReceiptService:
                 factor = round(float(factor) * 100, 2) if kind == "markup" else round(float(factor), 2)
             rebill = {"project": raw["project"], "type": kind, "factor": factor if kind in ("markup", "price") else None}
         return {"category": raw.get("category") or t.get("explanation_category"),
+                # "Money paid to user": the user it was paid to
+                "paid_user": raw.get("paid_user") or None,
                 "vat_rate": f"{float(rate):.1f}" if rate not in (None, "") else None,
                 "rebill": rebill,
                 # what FreeAgent calls it (Smart Capture's reading of a receipt, say)
@@ -2381,6 +2418,15 @@ class ReceiptService:
         if fa is None:
             return {}
         changes: dict[str, Any] = {}
+        if settings.get("paid_user"):
+            # to "Money paid to user": the user, and no category
+            if settings["paid_user"] != fa.get("paid_user"):
+                changes["paid_user"] = settings["paid_user"]
+                if fa["category"]:
+                    changes["category"] = None
+            return changes
+        if fa.get("paid_user") and "paid_user" in settings and settings.get("category"):
+            changes["paid_user"] = None      # from "Money paid to user" to a category
         if settings.get("category") and settings["category"] != fa["category"]:
             changes["category"] = settings["category"]
         if settings.get("vat_rate") and settings["vat_rate"] != fa["vat_rate"]:
@@ -2436,8 +2482,14 @@ class ReceiptService:
                              reason: str | None) -> tuple[dict[str, Any], list[str]]:
         """The explanation "No receipt needed" would create, and what stops it."""
         from .filer import _apply_rebill
-        problems = [] if settings.get("category") else ["Choose a category"]
         description = (t.get("description") or "").split("//")[0].strip() or "Payment"
+        if settings.get("paid_user"):
+            # "Money paid to user" (money moved to your own account, say):
+            # FreeAgent wants the user and no category
+            return {"bank_transaction": t["url"], "dated_on": t["dated_on"],
+                    "gross_value": f"{float(t['amount']):.2f}", "paid_user": settings["paid_user"],
+                    "description": description[:200]}, []
+        problems = [] if settings.get("category") else ["Choose a category"]
         body: dict[str, Any] = {
             "bank_transaction": t["url"], "dated_on": t["dated_on"], "gross_value": f"{float(t['amount']):.2f}",
             "category": settings.get("category"),
@@ -2502,6 +2554,12 @@ class ReceiptService:
 
         def make(guess: dict[str, Any]) -> str:
             body = {**restore_body(guess), **changes, "bank_transaction": transaction_url}
+            if body.get("paid_user"):
+                # "Money paid to user": none of the guess's category, VAT or re-billing
+                for k in ("category", "sales_tax_rate", "second_sales_tax_rate", "sales_tax_status",
+                          "project", "rebill_type", "rebill_factor"):
+                    body.pop(k, None)
+            body = {k: v for k, v in body.items() if v is not None}
             url = create_explanation(client, body)
             self.db.set_state(f"explained:{transaction_url}",
                               json.dumps({"state": "filed", "url": url, "body": body, "at": _now()}))

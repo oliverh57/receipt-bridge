@@ -224,6 +224,11 @@ class FreeAgent:
     def me(self) -> dict:
         return self.get("users/me").json()["user"]
 
+    def users(self) -> list[dict]:
+        """The company's people (not hidden ones), for "Money paid to user".
+        FreeAgent only lists them to a login with Tax, Accounting & Users access."""
+        return self.get_all("users", "users", {"view": "active_staff"})
+
     def bank_accounts(self) -> list[dict]:
         return self.get_all("bank_accounts", "bank_accounts")
 

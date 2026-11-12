@@ -206,6 +206,87 @@ def test_no_receipt_needed_explains_the_payment_with_its_own_settings() -> None:
         assert row["settings"]["category"] == CATEGORY and row["explained_here"]["state"] == "filed"
 
 
+def test_money_paid_to_user_explains_with_the_user_and_no_category() -> None:
+    """Money moved to your own account: "Money paid to user" on its Bank
+    Feed line sends FreeAgent the user, and no category, VAT or re-billing."""
+    service, _rid, tmp = make()
+    with tmp:
+        acct, url = "https://fa.test/v2/bank_accounts/1", "https://fa.test/v2/bank_transactions/11"
+        me = "https://fa.test/v2/users/1"
+        ref = json.loads(service.db.get_state("freeagent:reference"))
+        ref.update({"bank_accounts": [{"url": acct, "name": "Example Bank", "currency": "GBP"}],
+                    "vat": {"registered": True}, "users": [{"url": me, "name": "Example Director", "role": "Director"}]})
+        service.db.set_state("freeagent:reference", json.dumps(ref))
+        service.db.set_state("freeagent:accounts", json.dumps([acct]))
+        service.db.save_bank_transactions([{"url": url, "bank_account": acct, "dated_on": "2026-03-05",
+                                            "amount": "-500.00", "unexplained_amount": "-500.00",
+                                            "description": "TO EXAMPLE PERSONAL // ref"}])
+        try:
+            service.set_payment_settings(url, {"paid_user": "https://fa.test/v2/users/99"})
+            raise AssertionError("a user FreeAgent didn't list was accepted")
+        except ValueError:
+            pass
+        service.set_payment_settings(url, {"category": CATEGORY, "vat_rate": "20.0"})
+        settings = service.set_payment_settings(url, {"paid_user": me})
+        assert settings == {"category": None, "paid_user": me}, "a user payment has no category or VAT"
+        sent = []
+        service._freeagent = lambda: SimpleNamespace(connected=True)
+        service._run_freeagent_sync = lambda: None
+        original = filer.explain_without_receipt
+        filer.explain_without_receipt = lambda c, u, body: sent.append(body) or "e/new"
+        try:
+            service._run_explain_payment(url, None)
+        finally:
+            filer.explain_without_receipt = original
+        assert sent == [{"bank_transaction": url, "dated_on": "2026-03-05", "gross_value": "-500.00",
+                         "paid_user": me, "description": "TO EXAMPLE PERSONAL"}]
+        # a category again: no longer paid to a user
+        assert service.set_payment_settings(url, {"category": CATEGORY})["paid_user"] is None
+
+
+def test_changing_freeagent_explanation_to_and_from_money_paid_to_user() -> None:
+    service, _rid, tmp = make()
+    with tmp:
+        acct, url = "https://fa.test/v2/bank_accounts/1", "https://fa.test/v2/bank_transactions/12"
+        me = "https://fa.test/v2/users/1"
+        ref = json.loads(service.db.get_state("freeagent:reference"))
+        ref.update({"bank_accounts": [{"url": acct, "name": "Example Bank", "currency": "GBP"}],
+                    "vat": {"registered": True}, "users": [{"url": me, "name": "Example Director"}]})
+        service.db.set_state("freeagent:reference", json.dumps(ref))
+        service.db.set_state("freeagent:accounts", json.dumps([acct]))
+
+        def explained(explanation: dict) -> None:
+            service.db.save_bank_transactions([{"url": url, "bank_account": acct, "dated_on": "2026-03-06",
+                "amount": "-200.00", "unexplained_amount": "0", "description": "TRANSFER",
+                "bank_transaction_explanations": [{"url": "e/12", "marked_for_review": False, **explanation}]}])
+
+        row = lambda: next(r for r in service.statement(acct, "2026-03")["rows"] if r["url"] == url)
+        explained({"category": "c/general", "sales_tax_rate": "20.0"})
+        service.set_payment_settings(url, {"paid_user": me})
+        assert row()["freeagent"]["changes"] == {"paid_user": me, "category": None}
+        service.reset_payment_settings(url)
+
+        explained({"paid_user": me})
+        assert row()["freeagent"]["paid_user"] == me and row()["freeagent"]["changes"] == {}
+        service.set_payment_settings(url, {"paid_user": me})
+        assert row()["freeagent"]["changes"] == {}, "the same user: nothing to send"
+        service.set_payment_settings(url, {"category": CATEGORY})
+        assert row()["freeagent"]["changes"] == {"paid_user": None, "category": CATEGORY}
+
+
+def test_users_read_from_freeagent_always_include_you() -> None:
+    me = {"url": "u/1", "first_name": "Example", "last_name": "Director", "role": "Director"}
+    listed = SimpleNamespace(users=lambda: [me, {"url": "u/2", "first_name": "Example", "last_name": "Employee",
+                                                  "role": "Employee"}])
+    assert ReceiptService._read_users(listed, me) == [{"url": "u/1", "name": "Example Director", "role": "Director"},
+                                                      {"url": "u/2", "name": "Example Employee", "role": "Employee"}]
+
+    def refused():
+        raise filer.FreeAgentError("FreeAgent GET users failed (403): no access")
+    assert ReceiptService._read_users(SimpleNamespace(users=refused), me) == [
+        {"url": "u/1", "name": "Example Director", "role": "Director"}]
+
+
 def test_a_payment_freeagent_explained_starts_from_its_explanation() -> None:
     """The Statement shows FreeAgent's own category, VAT and re-billing; only
     what you change is sent, and "Keep FreeAgent's" forgets it."""
